@@ -60,6 +60,9 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  const { fieldSimulator } = await import("./simulator");
+  await fieldSimulator.initialize();
+  
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
@@ -91,8 +94,11 @@ app.use((req, res, next) => {
       host: "0.0.0.0",
       reusePort: true,
     },
-    () => {
+    async () => {
       log(`serving on port ${port}`);
+      
+      const { fieldSimulator } = await import("./simulator");
+      fieldSimulator.start();
     },
   );
 })();
