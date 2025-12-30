@@ -59,20 +59,30 @@ export default function Blueprints() {
     inputs: "[]",
     outputs: "[]",
   });
+  const [formError, setFormError] = useState<string | null>(null);
 
   const handleCreate = () => {
+    setFormError(null);
     try {
+      const parsedInputs = JSON.parse(formData.inputs);
+      const parsedOutputs = JSON.parse(formData.outputs);
+      
+      if (!formData.name.trim()) {
+        setFormError("Name is required");
+        return;
+      }
+      
       createMutation.mutate({
         name: formData.name,
         vendorId: formData.vendorId || null,
         description: formData.description,
         classification: formData.classification,
-        inputs: JSON.parse(formData.inputs),
-        outputs: JSON.parse(formData.outputs),
+        inputs: parsedInputs,
+        outputs: parsedOutputs,
         inOuts: [],
       });
     } catch (e) {
-      console.error("Invalid JSON in inputs/outputs");
+      setFormError("Invalid JSON in inputs or outputs field. Please check the format.");
     }
   };
 
@@ -153,6 +163,11 @@ export default function Blueprints() {
                     className="font-mono text-xs"
                   />
                 </div>
+                {formError && (
+                  <div className="text-red-500 text-sm border border-red-500/30 bg-red-500/10 p-2" data-testid="form-error">
+                    {formError}
+                  </div>
+                )}
                 <Button onClick={handleCreate} className="w-full bg-primary text-black" data-testid="button-submit-cm">
                   Create
                 </Button>
