@@ -1,0 +1,48 @@
+# Dependencies
+node_modules/
+.npm
+
+# Build outputs
+dist/
+
+# Development files
+.git/
+.github/
+.vscode/
+.idea/
+
+# Environment files
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+
+# Test files
+coverage/
+*.test.ts
+*.test.tsx
+__tests__/
+
+# Documentation
+docs/
+*.md
+!README.md
+
+# Hardhat
+cache/
+artifacts/
+typechain-types/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Replit
+.replit
+replit.md
+replit.nix

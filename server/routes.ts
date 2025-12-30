@@ -24,6 +24,45 @@ export async function registerRoutes(
   app: Express
 ): Promise<Server> {
 
+  // ==========================================================================
+  // HEALTH CHECK
+  // ==========================================================================
+  app.get("/api/health", async (req, res) => {
+    try {
+      const startTime = Date.now();
+      
+      // Check database connectivity
+      const sites = await storage.getSites();
+      const dbLatency = Date.now() - startTime;
+      
+      // Check blockchain service
+      const blockchainStatus = blockchainService.isEnabled() ? "connected" : "disconnected";
+      
+      res.json({
+        status: "healthy",
+        timestamp: new Date().toISOString(),
+        version: "1.0.0",
+        uptime: process.uptime(),
+        checks: {
+          database: {
+            status: "healthy",
+            latency: `${dbLatency}ms`,
+          },
+          blockchain: {
+            status: blockchainStatus,
+          },
+        },
+      });
+    } catch (error) {
+      console.error("Health check failed:", error);
+      res.status(503).json({
+        status: "unhealthy",
+        timestamp: new Date().toISOString(),
+        error: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
+  });
+
   // Sites
   app.get("/api/sites", async (req, res) => {
     try {
