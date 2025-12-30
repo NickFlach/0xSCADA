@@ -7,6 +7,8 @@ import Dashboard from "@/pages/dashboard";
 import Sites from "@/pages/sites";
 import Events from "@/pages/events";
 import Blueprints from "@/pages/blueprints";
+import Vendors from "@/pages/vendors";
+import CodeGen from "@/pages/codegen";
 import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
 
@@ -18,6 +20,8 @@ function Router() {
       <Route path="/sites" component={Sites} />
       <Route path="/events" component={Events} />
       <Route path="/blueprints" component={Blueprints} />
+      <Route path="/vendors" component={Vendors} />
+      <Route path="/codegen" component={CodeGen} />
       <Route component={NotFound} />
     </Switch>
   );

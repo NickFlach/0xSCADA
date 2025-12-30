@@ -229,6 +229,16 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/blueprints/cm-types", async (req, res) => {
+    try {
+      const cmType = await storage.createControlModuleType(req.body);
+      res.status(201).json(cmType);
+    } catch (error) {
+      console.error("Error creating CM type:", error);
+      res.status(500).json({ error: "Failed to create control module type" });
+    }
+  });
+
   // Control Module Instances
   app.get("/api/blueprints/cm-instances", async (req, res) => {
     try {
@@ -251,6 +261,16 @@ export async function registerRoutes(
     }
   });
 
+  app.post("/api/blueprints/unit-types", async (req, res) => {
+    try {
+      const unitType = await storage.createUnitType(req.body);
+      res.status(201).json(unitType);
+    } catch (error) {
+      console.error("Error creating unit type:", error);
+      res.status(500).json({ error: "Failed to create unit type" });
+    }
+  });
+
   // Unit Instances
   app.get("/api/blueprints/unit-instances", async (req, res) => {
     try {
@@ -270,6 +290,16 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error fetching phase types:", error);
       res.status(500).json({ error: "Failed to fetch phase types" });
+    }
+  });
+
+  app.post("/api/blueprints/phase-types", async (req, res) => {
+    try {
+      const phaseType = await storage.createPhaseType(req.body);
+      res.status(201).json(phaseType);
+    } catch (error) {
+      console.error("Error creating phase type:", error);
+      res.status(500).json({ error: "Failed to create phase type" });
     }
   });
 
