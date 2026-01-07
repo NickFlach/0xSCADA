@@ -59,7 +59,7 @@
     "express": "^4.21.2",
     "express-session": "^1.18.1",
     "framer-motion": "^12.23.24",
-    "hardhat": "^3.1.0",
+    "hardhat": "^2.28.0",
     "input-otp": "^1.4.2",
     "lucide-react": "^0.545.0",
     "memorystore": "^1.6.7",
@@ -98,16 +98,16 @@
     "@types/react-dom": "^19.2.0",
     "@types/ws": "^8.5.13",
     "@vitejs/plugin-react": "^5.0.4",
+    "@vitest/coverage-v8": "^2.1.0",
     "autoprefixer": "^10.4.21",
     "drizzle-kit": "^0.31.4",
     "esbuild": "^0.25.0",
-    "vitest": "^2.1.0",
-    "@vitest/coverage-v8": "^2.1.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.20.5",
     "typescript": "5.6.3",
-    "vite": "^7.1.9"
+    "vite": "^7.1.9",
+    "vitest": "^2.1.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.0.8"

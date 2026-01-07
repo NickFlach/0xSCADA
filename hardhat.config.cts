@@ -1,6 +1,6 @@
-import { HardhatUserConfig } from "hardhat/config";
-import "@nomicfoundation/hardhat-toolbox";
-import "@nomicfoundation/hardhat-ethers";
+import type { HardhatUserConfig } from "hardhat/config";
+require("@nomicfoundation/hardhat-toolbox");
+require("@nomicfoundation/hardhat-ethers");
 
 const config: HardhatUserConfig = {
   solidity: {
@@ -25,4 +25,4 @@ const config: HardhatUserConfig = {
   },
 };
 
-export default config;
+module.exports = config;
