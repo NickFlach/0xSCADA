@@ -333,6 +333,231 @@ export function createCommandEvent(
 }
 
 // =============================================================================
+// ACKNOWLEDGEMENT EVENT HELPERS
+// =============================================================================
+
+export interface AcknowledgementInput {
+  siteId: string;
+  assetId?: string;
+  alarmEventId: string;
+  alarmId: string;
+  comment?: string;
+  originId: string;
+  originType?: OriginType;
+}
+
+export function createAcknowledgementEvent(
+  input: AcknowledgementInput,
+  signingKey: string
+): SignedEvent {
+  return createSignedEvent(
+    {
+      eventType: EventType.ACKNOWLEDGEMENT,
+      siteId: input.siteId,
+      assetId: input.assetId,
+      sourceTimestamp: new Date(),
+      originType: input.originType || OriginType.USER,
+      originId: input.originId,
+      payload: {
+        alarmEventId: input.alarmEventId,
+        alarmId: input.alarmId,
+        comment: input.comment,
+        acknowledgedAt: new Date().toISOString(),
+      },
+      details: `Acknowledged alarm ${input.alarmId}`,
+    },
+    signingKey
+  );
+}
+
+// =============================================================================
+// MAINTENANCE EVENT HELPERS
+// =============================================================================
+
+export interface MaintenanceInput {
+  siteId: string;
+  assetId: string;
+  workOrderId: string;
+  maintenanceType: "PREVENTIVE" | "CORRECTIVE" | "PREDICTIVE" | "EMERGENCY";
+  status: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED" | "CANCELLED";
+  description: string;
+  technician?: string;
+  parts?: string[];
+  duration?: number;
+  originId: string;
+  originType?: OriginType;
+}
+
+export function createMaintenanceEvent(
+  input: MaintenanceInput,
+  signingKey: string
+): SignedEvent {
+  return createSignedEvent(
+    {
+      eventType: EventType.MAINTENANCE,
+      siteId: input.siteId,
+      assetId: input.assetId,
+      sourceTimestamp: new Date(),
+      originType: input.originType || OriginType.USER,
+      originId: input.originId,
+      payload: {
+        workOrderId: input.workOrderId,
+        maintenanceType: input.maintenanceType,
+        status: input.status,
+        description: input.description,
+        technician: input.technician,
+        parts: input.parts,
+        duration: input.duration,
+      },
+      details: `[${input.maintenanceType}] ${input.description}`,
+    },
+    signingKey
+  );
+}
+
+// =============================================================================
+// BLUEPRINT CHANGE EVENT HELPERS
+// =============================================================================
+
+export interface BlueprintChangeInput {
+  siteId: string;
+  blueprintType: "CONTROL_MODULE" | "UNIT" | "PHASE";
+  blueprintId: string;
+  blueprintName: string;
+  changeType: "CREATE" | "UPDATE" | "DELETE";
+  previousHash?: string;
+  newHash: string;
+  diff?: Record<string, unknown>;
+  originId: string;
+  originType?: OriginType;
+}
+
+export function createBlueprintChangeEvent(
+  input: BlueprintChangeInput,
+  signingKey: string
+): SignedEvent {
+  return createSignedEvent(
+    {
+      eventType: EventType.BLUEPRINT_CHANGE,
+      siteId: input.siteId,
+      sourceTimestamp: new Date(),
+      originType: input.originType || OriginType.USER,
+      originId: input.originId,
+      payload: {
+        blueprintType: input.blueprintType,
+        blueprintId: input.blueprintId,
+        blueprintName: input.blueprintName,
+        changeType: input.changeType,
+        previousHash: input.previousHash,
+        newHash: input.newHash,
+        diff: input.diff,
+      },
+      details: `${input.changeType} ${input.blueprintType}: ${input.blueprintName}`,
+    },
+    signingKey
+  );
+}
+
+// =============================================================================
+// CODE GENERATION EVENT HELPERS
+// =============================================================================
+
+export interface CodeGenerationInput {
+  siteId: string;
+  blueprintId: string;
+  blueprintName: string;
+  vendorId: string;
+  vendorName: string;
+  language: string;
+  codeHash: string;
+  codeSize: number;
+  generatedCodeId: string;
+  originId: string;
+  originType?: OriginType;
+}
+
+export function createCodeGenerationEvent(
+  input: CodeGenerationInput,
+  signingKey: string
+): SignedEvent {
+  return createSignedEvent(
+    {
+      eventType: EventType.CODE_GENERATION,
+      siteId: input.siteId,
+      sourceTimestamp: new Date(),
+      originType: input.originType || OriginType.SYSTEM,
+      originId: input.originId,
+      payload: {
+        blueprintId: input.blueprintId,
+        blueprintName: input.blueprintName,
+        vendorId: input.vendorId,
+        vendorName: input.vendorName,
+        language: input.language,
+        codeHash: input.codeHash,
+        codeSize: input.codeSize,
+        generatedCodeId: input.generatedCodeId,
+      },
+      details: `Generated ${input.language} code for ${input.blueprintName} (${input.vendorName})`,
+    },
+    signingKey
+  );
+}
+
+// =============================================================================
+// DEPLOYMENT INTENT EVENT HELPERS
+// =============================================================================
+
+export interface DeploymentIntentInput {
+  siteId: string;
+  intentId: string;
+  blueprintId: string;
+  blueprintName: string;
+  codeHash: string;
+  targetControllerId: string;
+  targetControllerName: string;
+  status: "PROPOSED" | "APPROVED" | "REJECTED" | "DEPLOYED" | "ROLLED_BACK";
+  requiredApprovals: number;
+  approvals?: Array<{
+    userId: string;
+    userName: string;
+    decision: "APPROVE" | "REJECT";
+    comment?: string;
+    signature: string;
+    decidedAt: string;
+  }>;
+  originId: string;
+  originType?: OriginType;
+}
+
+export function createDeploymentIntentEvent(
+  input: DeploymentIntentInput,
+  signingKey: string
+): SignedEvent {
+  return createSignedEvent(
+    {
+      eventType: EventType.DEPLOYMENT_INTENT,
+      siteId: input.siteId,
+      sourceTimestamp: new Date(),
+      originType: input.originType || OriginType.AGENT,
+      originId: input.originId,
+      payload: {
+        intentId: input.intentId,
+        blueprintId: input.blueprintId,
+        blueprintName: input.blueprintName,
+        codeHash: input.codeHash,
+        targetControllerId: input.targetControllerId,
+        targetControllerName: input.targetControllerName,
+        status: input.status,
+        requiredApprovals: input.requiredApprovals,
+        approvals: input.approvals || [],
+      },
+      details: `[${input.status}] Deploy ${input.blueprintName} to ${input.targetControllerName}`,
+    },
+    signingKey
+  );
+}
+
+// =============================================================================
 // SINGLETON INSTANCE
 // =============================================================================
 

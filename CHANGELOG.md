@@ -104,10 +104,55 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Sites Table** - Added `ethereum_address`, `authorized_gateways`, `authorized_signers`
 - **Navbar** - Added Agents link with Bot icon
 
+#### Phase 1: Evolved Events API (`/api/v2/events`)
+- `GET /api/v2/events` - List events with filtering (site, asset, type, origin, status, time range)
+- `GET /api/v2/events/:id` - Get event with batch info and verification details
+- `GET /api/v2/events/:id/verify` - Verify event hash, signature, and Merkle proof
+- `POST /api/v2/events` - Create any event type with deterministic signing
+- `POST /api/v2/events/telemetry` - Convenience endpoint for telemetry
+- `POST /api/v2/events/alarm` - Convenience endpoint for alarms
+- `POST /api/v2/events/command` - Convenience endpoint for commands
+- `GET /api/v2/events/batches` - List Merkle batches
+- `GET /api/v2/events/batches/:id` - Get batch with events
+- `POST /api/v2/events/batches/:id/anchor` - Trigger batch anchoring
+- `GET /api/v2/events/stats` - Event statistics
+- `GET /api/v2/events/types` - Available event types and origins
+
+#### Phase 2: Agent Runtime Service (`server/agents/runtime.ts`)
+- **AgentRuntime** - Lifecycle management, event routing, proposal workflow
+- **Event Subscription** - Automatic event routing based on agent scope
+- **Proposal Creation** - Signed proposals with risk assessment
+- **Approval Workflow** - Multi-signature approval with audit trail
+- **Output Storage** - Cryptographically signed agent outputs
+- **Audit Logging** - Complete audit trail for all agent actions
+
+#### Phase 3: Edge Gateway Service (`server/gateway`)
+- **EdgeGateway** - Core gateway class with event emission
+- **Protocol Drivers** - OPC UA and Modbus TCP drivers (simulated)
+- **Tag Management** - Register, subscribe, and monitor tags
+- **Alarm Detection** - Automatic alarm generation from tag values
+- **Store-and-Forward** - Queue events during network outages
+- **Heartbeat** - Periodic gateway status events
+- **Gateway Registry** - Manage multiple gateways
+
+#### Phase 4: Visualization Components
+- **LiveTagsPanel** - Real-time tag display with sparklines, quality, trends
+- **ProposalsPanel** - View/approve/reject agent proposals with risk indicators
+- **ApprovalChain** - Visual approval progress indicator
+- **RiskLevelBadge** - Color-coded risk level display
+
+#### Phase 5: Zero Trust Security (`server/security`)
+- **KeyManager** - Key generation, storage, rotation, expiration
+- **RBACService** - Role-based access control with 6 roles, 17 permissions
+- **AuditService** - Cryptographically chained audit log with integrity verification
+- **SessionManager** - Session creation, validation, MFA support
+- **SecurityService** - Unified facade for authentication and authorization
+
 ### Technical Notes
 - All lint errors in IDE are path resolution issues - modules exist in `node_modules`
 - TypeScript target is ES2022, supporting Map iteration
 - Existing patterns from v1.0 maintained for consistency
+- EventEmitter inheritance works at runtime despite IDE errors
 
 ---
 
