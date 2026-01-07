@@ -425,6 +425,10 @@ export abstract class BaseAgent {
     return this.config.scope;
   }
 
+  get publicKey(): string {
+    return this.config.publicKey;
+  }
+
   get running(): boolean {
     return this.isRunning;
   }

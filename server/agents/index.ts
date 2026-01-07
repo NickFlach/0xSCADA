@@ -14,6 +14,9 @@ import { ChangeControlAgent } from "./change-control-agent";
 import { ComplianceAgent } from "./compliance-agent";
 import { BaseAgent, generateAgentKeys } from "./base";
 import { getEventService } from "../events";
+import { db } from "../db";
+import { agents } from "@shared/schema";
+import { eq } from "drizzle-orm";
 
 // =============================================================================
 // AGENT REGISTRY
@@ -148,13 +151,45 @@ export const agentRegistry = new AgentRegistry();
 // =============================================================================
 
 /**
+ * Persist an agent to the database (upsert)
+ */
+async function persistAgentToDb(agent: BaseAgent): Promise<void> {
+  const existing = await db.select().from(agents).where(eq(agents.id, agent.id));
+  
+  if (existing.length === 0) {
+    await db.insert(agents).values({
+      id: agent.id,
+      name: agent.name,
+      displayName: agent.displayName,
+      description: `${agent.displayName} - Autonomous monitoring agent`,
+      agentType: agent.agentType,
+      publicKey: agent.publicKey,
+      keyAlgorithm: "ed25519",
+      ethereumAddress: null,
+      capabilities: agent.capabilities,
+      scope: agent.scope,
+      status: "ACTIVE",
+      version: "1.0.0",
+      createdBy: "SYSTEM",
+    });
+  } else {
+    await db.update(agents)
+      .set({ 
+        status: "ACTIVE",
+        updatedAt: new Date()
+      })
+      .where(eq(agents.id, agent.id));
+  }
+}
+
+/**
  * Initialize the default P0 agents (PRD Section 6.4)
  */
-export function initializeDefaultAgents(): {
+export async function initializeDefaultAgents(): Promise<{
   opsAgent: OpsAgent;
   changeControlAgent: ChangeControlAgent;
   complianceAgent: ComplianceAgent;
-} {
+}> {
   // Create Ops Agent
   const opsAgent = new OpsAgent({
     id: "ops-agent-default",
@@ -162,6 +197,7 @@ export function initializeDefaultAgents(): {
     displayName: "Ops Agent",
   });
   agentRegistry.register(opsAgent);
+  await persistAgentToDb(opsAgent);
 
   // Create Change-Control Agent
   const changeControlAgent = new ChangeControlAgent({
@@ -170,6 +206,7 @@ export function initializeDefaultAgents(): {
     displayName: "Change-Control Agent",
   });
   agentRegistry.register(changeControlAgent);
+  await persistAgentToDb(changeControlAgent);
 
   // Create Compliance Agent
   const complianceAgent = new ComplianceAgent({
@@ -178,6 +215,7 @@ export function initializeDefaultAgents(): {
     displayName: "Compliance Agent",
   });
   agentRegistry.register(complianceAgent);
+  await persistAgentToDb(complianceAgent);
 
   console.log("🤖 Default agents initialized");
 
