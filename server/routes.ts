@@ -18,11 +18,29 @@ import {
   generateL5X,
 } from "./blueprints";
 import type { BlueprintFiles } from "./blueprints";
+import { agentRoutes } from "./routes/agents";
+import { eventRoutes } from "./routes/events";
 
 export async function registerRoutes(
   httpServer: Server,
   app: Express
 ): Promise<Server> {
+
+  // ==========================================================================
+  // MODULAR ROUTES
+  // ==========================================================================
+  app.use("/api/agents", agentRoutes);
+  app.use("/api/v2/events", eventRoutes);
+  
+  // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
+  app.get("/api/agent-outputs", async (req, res, next) => {
+    req.url = "/outputs";
+    agentRoutes(req, res, next);
+  });
+  app.get("/api/agent-proposals", async (req, res, next) => {
+    req.url = "/proposals";
+    agentRoutes(req, res, next);
+  });
 
   // ==========================================================================
   // HEALTH CHECK
