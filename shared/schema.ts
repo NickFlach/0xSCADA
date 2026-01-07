@@ -3,14 +3,25 @@ import { pgTable, text, varchar, timestamp, boolean, jsonb, integer } from "driz
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod";
 
-// Sites
+// =============================================================================
+// SITES (PRD Section 7.1: Site Registry)
+// =============================================================================
 export const sites = pgTable("sites", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   name: text("name").notNull(),
   location: text("location").notNull(),
   owner: text("owner").notNull(),
   status: text("status").notNull().default("ONLINE"),
+  
+  // PRD: Ethereum identity
+  ethereumAddress: text("ethereum_address"), // Owner's Ethereum address
+  
+  // PRD: Authorized gateways and signers (Section 7.1)
+  authorizedGateways: jsonb("authorized_gateways").notNull().default(sql`'[]'::jsonb`),
+  authorizedSigners: jsonb("authorized_signers").notNull().default(sql`'[]'::jsonb`),
+  
   createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });
 
 export const insertSiteSchema = createInsertSchema(sites).omit({
@@ -41,7 +52,108 @@ export const insertAssetSchema = createInsertSchema(assets).omit({
 export type InsertAsset = z.infer<typeof insertAssetSchema>;
 export type Asset = typeof assets.$inferSelect;
 
-// Event Anchors
+// =============================================================================
+// EVENTS (PRD Section 6.1: Event Model)
+// =============================================================================
+
+// Event Types enum for database
+export const EVENT_TYPES = [
+  "TELEMETRY",
+  "ALARM", 
+  "COMMAND",
+  "ACKNOWLEDGEMENT",
+  "MAINTENANCE",
+  "BLUEPRINT_CHANGE",
+  "CODE_GENERATION",
+  "DEPLOYMENT_INTENT",
+] as const;
+
+export const ORIGIN_TYPES = ["GATEWAY", "USER", "AGENT", "SYSTEM"] as const;
+export const ANCHOR_STATUSES = ["PENDING", "BATCHED", "ANCHORED", "FAILED"] as const;
+
+// EVENT BATCHES must be defined before events due to foreign key reference
+export const eventBatches = pgTable("event_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Batch metadata
+  siteId: text("site_id").references(() => sites.id),
+  eventCount: integer("event_count").notNull(),
+  
+  // PRD: Merkle root for batch
+  merkleRoot: text("merkle_root").notNull(),
+  
+  // Time range
+  firstEventAt: timestamp("first_event_at").notNull(),
+  lastEventAt: timestamp("last_event_at").notNull(),
+  
+  // PRD: Ethereum anchoring
+  anchorStatus: text("anchor_status").notNull().default("PENDING"),
+  txHash: text("tx_hash"),
+  blockNumber: integer("block_number"),
+  anchoredAt: timestamp("anchored_at"),
+  
+  // Metadata pointer (PRD: IPFS / content hash)
+  metadataHash: text("metadata_hash"),
+  metadataUri: text("metadata_uri"), // IPFS URI or other storage
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertEventBatchSchema = createInsertSchema(eventBatches).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertEventBatch = z.infer<typeof insertEventBatchSchema>;
+export type EventBatch = typeof eventBatches.$inferSelect;
+
+export const events = pgTable("events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // PRD: Event type (typed, not just string)
+  eventType: text("event_type").notNull(),
+  
+  // Location
+  siteId: text("site_id").notNull().references(() => sites.id),
+  assetId: text("asset_id").references(() => assets.id),
+  
+  // PRD: Timestamps (source + receipt)
+  sourceTimestamp: timestamp("source_timestamp").notNull(),
+  receiptTimestamp: timestamp("receipt_timestamp").notNull().defaultNow(),
+  
+  // PRD: Origin (signed by origin)
+  originType: text("origin_type").notNull(), // GATEWAY, USER, AGENT, SYSTEM
+  originId: text("origin_id").notNull(), // Gateway ID, User ID, or Agent ID
+  
+  // Payload
+  payload: jsonb("payload").notNull(),
+  details: text("details"), // Human-readable summary
+  
+  // PRD: Cryptographic fields (signed, hashable)
+  signature: text("signature").notNull(), // Origin's signature
+  hash: text("hash").notNull(), // SHA-256 of canonical event
+  
+  // PRD: Anchor reference
+  anchorStatus: text("anchor_status").notNull().default("PENDING"),
+  batchId: text("batch_id").references(() => eventBatches.id),
+  merkleIndex: integer("merkle_index"),
+  merkleProof: jsonb("merkle_proof"), // Array of proof hashes
+  anchorTxHash: text("anchor_tx_hash"),
+  anchoredAt: timestamp("anchored_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertEventSchema = createInsertSchema(events).omit({
+  id: true,
+  createdAt: true,
+  receiptTimestamp: true,
+});
+
+export type InsertEvent = z.infer<typeof insertEventSchema>;
+export type Event = typeof events.$inferSelect;
+
+// Legacy: Keep for backward compatibility during migration
 export const eventAnchors = pgTable("event_anchors", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   assetId: text("asset_id").notNull().references(() => assets.id),
@@ -435,3 +547,320 @@ export const insertControllerSchema = createInsertSchema(controllers).omit({
 
 export type InsertController = z.infer<typeof insertControllerSchema>;
 export type Controller = typeof controllers.$inferSelect;
+
+// =============================================================================
+// GATEWAYS (PRD Section 6.2: Edge Gateway)
+// =============================================================================
+export const gateways = pgTable("gateways", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  siteId: text("site_id").notNull().references(() => sites.id),
+  
+  // PRD: Device identity + key management
+  publicKey: text("public_key").notNull(),
+  keyAlgorithm: text("key_algorithm").notNull().default("ed25519"),
+  ethereumAddress: text("ethereum_address"),
+  
+  // Protocol support (PRD: OPC UA + legacy)
+  protocols: jsonb("protocols").notNull().default(sql`'["OPC_UA"]'::jsonb`),
+  
+  // Connection info
+  endpoint: text("endpoint"),
+  lastHeartbeat: timestamp("last_heartbeat"),
+  
+  // Status
+  status: text("status").notNull().default("OFFLINE"), // ONLINE, OFFLINE, ERROR
+  errorMessage: text("error_message"),
+  
+  // Metrics
+  eventsProcessed: integer("events_processed").notNull().default(0),
+  lastEventAt: timestamp("last_event_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertGatewaySchema = createInsertSchema(gateways).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertGateway = z.infer<typeof insertGatewaySchema>;
+export type Gateway = typeof gateways.$inferSelect;
+
+// =============================================================================
+// AGENTS (PRD Section 6.3: Agent Framework)
+// =============================================================================
+export const AGENT_TYPES = ["OPS", "CHANGE_CONTROL", "COMPLIANCE", "SAFETY_OBSERVER", "CODEGEN", "CUSTOM"] as const;
+export const AGENT_STATUSES = ["ACTIVE", "INACTIVE", "SUSPENDED", "ERROR"] as const;
+
+export const agents = pgTable("agents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Identity
+  name: text("name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  agentType: text("agent_type").notNull(), // OPS, CHANGE_CONTROL, COMPLIANCE, etc.
+  
+  // PRD: Cryptographic identity
+  publicKey: text("public_key").notNull(),
+  keyAlgorithm: text("key_algorithm").notNull().default("ed25519"),
+  ethereumAddress: text("ethereum_address"),
+  
+  // PRD: Capabilities and scope
+  capabilities: jsonb("capabilities").notNull().default(sql`'[]'::jsonb`),
+  scope: jsonb("scope").notNull().default(sql`'{}'::jsonb`),
+  
+  // Status
+  status: text("status").notNull().default("INACTIVE"),
+  version: text("version").notNull().default("1.0.0"),
+  
+  // Runtime info
+  lastActiveAt: timestamp("last_active_at"),
+  errorCount: integer("error_count").notNull().default(0),
+  lastError: text("last_error"),
+  
+  // Ownership
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAgentSchema = createInsertSchema(agents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAgent = z.infer<typeof insertAgentSchema>;
+export type Agent = typeof agents.$inferSelect;
+
+// =============================================================================
+// AGENT STATE (PRD: Scoped memory)
+// =============================================================================
+export const agentState = pgTable("agent_state", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: text("agent_id").notNull().references(() => agents.id),
+  
+  // Key-value storage
+  key: text("key").notNull(),
+  value: jsonb("value").notNull(),
+  
+  // Metadata
+  expiresAt: timestamp("expires_at"),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAgentStateSchema = createInsertSchema(agentState).omit({
+  id: true,
+  updatedAt: true,
+});
+
+export type InsertAgentState = z.infer<typeof insertAgentStateSchema>;
+export type AgentState = typeof agentState.$inferSelect;
+
+// =============================================================================
+// AGENT OUTPUTS (PRD: Signed outputs)
+// =============================================================================
+export const AGENT_OUTPUT_TYPES = ["SUMMARY", "REPORT", "PROPOSAL", "ANALYSIS", "CODE", "ALERT"] as const;
+
+export const agentOutputs = pgTable("agent_outputs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: text("agent_id").notNull().references(() => agents.id),
+  
+  // Output type and content
+  outputType: text("output_type").notNull(),
+  title: text("title").notNull(),
+  content: jsonb("content").notNull(),
+  
+  // Context
+  siteId: text("site_id").references(() => sites.id),
+  assetIds: jsonb("asset_ids").default(sql`'[]'::jsonb`),
+  eventIds: jsonb("event_ids").default(sql`'[]'::jsonb`),
+  
+  // PRD: Cryptographic (signed outputs)
+  hash: text("hash").notNull(),
+  signature: text("signature").notNull(),
+  
+  // Metadata
+  confidence: integer("confidence"), // 0-100
+  reasoning: text("reasoning"),
+  
+  // For proposals
+  requiresApproval: boolean("requires_approval").notNull().default(false),
+  approvalStatus: text("approval_status"), // PENDING, APPROVED, REJECTED
+  approvedBy: text("approved_by"),
+  approvedAt: timestamp("approved_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAgentOutputSchema = createInsertSchema(agentOutputs).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentOutput = z.infer<typeof insertAgentOutputSchema>;
+export type AgentOutput = typeof agentOutputs.$inferSelect;
+
+// =============================================================================
+// AGENT PROPOSALS (PRD: All proposals require human approval)
+// =============================================================================
+export const PROPOSAL_STATUSES = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "REJECTED", "EXPIRED", "EXECUTED", "FAILED"] as const;
+export const PROPOSAL_TYPES = ["COMMAND", "SETPOINT_CHANGE", "MODE_CHANGE", "BLUEPRINT_CHANGE", "DEPLOYMENT", "MAINTENANCE", "CONFIGURATION"] as const;
+export const RISK_LEVELS = ["LOW", "MEDIUM", "HIGH", "CRITICAL"] as const;
+
+export const agentProposals = pgTable("agent_proposals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  agentId: text("agent_id").notNull().references(() => agents.id),
+  
+  // What is being proposed
+  proposalType: text("proposal_type").notNull(),
+  title: text("title").notNull(),
+  description: text("description").notNull(),
+  
+  // The proposed action
+  action: jsonb("action").notNull(),
+  
+  // Context and reasoning
+  reasoning: text("reasoning").notNull(),
+  confidence: integer("confidence").notNull(), // 0-100
+  supportingEventIds: jsonb("supporting_event_ids").default(sql`'[]'::jsonb`),
+  
+  // Risk assessment
+  riskLevel: text("risk_level").notNull(),
+  riskFactors: jsonb("risk_factors").default(sql`'[]'::jsonb`),
+  
+  // Cryptographic
+  hash: text("hash").notNull(),
+  signature: text("signature").notNull(),
+  
+  // Approval workflow
+  status: text("status").notNull().default("DRAFT"),
+  requiredApprovals: integer("required_approvals").notNull().default(1),
+  approvals: jsonb("approvals").default(sql`'[]'::jsonb`),
+  
+  // Timing
+  expiresAt: timestamp("expires_at"),
+  executedAt: timestamp("executed_at"),
+  
+  // Result
+  executionResult: jsonb("execution_result"),
+  executionError: text("execution_error"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertAgentProposalSchema = createInsertSchema(agentProposals).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertAgentProposal = z.infer<typeof insertAgentProposalSchema>;
+export type AgentProposal = typeof agentProposals.$inferSelect;
+
+// =============================================================================
+// USERS (PRD Section 4.1: Primary Users with roles)
+// =============================================================================
+export const USER_ROLES = ["ENGINEER", "OPERATOR", "MAINTENANCE", "AUDITOR", "ADMIN"] as const;
+
+export const users = pgTable("users", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Identity
+  username: text("username").notNull().unique(),
+  email: text("email").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  
+  // Authentication
+  passwordHash: text("password_hash").notNull(),
+  
+  // PRD: Cryptographic identity for signing
+  publicKey: text("public_key"),
+  keyAlgorithm: text("key_algorithm"),
+  ethereumAddress: text("ethereum_address"),
+  
+  // Role-based access (PRD Section 4.1)
+  role: text("role").notNull().default("OPERATOR"),
+  permissions: jsonb("permissions").default(sql`'[]'::jsonb`),
+  
+  // Scope
+  siteIds: jsonb("site_ids").default(sql`'[]'::jsonb`), // Sites user can access
+  
+  // Status
+  active: boolean("active").notNull().default(true),
+  lastLoginAt: timestamp("last_login_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUserSchema = createInsertSchema(users).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUser = z.infer<typeof insertUserSchema>;
+export type User = typeof users.$inferSelect;
+
+// =============================================================================
+// CHANGE INTENTS (PRD Section 7.3: Change Intent Contract)
+// =============================================================================
+export const CHANGE_INTENT_STATUSES = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "ANCHORED", "DEPLOYED", "ROLLED_BACK", "REJECTED"] as const;
+
+export const changeIntents = pgTable("change_intents", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // What is being changed
+  blueprintId: text("blueprint_id").notNull(),
+  blueprintName: text("blueprint_name").notNull(),
+  blueprintHash: text("blueprint_hash").notNull(),
+  
+  // Generated code
+  codegenId: text("codegen_id"),
+  codeHash: text("code_hash"),
+  
+  // Target
+  targetControllerId: text("target_controller_id").references(() => controllers.id),
+  targetControllerName: text("target_controller_name"),
+  
+  // Change package (PRD: diffs, test plans, rollback steps)
+  changePackage: jsonb("change_package").notNull().default(sql`'{}'::jsonb`),
+  
+  // Approval chain
+  requiredApprovals: integer("required_approvals").notNull().default(1),
+  approvals: jsonb("approvals").default(sql`'[]'::jsonb`),
+  
+  // Status
+  status: text("status").notNull().default("DRAFT"),
+  
+  // PRD: Ethereum anchoring
+  intentHash: text("intent_hash").notNull(), // Hash of entire intent
+  anchorTxHash: text("anchor_tx_hash"),
+  anchoredAt: timestamp("anchored_at"),
+  
+  // Deployment
+  deployedAt: timestamp("deployed_at"),
+  deployedBy: text("deployed_by"),
+  
+  // Rollback
+  rolledBackAt: timestamp("rolled_back_at"),
+  rolledBackBy: text("rolled_back_by"),
+  rollbackReason: text("rollback_reason"),
+  
+  createdBy: text("created_by").notNull(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertChangeIntentSchema = createInsertSchema(changeIntents).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertChangeIntent = z.infer<typeof insertChangeIntentSchema>;
+export type ChangeIntent = typeof changeIntents.$inferSelect;

@@ -5,6 +5,112 @@ All notable changes to 0xSCADA will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-01-06
+
+### Added
+
+#### Agentic-First Architecture (PRD Phase 0 & 1)
+
+##### Event Model (PRD Section 6.1)
+- **Typed Events** - 8 event types: Telemetry, Alarm, Command, Acknowledgement, Maintenance, BlueprintChange, CodeGeneration, DeploymentIntent
+- **Dual Timestamps** - Source timestamp (when occurred) + Receipt timestamp (when received)
+- **Origin Tracking** - Every event signed by origin (Gateway, User, Agent, System)
+- **Deterministic Serialization** - Canonical JSON for consistent hashing
+- **Event Signing** - HMAC-SHA256 signatures on all events
+- **Anchor Status** - Track PENDING → BATCHED → ANCHORED lifecycle
+
+##### Merkle Batching System (PRD Section 7.2)
+- **Event Accumulator** - Collect events for batch anchoring
+- **Merkle Tree Builder** - Compute Merkle roots for event batches
+- **Batch Manager** - Manage batch lifecycle and anchoring
+- **Merkle Proofs** - Generate and verify inclusion proofs
+
+##### Agent Framework (PRD Section 6.3)
+- **Agent Registry** - Register, start, stop agents with lifecycle management
+- **Agent Identity** - Cryptographic identity with public/private keys
+- **Agent Capabilities** - Fine-grained capability system (READ_EVENTS, PROPOSE_CHANGES, etc.)
+- **Agent Scope** - Site/asset/event type access control
+- **Agent State** - Scoped memory with key-value storage and expiration
+- **Signed Outputs** - All agent outputs cryptographically signed
+
+##### P0 Agents (PRD Section 6.4)
+- **Ops Agent** - Plant state summaries, shift handoff reports, anomaly detection
+- **Change-Control Agent** - Blueprint change tracking, code generation, change packages with diffs/test plans/rollback steps
+- **Compliance Agent** - Audit evidence generation, anchor verification, compliance reports
+
+##### Ethereum Contracts (PRD Section 7)
+- **SiteRegistry.sol** - Site registration with authorized gateways and signers
+- **EventAnchor.sol** - Merkle root anchoring with metadata pointers
+- **ChangeIntent.sol** - Blueprint/codegen hash anchoring with multi-sig approval
+
+##### Gateway Support (PRD Section 6.2)
+- **Gateway Schema** - Device identity, key management, protocol support
+- **Protocol Configuration** - OPC UA + legacy protocol support fields
+
+##### User Management (PRD Section 4.1)
+- **User Schema** - Users with roles (Engineer, Operator, Maintenance, Auditor, Admin)
+- **Cryptographic Identity** - Optional public key and Ethereum address
+- **Site Scoping** - Users can be scoped to specific sites
+
+##### Change Intents (PRD Section 7.3)
+- **Change Package** - Diffs, test plans, rollback steps
+- **Approval Workflow** - Multi-signature approval chain
+- **Deployment Tracking** - Track deployed/rolled-back status
+- **Intent Anchoring** - Ethereum anchoring before deployment
+
+#### User Interface
+
+##### Agent Dashboard (`/agents`)
+- **Agent Cards** - View all registered agents with status and capabilities
+- **Proposal Management** - View, approve, reject agent proposals
+- **Activity Feed** - Real-time agent output stream
+- **Risk Indicators** - Visual risk level badges on proposals
+
+##### Verification Components
+- **VerificationBadge** - Click-to-verify with hash, Merkle proof, Ethereum tx
+- **AnchorStatusIndicator** - Visual status (✔ anchored / ⏳ pending)
+
+#### API Endpoints
+
+##### Agent API (`/api/agents`)
+- `GET /api/agents` - List all agents
+- `GET /api/agents/:id` - Get agent by ID
+- `POST /api/agents` - Create agent
+- `PATCH /api/agents/:id` - Update agent
+- `DELETE /api/agents/:id` - Delete agent
+- `GET /api/agents/:id/state` - Get agent state
+- `PUT /api/agents/:id/state/:key` - Set state value
+- `DELETE /api/agents/:id/state/:key` - Delete state value
+- `GET /api/agents/:id/outputs` - Get agent outputs
+- `POST /api/agents/:id/outputs` - Create output
+- `GET /api/agents/:id/proposals` - Get agent proposals
+- `POST /api/agents/:id/proposals` - Create proposal
+- `POST /api/agent-proposals/:id/approve` - Approve proposal
+- `POST /api/agent-proposals/:id/reject` - Reject proposal
+
+#### Infrastructure
+
+##### Cryptographic Infrastructure (`server/crypto`)
+- Canonical JSON serialization
+- SHA-256 hashing
+- HMAC-SHA256 signing
+- Merkle tree construction and verification
+- Ethereum address validation
+
+##### Database Migration
+- `migrations/0002_agentic_update.sql` - Full schema migration for v2.0
+
+### Changed
+- **Sites Table** - Added `ethereum_address`, `authorized_gateways`, `authorized_signers`
+- **Navbar** - Added Agents link with Bot icon
+
+### Technical Notes
+- All lint errors in IDE are path resolution issues - modules exist in `node_modules`
+- TypeScript target is ES2022, supporting Map iteration
+- Existing patterns from v1.0 maintained for consistency
+
+---
+
 ## [1.0.0] - 2024-12-30
 
 ### Added
