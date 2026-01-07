@@ -63,6 +63,10 @@ app.use((req, res, next) => {
   const { fieldSimulator } = await import("./simulator");
   await fieldSimulator.initialize();
   
+  const { initializeDefaultAgents, startDefaultAgents } = await import("./agents");
+  initializeDefaultAgents();
+  await startDefaultAgents();
+  
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
