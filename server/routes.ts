@@ -16,6 +16,10 @@ import {
   generateSCLSource,
   cmTypeToAOI,
   generateL5X,
+  ladderLogicAgent,
+  INSTRUCTION_LIBRARY,
+  getInstructionsByCategory,
+  BatchRungGenerator,
 } from "./blueprints";
 import type { BlueprintFiles } from "./blueprints";
 import { agentRoutes } from "./routes/agents";
@@ -957,6 +961,282 @@ export async function registerRoutes(
     } catch (error) {
       console.error("Error anchoring code:", error);
       res.status(500).json({ error: "Failed to anchor code" });
+    }
+  });
+
+  // ============================================================================
+  // LADDER LOGIC AGENT API ENDPOINTS
+  // ============================================================================
+
+  // Get instruction library
+  app.get("/api/ladder-logic/instructions", (req, res) => {
+    try {
+      const { category } = req.query;
+      
+      if (category && typeof category === "string") {
+        const instructions = getInstructionsByCategory(category as any);
+        res.json(instructions);
+      } else {
+        res.json(INSTRUCTION_LIBRARY);
+      }
+    } catch (error) {
+      console.error("Error fetching instructions:", error);
+      res.status(500).json({ error: "Failed to fetch instruction library" });
+    }
+  });
+
+  // Generate ladder logic for a control module
+  app.post("/api/generate/ladder-logic/control-module/:cmTypeId", async (req, res) => {
+    try {
+      const { cmTypeId } = req.params;
+      const { includeComments, generateFaultHandling, generateInterlocks } = req.body;
+
+      // Get CM Type
+      const cmTypes = await storage.getControlModuleTypes();
+      const cmType = cmTypes.find(t => t.id === cmTypeId);
+      if (!cmType) {
+        return res.status(404).json({ error: "Control Module Type not found" });
+      }
+
+      // Build context and generate ladder logic
+      const context = ladderLogicAgent.buildContextFromCMType({
+        name: cmType.name,
+        inputs: cmType.inputs as any[],
+        outputs: cmType.outputs as any[],
+        inOuts: cmType.inOuts as any[],
+      }, {
+        includeComments: includeComments ?? true,
+        generateFaultHandling: generateFaultHandling ?? true,
+        generateInterlocks: generateInterlocks ?? true,
+      });
+
+      const result = ladderLogicAgent.generateControlModuleLogic(context);
+
+      if (!result.success) {
+        return res.status(400).json({ 
+          error: "Failed to generate ladder logic",
+          errors: result.errors 
+        });
+      }
+
+      // Get Rockwell vendor for storing
+      const vendors = await storage.getVendors();
+      const rockwellVendor = vendors.find(v => v.name === "rockwell");
+
+      // Hash and store the generated code
+      const codeHash = codeGenerator.hashCode(result.neutralText);
+      const stored = await storage.createGeneratedCode({
+        sourceType: "control_module",
+        sourceId: cmTypeId,
+        vendorId: rockwellVendor?.id || "",
+        language: "Ladder",
+        code: result.neutralText,
+        codeHash,
+        metadata: {
+          format: "neutral_text",
+          cmTypeName: cmType.name,
+          rungCount: result.metadata.rungCount,
+          instructionCount: result.metadata.instructionCount,
+        },
+        status: "draft",
+      });
+
+      res.json({
+        success: true,
+        id: stored.id,
+        code: result.neutralText,
+        codeHash,
+        language: "Ladder",
+        routines: result.routines,
+        tags: result.tags,
+        metadata: result.metadata,
+        warnings: result.warnings,
+      });
+    } catch (error) {
+      console.error("Error generating ladder logic:", error);
+      res.status(500).json({ error: "Failed to generate ladder logic" });
+    }
+  });
+
+  // Generate ladder logic for a phase
+  app.post("/api/generate/ladder-logic/phase/:phaseTypeId", async (req, res) => {
+    try {
+      const { phaseTypeId } = req.params;
+      const { includeComments, generateFaultHandling, generateInterlocks } = req.body;
+
+      // Get Phase Type
+      const phaseTypes = await storage.getPhaseTypes();
+      const phaseType = phaseTypes.find(t => t.id === phaseTypeId);
+      if (!phaseType) {
+        return res.status(404).json({ error: "Phase Type not found" });
+      }
+
+      // Build context and generate ladder logic
+      const context = ladderLogicAgent.buildContextFromPhaseType({
+        name: phaseType.name,
+        description: phaseType.description || "",
+        inputs: phaseType.inputs as any[],
+        outputs: phaseType.outputs as any[],
+        inOuts: phaseType.inOuts as any[],
+        internalValues: phaseType.internalValues as any[],
+        linkedModules: phaseType.linkedModules as any[],
+        hmiParameters: phaseType.hmiParameters as any[] || [],
+        recipeParameters: phaseType.recipeParameters as any[] || [],
+        reportParameters: phaseType.reportParameters as any[] || [],
+        sequences: phaseType.sequences as Record<string, any>,
+      }, {
+        includeComments: includeComments ?? true,
+        generateFaultHandling: generateFaultHandling ?? true,
+        generateInterlocks: generateInterlocks ?? true,
+      });
+
+      const result = ladderLogicAgent.generatePhaseLogic(context);
+
+      if (!result.success) {
+        return res.status(400).json({ 
+          error: "Failed to generate phase ladder logic",
+          errors: result.errors 
+        });
+      }
+
+      // Get Rockwell vendor
+      const vendors = await storage.getVendors();
+      const rockwellVendor = vendors.find(v => v.name === "rockwell");
+
+      // Hash and store
+      const codeHash = codeGenerator.hashCode(result.neutralText);
+      const stored = await storage.createGeneratedCode({
+        sourceType: "phase",
+        sourceId: phaseTypeId,
+        vendorId: rockwellVendor?.id || "",
+        language: "Ladder",
+        code: result.neutralText,
+        codeHash,
+        metadata: {
+          format: "neutral_text",
+          phaseTypeName: phaseType.name,
+          rungCount: result.metadata.rungCount,
+          instructionCount: result.metadata.instructionCount,
+          routineCount: result.routines.length,
+        },
+        status: "draft",
+      });
+
+      res.json({
+        success: true,
+        id: stored.id,
+        code: result.neutralText,
+        codeHash,
+        language: "Ladder",
+        routines: result.routines,
+        tags: result.tags,
+        metadata: result.metadata,
+        warnings: result.warnings,
+      });
+    } catch (error) {
+      console.error("Error generating phase ladder logic:", error);
+      res.status(500).json({ error: "Failed to generate phase ladder logic" });
+    }
+  });
+
+  // Batch rung generation from template
+  app.post("/api/ladder-logic/batch", async (req, res) => {
+    try {
+      const { template, csvContent, startRungNumber } = req.body;
+
+      if (!template) {
+        return res.status(400).json({ error: "Template is required" });
+      }
+
+      const generator = new BatchRungGenerator();
+      generator.loadTemplate(template);
+
+      // Validate template
+      const templateValidation = generator.validateTemplate();
+      if (!templateValidation.valid) {
+        return res.status(400).json({
+          error: "Invalid template",
+          errors: templateValidation.errors,
+          warnings: templateValidation.warnings,
+        });
+      }
+
+      let result;
+      if (csvContent) {
+        // Validate CSV against template
+        const csvValidation = generator.validateCSV(csvContent);
+        if (!csvValidation.valid) {
+          return res.status(400).json({
+            error: "CSV validation failed",
+            errors: csvValidation.errors,
+            warnings: csvValidation.warnings,
+            missingVariables: csvValidation.missingVariables,
+          });
+        }
+
+        // Generate from CSV
+        result = generator.generateAll(csvContent);
+      } else {
+        // Just return template info
+        res.json({
+          success: true,
+          template,
+          variables: templateValidation.variables,
+          warnings: templateValidation.warnings,
+        });
+        return;
+      }
+
+      res.json({
+        success: result.success,
+        neutralText: result.neutralText,
+        rungCount: result.rungs.length,
+        generatedTags: result.generatedTags,
+        errors: result.errors,
+        warnings: result.warnings,
+      });
+    } catch (error) {
+      console.error("Error in batch rung generation:", error);
+      res.status(500).json({ error: "Failed to generate batch rungs" });
+    }
+  });
+
+  // Generate AI prompt context for external AI integration
+  app.post("/api/ladder-logic/ai-context/:cmTypeId", async (req, res) => {
+    try {
+      const { cmTypeId } = req.params;
+
+      // Get CM Type
+      const cmTypes = await storage.getControlModuleTypes();
+      const cmType = cmTypes.find(t => t.id === cmTypeId);
+      if (!cmType) {
+        return res.status(404).json({ error: "Control Module Type not found" });
+      }
+
+      // Build context
+      const context = ladderLogicAgent.buildContextFromCMType({
+        name: cmType.name,
+        inputs: cmType.inputs as any[],
+        outputs: cmType.outputs as any[],
+        inOuts: cmType.inOuts as any[],
+      });
+
+      const aiPrompt = ladderLogicAgent.generateAIPromptContext(context);
+
+      res.json({
+        success: true,
+        cmTypeName: cmType.name,
+        aiPrompt,
+        context: {
+          sourceType: context.sourceType,
+          sourceName: context.sourceName,
+          inputCount: context.inputs.length,
+          outputCount: context.outputs.length,
+        },
+      });
+    } catch (error) {
+      console.error("Error generating AI context:", error);
+      res.status(500).json({ error: "Failed to generate AI context" });
     }
   });
 

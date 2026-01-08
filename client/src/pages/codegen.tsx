@@ -1,14 +1,17 @@
 import { Navbar } from "@/components/layout/Navbar";
-import { Code, Play, Anchor, Copy, Check, AlertCircle } from "lucide-react";
+import { Code, Play, Anchor, Copy, Check, AlertCircle, Cpu, Settings } from "lucide-react";
 import { useQuery, useMutation } from "@tanstack/react-query";
-import { fetchControlModuleTypes, fetchPhaseTypes, fetchVendors, generateControlModuleCode, generatePhaseCode } from "@/lib/api";
+import { fetchControlModuleTypes, fetchPhaseTypes, fetchVendors, generateControlModuleCode, generatePhaseCode, generateLadderLogicForControlModule, generateLadderLogicForPhase } from "@/lib/api";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { Switch } from "@/components/ui/switch";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 
 type SourceType = "control_module" | "phase";
+type GenerationMode = "vendor" | "ladder_logic";
 
 export default function CodeGen() {
   const [sourceType, setSourceType] = useState<SourceType>("control_module");
@@ -19,6 +22,18 @@ export default function CodeGen() {
   const [codeHash, setCodeHash] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
+  const [generationMode, setGenerationMode] = useState<GenerationMode>("vendor");
+  
+  const [ladderOptions, setLadderOptions] = useState({
+    includeComments: true,
+    generateFaultHandling: true,
+    generateInterlocks: true,
+  });
+  const [ladderMetadata, setLadderMetadata] = useState<{
+    rungCount?: number;
+    instructionCount?: number;
+    tags?: Array<{ name: string; dataType: string; description?: string }>;
+  } | null>(null);
 
   const { data: cmTypes = [] } = useQuery({
     queryKey: ["cm-types"],
@@ -35,7 +50,7 @@ export default function CodeGen() {
     queryFn: fetchVendors,
   });
 
-  const generateMutation = useMutation({
+  const generateVendorMutation = useMutation({
     mutationFn: async () => {
       if (sourceType === "control_module") {
         return generateControlModuleCode(selectedSource, selectedVendor, { instanceName: instanceName || undefined });
@@ -47,10 +62,36 @@ export default function CodeGen() {
       setGeneratedCode(result.code);
       setCodeHash(result.codeHash);
       setErrors([]);
+      setLadderMetadata(null);
     },
     onError: (error: Error) => {
       setErrors([error.message]);
       setGeneratedCode(null);
+    },
+  });
+
+  const generateLadderMutation = useMutation({
+    mutationFn: async () => {
+      if (sourceType === "control_module") {
+        return generateLadderLogicForControlModule(selectedSource, ladderOptions);
+      } else {
+        return generateLadderLogicForPhase(selectedSource, ladderOptions);
+      }
+    },
+    onSuccess: (result) => {
+      setGeneratedCode(result.code);
+      setCodeHash(result.codeHash);
+      setErrors([]);
+      setLadderMetadata({
+        rungCount: result.metadata.rungCount,
+        instructionCount: result.metadata.instructionCount,
+        tags: result.tags,
+      });
+    },
+    onError: (error: Error) => {
+      setErrors([error.message]);
+      setGeneratedCode(null);
+      setLadderMetadata(null);
     },
   });
 
@@ -64,7 +105,16 @@ export default function CodeGen() {
     }
   };
 
-  const canGenerate = selectedSource && selectedVendor;
+  const handleGenerate = () => {
+    if (generationMode === "vendor") {
+      generateVendorMutation.mutate();
+    } else {
+      generateLadderMutation.mutate();
+    }
+  };
+
+  const canGenerate = selectedSource && (generationMode === "ladder_logic" || selectedVendor);
+  const isPending = generateVendorMutation.isPending || generateLadderMutation.isPending;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-mono">
@@ -82,68 +132,123 @@ export default function CodeGen() {
               Configuration
             </h2>
 
-            <div className="space-y-4">
-              <div>
-                <Label>Source Type</Label>
-                <Select value={sourceType} onValueChange={(v) => { setSourceType(v as SourceType); setSelectedSource(""); }}>
-                  <SelectTrigger data-testid="select-source-type">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="control_module">Control Module</SelectItem>
-                    <SelectItem value="phase">Phase</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+            <Tabs value={generationMode} onValueChange={(v) => setGenerationMode(v as GenerationMode)}>
+              <TabsList className="w-full mb-4">
+                <TabsTrigger value="vendor" className="flex-1" data-testid="tab-vendor">
+                  <Settings className="w-4 h-4 mr-2" />
+                  Vendor Code
+                </TabsTrigger>
+                <TabsTrigger value="ladder_logic" className="flex-1" data-testid="tab-ladder-logic">
+                  <Cpu className="w-4 h-4 mr-2" />
+                  Ladder Logic
+                </TabsTrigger>
+              </TabsList>
 
-              <div>
-                <Label>Blueprint</Label>
-                <Select value={selectedSource} onValueChange={setSelectedSource}>
-                  <SelectTrigger data-testid="select-blueprint">
-                    <SelectValue placeholder="Select blueprint" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sources.map((s) => (
-                      <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+              <div className="space-y-4">
+                <div>
+                  <Label>Source Type</Label>
+                  <Select value={sourceType} onValueChange={(v) => { setSourceType(v as SourceType); setSelectedSource(""); }}>
+                    <SelectTrigger data-testid="select-source-type">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="control_module">Control Module</SelectItem>
+                      <SelectItem value="phase">Phase</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div>
-                <Label>Target Vendor</Label>
-                <Select value={selectedVendor} onValueChange={setSelectedVendor}>
-                  <SelectTrigger data-testid="select-target-vendor">
-                    <SelectValue placeholder="Select vendor" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {vendors.filter(v => v.isActive).map((v) => (
-                      <SelectItem key={v.id} value={v.id}>{v.displayName}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+                <div>
+                  <Label>Blueprint</Label>
+                  <Select value={selectedSource} onValueChange={setSelectedSource}>
+                    <SelectTrigger data-testid="select-blueprint">
+                      <SelectValue placeholder="Select blueprint" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {sources.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-              <div>
-                <Label>Instance Name (optional)</Label>
-                <Input
-                  data-testid="input-instance-name"
-                  value={instanceName}
-                  onChange={(e) => setInstanceName(e.target.value)}
-                  placeholder="e.g., TIC4750_01"
-                />
-              </div>
+                <TabsContent value="vendor" className="mt-0 space-y-4">
+                  <div>
+                    <Label>Target Vendor</Label>
+                    <Select value={selectedVendor} onValueChange={setSelectedVendor}>
+                      <SelectTrigger data-testid="select-target-vendor">
+                        <SelectValue placeholder="Select vendor" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {vendors.filter(v => v.isActive).map((v) => (
+                          <SelectItem key={v.id} value={v.id}>{v.displayName}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
 
-              <Button
-                onClick={() => generateMutation.mutate()}
-                disabled={!canGenerate || generateMutation.isPending}
-                className="w-full bg-primary text-black hover:bg-primary/80"
-                data-testid="button-generate"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                {generateMutation.isPending ? "Generating..." : "Generate Code"}
-              </Button>
-            </div>
+                  <div>
+                    <Label>Instance Name (optional)</Label>
+                    <Input
+                      data-testid="input-instance-name"
+                      value={instanceName}
+                      onChange={(e) => setInstanceName(e.target.value)}
+                      placeholder="e.g., TIC4750_01"
+                    />
+                  </div>
+                </TabsContent>
+
+                <TabsContent value="ladder_logic" className="mt-0 space-y-4">
+                  <div className="border border-white/10 bg-white/5 p-4 space-y-3">
+                    <h3 className="text-sm font-bold uppercase text-primary">Generation Options</h3>
+                    
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="includeComments" className="text-sm">Include Comments</Label>
+                      <Switch
+                        id="includeComments"
+                        checked={ladderOptions.includeComments}
+                        onCheckedChange={(checked) => setLadderOptions(prev => ({ ...prev, includeComments: checked }))}
+                        data-testid="switch-include-comments"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="generateFaultHandling" className="text-sm">Generate Fault Handling</Label>
+                      <Switch
+                        id="generateFaultHandling"
+                        checked={ladderOptions.generateFaultHandling}
+                        onCheckedChange={(checked) => setLadderOptions(prev => ({ ...prev, generateFaultHandling: checked }))}
+                        data-testid="switch-fault-handling"
+                      />
+                    </div>
+
+                    <div className="flex items-center justify-between">
+                      <Label htmlFor="generateInterlocks" className="text-sm">Generate Interlocks</Label>
+                      <Switch
+                        id="generateInterlocks"
+                        checked={ladderOptions.generateInterlocks}
+                        onCheckedChange={(checked) => setLadderOptions(prev => ({ ...prev, generateInterlocks: checked }))}
+                        data-testid="switch-interlocks"
+                      />
+                    </div>
+                  </div>
+
+                  <p className="text-xs text-muted-foreground">
+                    Generates Studio 5000 neutral text format ladder logic for Rockwell PLCs.
+                  </p>
+                </TabsContent>
+
+                <Button
+                  onClick={handleGenerate}
+                  disabled={!canGenerate || isPending}
+                  className="w-full bg-primary text-black hover:bg-primary/80"
+                  data-testid="button-generate"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  {isPending ? "Generating..." : generationMode === "ladder_logic" ? "Generate Ladder Logic" : "Generate Code"}
+                </Button>
+              </div>
+            </Tabs>
 
             {errors.length > 0 && (
               <div className="mt-4 border border-red-500/30 bg-red-500/10 p-4">
@@ -182,6 +287,16 @@ export default function CodeGen() {
               </div>
             )}
 
+            {ladderMetadata && (
+              <div className="mb-4 flex gap-4 text-xs text-muted-foreground">
+                <span>Rungs: <span className="text-primary">{ladderMetadata.rungCount}</span></span>
+                <span>Instructions: <span className="text-primary">{ladderMetadata.instructionCount}</span></span>
+                {ladderMetadata.tags && (
+                  <span>Tags: <span className="text-primary">{ladderMetadata.tags.length}</span></span>
+                )}
+              </div>
+            )}
+
             <div className="bg-black/50 border border-white/10 p-4 h-[500px] overflow-auto">
               {generatedCode ? (
                 <pre className="text-xs text-green-400 whitespace-pre-wrap" data-testid="generated-code">
@@ -189,10 +304,26 @@ export default function CodeGen() {
                 </pre>
               ) : (
                 <div className="text-muted-foreground text-center py-12">
-                  Select a blueprint and vendor, then click Generate to create code.
+                  {generationMode === "ladder_logic" 
+                    ? "Select a blueprint and click Generate to create ladder logic."
+                    : "Select a blueprint and vendor, then click Generate to create code."}
                 </div>
               )}
             </div>
+
+            {ladderMetadata?.tags && ladderMetadata.tags.length > 0 && (
+              <div className="mt-4 border border-white/10 bg-white/5 p-4">
+                <h3 className="text-sm font-bold uppercase text-primary mb-2">Required Tags</h3>
+                <div className="space-y-1">
+                  {ladderMetadata.tags.map((tag, i) => (
+                    <div key={i} className="text-xs flex justify-between">
+                      <span className="text-green-400 font-mono">{tag.name}</span>
+                      <span className="text-muted-foreground">{tag.dataType}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         </div>
       </div>

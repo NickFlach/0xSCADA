@@ -187,3 +187,127 @@ export async function seedDatabase(): Promise<{
   if (!response.ok) throw new Error("Failed to seed database");
   return response.json();
 }
+
+// ============================================================================
+// LADDER LOGIC GENERATION API
+// ============================================================================
+
+export interface LadderLogicResult {
+  success: boolean;
+  id: string;
+  code: string;
+  codeHash: string;
+  language: string;
+  routines: Array<{
+    name: string;
+    type: string;
+    neutralText: string;
+  }>;
+  tags: Array<{
+    name: string;
+    dataType: string;
+    scope: string;
+    description?: string;
+  }>;
+  metadata: {
+    generatedAt: string;
+    rungCount: number;
+    instructionCount: number;
+  };
+  warnings: string[];
+}
+
+export async function generateLadderLogicForControlModule(
+  cmTypeId: string,
+  options?: { 
+    includeComments?: boolean; 
+    generateFaultHandling?: boolean; 
+    generateInterlocks?: boolean 
+  }
+): Promise<LadderLogicResult> {
+  const response = await fetch(`${API_BASE}/generate/ladder-logic/control-module/${cmTypeId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options || {}),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to generate ladder logic");
+  }
+  return response.json();
+}
+
+export async function generateLadderLogicForPhase(
+  phaseTypeId: string,
+  options?: { 
+    includeComments?: boolean; 
+    generateFaultHandling?: boolean; 
+    generateInterlocks?: boolean 
+  }
+): Promise<LadderLogicResult> {
+  const response = await fetch(`${API_BASE}/generate/ladder-logic/phase/${phaseTypeId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(options || {}),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to generate phase ladder logic");
+  }
+  return response.json();
+}
+
+export async function fetchInstructionLibrary(category?: string): Promise<Record<string, any>> {
+  const url = category 
+    ? `${API_BASE}/ladder-logic/instructions?category=${category}`
+    : `${API_BASE}/ladder-logic/instructions`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error("Failed to fetch instruction library");
+  return response.json();
+}
+
+export async function generateBatchRungs(
+  template: string,
+  csvContent?: string,
+  startRungNumber?: number
+): Promise<{
+  success: boolean;
+  neutralText?: string;
+  rungCount?: number;
+  variables?: string[];
+  errors?: string[];
+  warnings?: string[];
+}> {
+  const response = await fetch(`${API_BASE}/ladder-logic/batch`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ template, csvContent, startRungNumber }),
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to generate batch rungs");
+  }
+  return response.json();
+}
+
+export async function getAIPromptContext(cmTypeId: string): Promise<{
+  success: boolean;
+  cmTypeName: string;
+  aiPrompt: string;
+  context: {
+    sourceType: string;
+    sourceName: string;
+    inputCount: number;
+    outputCount: number;
+  };
+}> {
+  const response = await fetch(`${API_BASE}/ladder-logic/ai-context/${cmTypeId}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+  });
+  if (!response.ok) {
+    const error = await response.json();
+    throw new Error(error.error || "Failed to generate AI context");
+  }
+  return response.json();
+}

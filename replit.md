@@ -115,6 +115,13 @@ Defined in `shared/schema.ts`:
 - `GET/POST /api/generated-code` - Generated code management
 - `POST /api/generated-code/:id/anchor` - Anchor generated code to blockchain
 
+### Ladder Logic Agent (Rockwell)
+- `GET /api/ladder-logic/instructions` - Get instruction library (optional: ?category=bit|timer|counter|compare|math|move|program)
+- `POST /api/generate/ladder-logic/control-module/:cmTypeId` - Generate ladder logic for control module
+- `POST /api/generate/ladder-logic/phase/:phaseTypeId` - Generate ladder logic for phase
+- `POST /api/ladder-logic/batch` - Batch rung generation from template with CSV
+- `POST /api/ladder-logic/ai-context/:cmTypeId` - Generate AI prompt context for external AI integration
+
 ## External Dependencies
 
 ### Database
@@ -142,6 +149,16 @@ Defined in `shared/schema.ts`:
 - **esbuild**: Production server bundling
 
 ## Recent Changes
+
+### January 8, 2026
+- **Ladder Logic Agent**: Added AI-driven ladder logic code generation for Rockwell Studio 5000
+  - Instruction library with all standard Studio 5000 instructions (XIC, XIO, OTE, TON, CTU, etc.)
+  - Neutral text format generation and parsing
+  - RungBuilder fluent API for programmatic rung construction
+  - Batch rung generation with template variables and CSV substitution
+  - AI context generation for external AI integration
+  - Full API routes for ladder logic generation
+  - Updated CodeGen page with Ladder Logic tab and generation options
 
 ### December 30, 2025
 - Added comprehensive blueprints and vendor management system
