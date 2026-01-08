@@ -19,10 +19,12 @@ export default function CodeGen() {
   const [selectedVendor, setSelectedVendor] = useState<string>("");
   const [instanceName, setInstanceName] = useState("");
   const [generatedCode, setGeneratedCode] = useState<string | null>(null);
+  const [visualDiagram, setVisualDiagram] = useState<string | null>(null);
   const [codeHash, setCodeHash] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [errors, setErrors] = useState<string[]>([]);
   const [generationMode, setGenerationMode] = useState<GenerationMode>("vendor");
+  const [codeViewMode, setCodeViewMode] = useState<"visual" | "neutral">("visual");
   
   const [ladderOptions, setLadderOptions] = useState({
     includeComments: true,
@@ -60,13 +62,17 @@ export default function CodeGen() {
     },
     onSuccess: (result) => {
       setGeneratedCode(result.code);
+      setVisualDiagram(null);
       setCodeHash(result.codeHash);
       setErrors([]);
       setLadderMetadata(null);
+      setCodeViewMode("neutral");
     },
     onError: (error: Error) => {
       setErrors([error.message]);
       setGeneratedCode(null);
+      setVisualDiagram(null);
+      setCodeViewMode("neutral");
     },
   });
 
@@ -80,6 +86,7 @@ export default function CodeGen() {
     },
     onSuccess: (result) => {
       setGeneratedCode(result.code);
+      setVisualDiagram(result.visualDiagram);
       setCodeHash(result.codeHash);
       setErrors([]);
       setLadderMetadata({
@@ -87,10 +94,12 @@ export default function CodeGen() {
         instructionCount: result.metadata.instructionCount,
         tags: result.tags,
       });
+      setCodeViewMode("visual");
     },
     onError: (error: Error) => {
       setErrors([error.message]);
       setGeneratedCode(null);
+      setVisualDiagram(null);
       setLadderMetadata(null);
     },
   });
@@ -297,10 +306,31 @@ export default function CodeGen() {
               </div>
             )}
 
+            {visualDiagram && (
+              <div className="flex gap-2 mb-2">
+                <Button 
+                  variant={codeViewMode === "visual" ? "default" : "outline"} 
+                  size="sm"
+                  onClick={() => setCodeViewMode("visual")}
+                  data-testid="button-view-visual"
+                >
+                  Ladder Diagram
+                </Button>
+                <Button 
+                  variant={codeViewMode === "neutral" ? "default" : "outline"} 
+                  size="sm"
+                  onClick={() => setCodeViewMode("neutral")}
+                  data-testid="button-view-neutral"
+                >
+                  Neutral Text
+                </Button>
+              </div>
+            )}
+
             <div className="bg-black/50 border border-white/10 p-4 h-[500px] overflow-auto">
               {generatedCode ? (
-                <pre className="text-xs text-green-400 whitespace-pre-wrap" data-testid="generated-code">
-                  {generatedCode}
+                <pre className="text-xs text-green-400 whitespace-pre" data-testid="generated-code">
+                  {visualDiagram && codeViewMode === "visual" ? visualDiagram : generatedCode}
                 </pre>
               ) : (
                 <div className="text-muted-foreground text-center py-12">

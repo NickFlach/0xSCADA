@@ -20,6 +20,7 @@ import {
   INSTRUCTION_LIBRARY,
   getInstructionsByCategory,
   BatchRungGenerator,
+  routineToLadderDiagram,
 } from "./blueprints";
 import type { BlueprintFiles } from "./blueprints";
 import { agentRoutes } from "./routes/agents";
@@ -1041,10 +1042,21 @@ export async function registerRoutes(
         status: "draft",
       });
 
+      // Generate visual ladder diagram
+      let visualDiagram = "";
+      for (const routine of result.routines) {
+        visualDiagram += routineToLadderDiagram({
+          name: routine.name,
+          type: "Ladder",
+          rungs: routine.rungs,
+        }) + "\n";
+      }
+
       res.json({
         success: true,
         id: stored.id,
         code: result.neutralText,
+        visualDiagram,
         codeHash,
         language: "Ladder",
         routines: result.routines,
@@ -1122,10 +1134,21 @@ export async function registerRoutes(
         status: "draft",
       });
 
+      // Generate visual ladder diagram
+      let visualDiagram = "";
+      for (const routine of result.routines) {
+        visualDiagram += routineToLadderDiagram({
+          name: routine.name,
+          type: "Ladder",
+          rungs: routine.rungs,
+        }) + "\n";
+      }
+
       res.json({
         success: true,
         id: stored.id,
         code: result.neutralText,
+        visualDiagram,
         codeHash,
         language: "Ladder",
         routines: result.routines,

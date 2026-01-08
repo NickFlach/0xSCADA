@@ -196,6 +196,7 @@ export interface LadderLogicResult {
   success: boolean;
   id: string;
   code: string;
+  visualDiagram: string;
   codeHash: string;
   language: string;
   routines: Array<{

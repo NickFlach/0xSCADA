@@ -16,3 +16,4 @@ export * from "./ladder-logic-types";
 export * from "./neutral-text-generator";
 export * from "./ladder-logic-agent";
 export * from "./batch-rung-generator";
+export * from "./ladder-diagram-renderer";
