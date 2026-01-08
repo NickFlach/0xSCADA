@@ -338,3 +338,46 @@ export function generateLadderRungs(cmType: ParsedCMType): string[] {
 
   return rungs;
 }
+
+/**
+ * Generate advanced ladder logic using the LadderLogicAgent
+ * This provides AI-ready code generation with full instruction support
+ */
+export async function generateAdvancedLadderLogic(
+  cmType: ParsedCMType,
+  options?: {
+    includeComments?: boolean;
+    generateFaultHandling?: boolean;
+    generateInterlocks?: boolean;
+  }
+): Promise<{
+  success: boolean;
+  neutralText: string;
+  rungs: string[];
+  tags: Array<{ name: string; dataType: string }>;
+  errors: string[];
+}> {
+  // Dynamic import to avoid circular dependencies
+  const { ladderLogicAgent } = await import("./ladder-logic-agent");
+  
+  const context = ladderLogicAgent.buildContextFromCMType(cmType, {
+    includeComments: options?.includeComments ?? true,
+    generateFaultHandling: options?.generateFaultHandling ?? true,
+    generateInterlocks: options?.generateInterlocks ?? true,
+  });
+  
+  const result = ladderLogicAgent.generateControlModuleLogic(context);
+  
+  // Dynamic import for neutral text generator
+  const { rungToNeutralText } = await import("./neutral-text-generator");
+  
+  return {
+    success: result.success,
+    neutralText: result.neutralText,
+    rungs: result.routines.flatMap(r => 
+      r.rungs.map(rung => rungToNeutralText(rung))
+    ),
+    tags: result.tags.map(t => ({ name: t.name, dataType: t.dataType })),
+    errors: result.errors,
+  };
+}

@@ -10,3 +10,9 @@ export * from "./code-generator";
 export * from "./siemens-adapter";
 export * from "./rockwell-adapter";
 export * from "./seed-database";
+
+// Ladder Logic AI Agent - LadderLogix-style code generation
+export * from "./ladder-logic-types";
+export * from "./neutral-text-generator";
+export * from "./ladder-logic-agent";
+export * from "./batch-rung-generator";
