@@ -25,6 +25,8 @@ import {
 import type { BlueprintFiles } from "./blueprints";
 import { agentRoutes } from "./routes/agents";
 import { eventRoutes } from "./routes/events";
+import { batchRoutes } from "./routes/batch";
+import { batchAnchoringService } from "./batch-anchoring";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -36,6 +38,7 @@ export async function registerRoutes(
   // ==========================================================================
   app.use("/api/agents", agentRoutes);
   app.use("/api/v2/events", eventRoutes);
+  app.use("/api/batch", batchRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {

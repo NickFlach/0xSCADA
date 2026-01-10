@@ -43,16 +43,26 @@ contract IndustrialRegistry {
         address performedBy;
     }
 
+    struct BatchAnchor {
+        bytes32 merkleRoot;
+        uint256 eventCount;
+        uint256 timestamp;
+        address anchoredBy;
+    }
+
     mapping(string => SiteRegistry) public sites;
     mapping(string => AssetRegistry) public assets;
+    mapping(string => BatchAnchor) public batches;
     
     string[] public siteIds;
     string[] public assetIds;
+    string[] public batchIds;
 
     event SiteRegistered(string indexed siteId, string name, address owner, uint256 timestamp);
     event AssetRegistered(string indexed assetId, string siteId, string assetType, uint256 timestamp);
     event EventAnchored(string indexed assetId, string eventType, bytes32 payloadHash, uint256 timestamp, address recordedBy);
     event MaintenanceAnchored(string indexed assetId, string workOrderId, string maintenanceType, uint256 timestamp, address performedBy);
+    event BatchRootAnchored(string indexed batchId, bytes32 merkleRoot, uint256 eventCount, uint256 timestamp, address anchoredBy);
 
     modifier onlyActiveSite(string memory siteId) {
         require(sites[siteId].active, "Site does not exist or is inactive");
@@ -165,5 +175,77 @@ contract IndustrialRegistry {
      */
     function getAssetCount() external view returns (uint256) {
         return assetIds.length;
+    }
+
+    /**
+     * @notice Anchor a batch of events as a single Merkle root
+     * This is the high-volume anchoring solution - instead of anchoring each event
+     * individually, multiple events are batched off-chain into a Merkle tree, 
+     * and only the root is anchored on-chain.
+     * @param batchId Unique identifier for this batch
+     * @param merkleRoot The Merkle root of all event hashes in the batch
+     * @param eventCount Number of events included in this batch
+     */
+    function anchorBatchRoot(
+        string memory batchId,
+        bytes32 merkleRoot,
+        uint256 eventCount
+    ) external {
+        require(bytes(batchId).length > 0, "Batch ID cannot be empty");
+        require(merkleRoot != bytes32(0), "Merkle root cannot be empty");
+        require(eventCount > 0, "Event count must be greater than 0");
+        require(batches[batchId].timestamp == 0, "Batch already anchored");
+
+        batches[batchId] = BatchAnchor({
+            merkleRoot: merkleRoot,
+            eventCount: eventCount,
+            timestamp: block.timestamp,
+            anchoredBy: msg.sender
+        });
+
+        batchIds.push(batchId);
+        emit BatchRootAnchored(batchId, merkleRoot, eventCount, block.timestamp, msg.sender);
+    }
+
+    /**
+     * @notice Verify a Merkle proof for an event in a batch
+     * @param batchId The batch containing the event
+     * @param eventHash The hash of the event to verify
+     * @param proof The Merkle proof (array of sibling hashes)
+     * @return isValid True if the proof is valid
+     */
+    function verifyEventInBatch(
+        string memory batchId,
+        bytes32 eventHash,
+        bytes32[] memory proof
+    ) external view returns (bool isValid) {
+        BatchAnchor memory batch = batches[batchId];
+        require(batch.timestamp > 0, "Batch not found");
+
+        bytes32 computedHash = eventHash;
+        for (uint256 i = 0; i < proof.length; i++) {
+            bytes32 proofElement = proof[i];
+            if (computedHash < proofElement) {
+                computedHash = keccak256(abi.encodePacked(computedHash, proofElement));
+            } else {
+                computedHash = keccak256(abi.encodePacked(proofElement, computedHash));
+            }
+        }
+
+        return computedHash == batch.merkleRoot;
+    }
+
+    /**
+     * @notice Get batch details
+     */
+    function getBatch(string memory batchId) external view returns (BatchAnchor memory) {
+        return batches[batchId];
+    }
+
+    /**
+     * @notice Get total number of anchored batches
+     */
+    function getBatchCount() external view returns (uint256) {
+        return batchIds.length;
     }
 }

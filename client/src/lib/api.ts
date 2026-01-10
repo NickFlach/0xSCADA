@@ -312,3 +312,37 @@ export async function getAIPromptContext(cmTypeId: string): Promise<{
   }
   return response.json();
 }
+
+export interface BatchStats {
+  stats: {
+    pendingEvents: number;
+    totalBatchesAnchored: number;
+    totalEventsAnchored: number;
+    lastBatchTime: string | null;
+    averageEventsPerBatch: number;
+    estimatedGasSavings: number;
+  };
+  config: {
+    maxBatchSize: number;
+    maxBatchAgeMs: number;
+    enabled: boolean;
+  };
+  blockchain: {
+    enabled: boolean;
+    gasPrice: string;
+  };
+}
+
+export async function fetchBatchStats(): Promise<BatchStats> {
+  const response = await fetch(`${API_BASE}/batch/stats`);
+  if (!response.ok) throw new Error("Failed to fetch batch stats");
+  return response.json();
+}
+
+export async function flushBatch(): Promise<{ success: boolean; batch?: any; message?: string }> {
+  const response = await fetch(`${API_BASE}/batch/flush`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error("Failed to flush batch");
+  return response.json();
+}

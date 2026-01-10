@@ -1,8 +1,8 @@
 import { Navbar } from "@/components/layout/Navbar";
-import { Activity, ShieldCheck, AlertTriangle, Database } from "lucide-react";
+import { Activity, ShieldCheck, AlertTriangle, Database, Layers } from "lucide-react";
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
-import { fetchSites, fetchAssets, fetchEvents } from "@/lib/api";
+import { fetchSites, fetchAssets, fetchEvents, fetchBatchStats } from "@/lib/api";
 
 export default function Dashboard() {
   const { data: sites = [] } = useQuery({
@@ -21,6 +21,12 @@ export default function Dashboard() {
     queryKey: ["events"],
     queryFn: () => fetchEvents(10),
     refetchInterval: 2000,
+  });
+
+  const { data: batchStats } = useQuery({
+    queryKey: ["batchStats"],
+    queryFn: fetchBatchStats,
+    refetchInterval: 5000,
   });
 
   const onlineSites = sites.filter(s => s.status === "ONLINE").length;
@@ -69,6 +75,38 @@ export default function Dashboard() {
             icon={AlertTriangle} 
             status={assets.filter(a => a.status === "WARNING").length > 0 ? "warning" : "good"}
           />
+        </div>
+
+        <div className="mb-8 border border-white/10 bg-white/5 p-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Layers className="w-5 h-5 text-primary" />
+              <div>
+                <h3 className="text-sm font-bold uppercase">Batch Anchoring</h3>
+                <p className="text-xs text-muted-foreground">Merkle tree batching for gas-efficient L1 anchoring</p>
+              </div>
+            </div>
+            <div className="flex gap-6 text-xs">
+              <div className="text-center">
+                <div className="text-lg font-bold text-primary">{batchStats?.stats.pendingEvents || 0}</div>
+                <div className="text-muted-foreground uppercase">Pending</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold">{batchStats?.stats.totalBatchesAnchored || 0}</div>
+                <div className="text-muted-foreground uppercase">Batches</div>
+              </div>
+              <div className="text-center">
+                <div className="text-lg font-bold">{batchStats?.stats.totalEventsAnchored || 0}</div>
+                <div className="text-muted-foreground uppercase">Anchored</div>
+              </div>
+              <div className="text-center">
+                <div className={`text-lg font-bold ${batchStats?.config.enabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                  {batchStats?.config.enabled ? 'ON' : 'OFF'}
+                </div>
+                <div className="text-muted-foreground uppercase">Status</div>
+              </div>
+            </div>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">

@@ -8,10 +8,12 @@ const REGISTRY_ABI = [
   "function registerAsset(string assetId, string siteId, string assetType, string nameOrTag, bool critical)",
   "function anchorEvent(string assetId, string eventType, bytes32 payloadHash)",
   "function anchorMaintenance(string assetId, string workOrderId, string maintenanceType, uint256 performedAt)",
+  "function anchorBatchRoot(string batchId, bytes32 merkleRoot, uint256 eventCount)",
   "event SiteRegistered(string indexed siteId, string name, address owner, uint256 timestamp)",
   "event AssetRegistered(string indexed assetId, string siteId, string assetType, uint256 timestamp)",
   "event EventAnchored(string indexed assetId, string eventType, bytes32 payloadHash, uint256 timestamp, address recordedBy)",
   "event MaintenanceAnchored(string indexed assetId, string workOrderId, string maintenanceType, uint256 timestamp, address performedBy)",
+  "event BatchRootAnchored(string indexed batchId, bytes32 merkleRoot, uint256 eventCount, uint256 timestamp, address anchoredBy)",
 ];
 
 export interface BlockchainConfig {
@@ -159,6 +161,59 @@ export class BlockchainService {
       return receipt.hash;
     } catch (error) {
       console.error("Failed to anchor maintenance on-chain:", error);
+      return null;
+    }
+  }
+
+  async anchorBatchRoot(
+    batchId: string,
+    merkleRoot: string,
+    eventCount: number
+  ): Promise<string | null> {
+    if (!this.config.enabled || !this.config.registry) {
+      return null;
+    }
+
+    try {
+      const tx = await this.config.registry.anchorBatchRoot(batchId, merkleRoot, eventCount);
+      const receipt = await tx.wait();
+      console.log(`✅ Batch root anchored on-chain: ${receipt.hash}`);
+      console.log(`   Batch ID: ${batchId}`);
+      console.log(`   Merkle Root: ${merkleRoot}`);
+      console.log(`   Event Count: ${eventCount}`);
+      return receipt.hash;
+    } catch (error) {
+      console.error("Failed to anchor batch root on-chain:", error);
+      return null;
+    }
+  }
+
+  async getGasPrice(): Promise<{ gasPrice: bigint; formatted: string } | null> {
+    if (!this.config.enabled || !this.config.provider) {
+      return null;
+    }
+
+    try {
+      const feeData = await this.config.provider.getFeeData();
+      const gasPrice = feeData.gasPrice || BigInt(0);
+      const formatted = ethers.formatUnits(gasPrice, "gwei") + " gwei";
+      return { gasPrice, formatted };
+    } catch (error) {
+      console.error("Failed to get gas price:", error);
+      return null;
+    }
+  }
+
+  async estimateGas(functionName: string, ...args: any[]): Promise<bigint | null> {
+    if (!this.config.enabled || !this.config.registry) {
+      return null;
+    }
+
+    try {
+      const gasEstimate = await this.config.registry[functionName].estimateGas(...args);
+      return gasEstimate;
+    } catch (error) {
+      console.error(`Failed to estimate gas for ${functionName}:`, error);
       return null;
     }
   }
