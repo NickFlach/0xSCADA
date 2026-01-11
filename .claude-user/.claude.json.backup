@@ -11,9 +11,13 @@
     "prompt-queue": 1,
     "enter-to-steer-in-relatime": 1,
     "todo-list": 1,
-    "install-github-app": 1
+    "install-github-app": 1,
+    "install-slack-app": 1,
+    "drag-and-drop-images": 1,
+    "double-esc-code-restore": 1,
+    "continue": 1
   },
-  "promptQueueUseCount": 1,
+  "promptQueueUseCount": 2,
   "cachedStatsigGates": {
     "tengu_prompt_suggestion": true
   },

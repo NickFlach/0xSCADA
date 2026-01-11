@@ -7861,3 +7861,38 @@ Available tools: mcp__agentic_qe__fleet_init, mcp__agentic_qe__agent_spawn, mcp_
 2026-01-11T12:57:16.804Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
 2026-01-11T12:57:16.804Z [DEBUG] [API:auth] OAuth token check starting
 2026-01-11T12:57:16.804Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:19.668Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:23.177Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-11T12:57:23.178Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-11T12:57:23.178Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:23.178Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-11T12:57:23.180Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/1f4e8481-ea92-4516-b33f-d54631837939-agent-1f4e8481-ea92-4516-b33f-d54631837939.json.tmp.4322.1768136243180
+2026-01-11T12:57:23.180Z [DEBUG] Preserving file permissions: 100644
+2026-01-11T12:57:23.180Z [DEBUG] Temp file written successfully, size: 758 bytes
+2026-01-11T12:57:23.180Z [DEBUG] Applied original permissions to temp file
+2026-01-11T12:57:23.180Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/1f4e8481-ea92-4516-b33f-d54631837939-agent-1f4e8481-ea92-4516-b33f-d54631837939.json.tmp.4322.1768136243180 to /home/runner/workspace/.claude-user/todos/1f4e8481-ea92-4516-b33f-d54631837939-agent-1f4e8481-ea92-4516-b33f-d54631837939.json
+2026-01-11T12:57:23.181Z [DEBUG] File /home/runner/workspace/.claude-user/todos/1f4e8481-ea92-4516-b33f-d54631837939-agent-1f4e8481-ea92-4516-b33f-d54631837939.json written atomically
+2026-01-11T12:57:23.182Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-11T12:57:23.182Z [DEBUG] Found 1 hook matchers in settings
+2026-01-11T12:57:23.182Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-11T12:57:23.200Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:23.200Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:23.200Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:23.200Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:23.205Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:23.227Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:23.227Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:23.228Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:25.732Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:33.486Z [DEBUG] Getting matching hook commands for Stop with query: undefined
+2026-01-11T12:57:33.486Z [DEBUG] Found 1 hook matchers in settings
+2026-01-11T12:57:33.486Z [DEBUG] Matched 1 unique hooks for query "no match query" (1 before deduplication)
+2026-01-11T12:57:33.499Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-11T12:57:33.502Z [DEBUG] Getting matching hook commands for SessionEnd with query: other
+2026-01-11T12:57:33.502Z [DEBUG] Found 0 hook matchers in settings
+2026-01-11T12:57:33.502Z [DEBUG] Matched 0 unique hooks for query "other" (0 before deduplication)
+2026-01-11T12:57:33.505Z [DEBUG] Cleaned up session snapshot: /home/runner/workspace/.claude-user/shell-snapshots/snapshot-bash-1768134901552-c6gvy6.sh
+2026-01-11T12:57:33.505Z [DEBUG] MCP server "agentic-qe": Sending SIGINT to MCP server process
+2026-01-11T12:57:33.506Z [DEBUG] LSP server manager shut down successfully
+2026-01-11T12:57:33.605Z [DEBUG] MCP server "agentic-qe": SIGINT failed, sending SIGTERM to MCP server process
+2026-01-11T12:57:33.655Z [DEBUG] MCP server "agentic-qe": MCP server process exited cleanly

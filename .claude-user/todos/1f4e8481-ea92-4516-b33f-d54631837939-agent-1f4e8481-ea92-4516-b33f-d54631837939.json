@@ -11,12 +11,12 @@
   },
   {
     "content": "Generate tests for key components",
-    "status": "in_progress",
+    "status": "completed",
     "activeForm": "Generating tests"
   },
   {
     "content": "Execute generated tests",
-    "status": "pending",
+    "status": "in_progress",
     "activeForm": "Executing tests"
   },
   {
