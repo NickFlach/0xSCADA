@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "agentic-qe": {
+      "command": "npx",
+      "args": [
+        "aqe-mcp"
+      ],
+      "env": {
+        "AQE_MEMORY_PATH": ".agentic-qe/memory.db",
+        "AQE_LEARNING_ENABLED": "true",
+        "NODE_NO_WARNINGS": "1"
+      }
+    }
+  }
+}

@@ -1,0 +1,8 @@
+2026-01-11T12:33:52.521Z [DEBUG] Watching for changes in setting files /home/runner/workspace/.claude, /home/runner/workspace/.claude...
+2026-01-11T12:33:52.528Z [DEBUG] [init] configureGlobalMTLS starting
+2026-01-11T12:33:52.528Z [DEBUG] [init] configureGlobalMTLS complete
+2026-01-11T12:33:52.528Z [DEBUG] [init] configureGlobalAgents starting
+2026-01-11T12:33:52.528Z [DEBUG] [init] configureGlobalAgents complete
+2026-01-11T12:33:52.568Z [DEBUG] Found 0 plugins (0 enabled, 0 disabled)
+2026-01-11T12:33:52.577Z [DEBUG] MCP server "agentic-qe": Starting connection with timeout of 30000ms
+2026-01-11T12:33:52.601Z [DEBUG] Watching for changes in skill directories: /home/runner/workspace/.claude/skills...

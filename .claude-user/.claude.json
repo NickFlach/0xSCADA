@@ -1,0 +1,130 @@
+{
+  "numStartups": 1,
+  "tipsHistory": {
+    "new-user-warmup": 1,
+    "plan-mode-for-complex-tasks": 1,
+    "terminal-setup": 1,
+    "memory-command": 1,
+    "theme-command": 1,
+    "status-line": 1,
+    "stickers-command": 1,
+    "prompt-queue": 1,
+    "enter-to-steer-in-relatime": 1,
+    "todo-list": 1,
+    "install-github-app": 1,
+    "install-slack-app": 1
+  },
+  "promptQueueUseCount": 1,
+  "cachedStatsigGates": {
+    "tengu_prompt_suggestion": true
+  },
+  "cachedGrowthBookFeatures": {
+    "tengu_1p_event_batch_config": {
+      "scheduledDelayMillis": 5000,
+      "maxExportBatchSize": 200,
+      "maxQueueSize": 8192
+    },
+    "tengu_mcp_tool_search": false,
+    "tengu_scratch": false,
+    "tengu_disable_bypass_permissions_mode": false,
+    "tengu_log_segment_events": false,
+    "tengu_log_datadog_events": true,
+    "tengu_event_sampling_config": {},
+    "tengu_tool_pear": false,
+    "tengu_thinkback": false,
+    "tengu_sumi": false,
+    "tengu_c4w_usage_limit_notifications_enabled": true,
+    "tengu-top-of-feed-tip": {
+      "tip": "",
+      "color": ""
+    },
+    "tengu_react_vulnerability_warning": false,
+    "tengu_post_compact_survey": false,
+    "tengu_streaming_tool_execution2": false,
+    "tengu_tool_search_unsupported_models": null,
+    "tengu_ant_attribution_header_new": true,
+    "tengu_permission_explainer": false,
+    "tengu_accept_with_feedback": true
+  },
+  "userID": "c5b5012581b731660b1d0bfa288fc9d01170f1d22b0241271fbbb2d72d357d17",
+  "firstStartTime": "2026-01-11T12:18:23.283Z",
+  "sonnet45MigrationComplete": true,
+  "opus45MigrationComplete": true,
+  "thinkingMigrationComplete": true,
+  "changelogLastFetched": 1768133974081,
+  "oauthAccount": {
+    "accountUuid": "317b4091-55bf-40ea-879f-f53f195c4381",
+    "emailAddress": "nflach78@gmail.com",
+    "organizationUuid": "3b91c6fd-4fd4-4b41-9ccb-862ffb1f2759",
+    "hasExtraUsageEnabled": false,
+    "displayName": "Flaukowski",
+    "organizationRole": "admin",
+    "workspaceRole": null,
+    "organizationName": "nflach78@gmail.com's Organization"
+  },
+  "claudeCodeFirstTokenDate": "2026-01-10T03:06:25.519236Z",
+  "hasCompletedOnboarding": true,
+  "lastOnboardingVersion": "2.1.4",
+  "projects": {
+    "/home/runner/workspace": {
+      "allowedTools": [],
+      "mcpContextUris": [],
+      "mcpServers": {
+        "agentic-qe": {
+          "type": "stdio",
+          "command": "npx",
+          "args": [
+            "aqe-mcp"
+          ],
+          "env": {}
+        }
+      },
+      "enabledMcpjsonServers": [],
+      "disabledMcpjsonServers": [],
+      "hasTrustDialogAccepted": true,
+      "projectOnboardingSeenCount": 1,
+      "hasClaudeMdExternalIncludesApproved": false,
+      "hasClaudeMdExternalIncludesWarningShown": false,
+      "reactVulnerabilityCache": {
+        "detected": false,
+        "package": null,
+        "packageName": null,
+        "version": null,
+        "packageManager": null
+      },
+      "exampleFiles": [
+        "routes.ts",
+        "api.ts",
+        "App.tsx",
+        "schema.ts",
+        "storage.ts"
+      ],
+      "exampleFilesGeneratedAt": 1768133974719,
+      "hasCompletedProjectOnboarding": true
+    }
+  },
+  "githubRepoPaths": {
+    "nickflach/0xscada": [
+      "/home/runner/workspace"
+    ]
+  },
+  "lastReleaseNotesSeen": "2.1.4",
+  "hasShownOpus45Notice": {
+    "3b91c6fd-4fd4-4b41-9ccb-862ffb1f2759": true
+  },
+  "groveConfigCache": {
+    "317b4091-55bf-40ea-879f-f53f195c4381": {
+      "grove_enabled": true,
+      "timestamp": 1768133973845
+    }
+  },
+  "s1mAccessCache": {
+    "3b91c6fd-4fd4-4b41-9ccb-862ffb1f2759": {
+      "hasAccess": false,
+      "hasAccessNotAsDefault": false,
+      "timestamp": 1768133974016
+    }
+  },
+  "officialMarketplaceAutoInstallAttempted": true,
+  "officialMarketplaceAutoInstalled": true
+}

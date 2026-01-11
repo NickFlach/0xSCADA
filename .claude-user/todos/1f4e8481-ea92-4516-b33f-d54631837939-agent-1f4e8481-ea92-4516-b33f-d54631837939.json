@@ -1,0 +1,32 @@
+[
+  {
+    "content": "Initialize AQE fleet with hierarchical topology",
+    "status": "completed",
+    "activeForm": "Initializing AQE fleet"
+  },
+  {
+    "content": "Explore codebase to identify testable code",
+    "status": "completed",
+    "activeForm": "Exploring codebase"
+  },
+  {
+    "content": "Generate tests for key components",
+    "status": "in_progress",
+    "activeForm": "Generating tests"
+  },
+  {
+    "content": "Execute generated tests",
+    "status": "pending",
+    "activeForm": "Executing tests"
+  },
+  {
+    "content": "Analyze test coverage",
+    "status": "pending",
+    "activeForm": "Analyzing coverage"
+  },
+  {
+    "content": "Run quality gate validation",
+    "status": "pending",
+    "activeForm": "Running quality gate"
+  }
+]
