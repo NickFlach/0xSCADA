@@ -141,8 +141,18 @@ Defined in `shared/schema.ts`:
 - **Connection**: Via `DATABASE_URL` environment variable
 
 ### Blockchain
-- **Hardhat**: Local Ethereum development network (chainId 1337)
+- **Custom Geth Fork**: go-ethereum fork in `geth-fork/` directory
+  - Chain ID: 380634 (0x5CADA)
+  - Consensus: Clique (Proof of Authority)
+  - Block Time: 5 seconds
+  - Gas Limit: 30,000,000
+- **Hardhat**: Smart contract development and testing (chainId 1337)
 - **ethers.js**: Ethereum provider and contract interaction
+- **Helper Scripts** (`blockchain/`):
+  - `init-chain.sh`: Initialize the custom blockchain
+  - `start-node.sh`: Start the geth node
+  - `create-account.sh`: Create new signer account
+  - `import-key.sh`: Import Hardhat default private key
 - **Environment Variables**:
   - `BLOCKCHAIN_RPC_URL`: JSON-RPC endpoint (defaults to localhost:8545)
   - `BLOCKCHAIN_PRIVATE_KEY`: Wallet for signing transactions
@@ -160,6 +170,16 @@ Defined in `shared/schema.ts`:
 - **esbuild**: Production server bundling
 
 ## Recent Changes
+
+### January 11, 2026
+- **Custom Blockchain Fork**: Forked go-ethereum for 0xSCADA private blockchain
+  - Chain ID: 380634 (0x5CADA) - unique identifier for the network
+  - Clique PoA consensus with 5-second block time (ideal for industrial applications)
+  - Pre-funded accounts compatible with Hardhat development environment
+  - Custom genesis configuration at `blockchain/genesis.json`
+  - Build geth binary from source in `geth-fork/build/bin/geth`
+  - Helper scripts for chain initialization, node startup, and account management
+  - Full control over consensus, gas limits, and network parameters
 
 ### January 10, 2026
 - **High-Volume Event Anchoring System**: Added batch anchoring with Merkle trees per Grok's recommendations

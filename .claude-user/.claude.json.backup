@@ -15,7 +15,9 @@
     "install-slack-app": 1,
     "drag-and-drop-images": 1,
     "double-esc-code-restore": 1,
-    "continue": 1
+    "continue": 1,
+    "shift-tab": 1,
+    "image-paste": 1
   },
   "promptQueueUseCount": 2,
   "cachedStatsigGates": {
