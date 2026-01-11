@@ -7284,3 +7284,580 @@ Available tools: mcp__agentic_qe__fleet_init, mcp__agentic_qe__agent_spawn, mcp_
 2026-01-11T12:55:54.845Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
 2026-01-11T12:55:54.845Z [DEBUG] [API:auth] OAuth token check starting
 2026-01-11T12:55:54.845Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:55:57.228Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:55:58.438Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:55:58.438Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:55:58.438Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:55:58.438Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:55:58.441Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:55:58.454Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:55:58.454Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:55:58.454Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:55:58.454Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:55:58.458Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:55:58.479Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:55:58.479Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:55:58.479Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:00.927Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:02.116Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:02.116Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:02.116Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:02.116Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:02.119Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:02.134Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:02.134Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:02.134Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:02.134Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:02.137Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:02.158Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:02.158Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:02.158Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:05.224Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:05.919Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:05.919Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:05.919Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:05.919Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:05.921Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:05.938Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:05.938Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:05.938Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:05.938Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:05.941Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:05.967Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:05.967Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:05.967Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:08.883Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:09.914Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:09.915Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:09.915Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:09.915Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:09.918Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:09.933Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:09.933Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:09.933Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:09.933Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:09.939Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:09.965Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:09.965Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:09.965Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:12.358Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:13.128Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:13.129Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:13.129Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:13.129Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:13.134Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:13.155Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:13.155Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:13.155Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:13.155Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:13.159Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:13.195Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:13.195Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:13.195Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:17.533Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:18.341Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:18.342Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:18.342Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:18.342Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:18.345Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:18.361Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:18.361Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:18.361Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:18.361Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:18.365Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:18.391Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:18.391Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:18.392Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:20.547Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:21.743Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:21.743Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:21.743Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:21.743Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:21.746Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:21.759Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:21.759Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:21.759Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:21.759Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:21.762Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:21.785Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:21.785Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:21.785Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:24.505Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:25.223Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:25.227Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:25.227Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:25.228Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:25.235Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:25.253Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:25.253Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:25.253Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:25.253Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:25.256Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:25.281Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:25.281Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:25.281Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:28.144Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:29.598Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:29.598Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:29.598Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:29.598Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:29.603Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:29.625Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:29.625Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:29.626Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:29.626Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:29.629Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:29.654Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:29.654Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:29.655Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:32.536Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:33.430Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:33.430Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:33.430Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:33.430Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:33.432Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:33.446Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:33.446Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:33.446Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:33.446Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:33.449Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:33.473Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:33.473Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:33.474Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:36.625Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:37.550Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:37.550Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:37.550Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:37.550Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:37.558Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:37.594Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:37.594Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:37.594Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:37.594Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:37.602Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:37.632Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:37.633Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:37.634Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:40.859Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:41.542Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:41.543Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:41.543Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:41.543Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:41.545Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:41.559Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:41.559Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:41.559Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:41.559Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:41.562Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:41.586Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:41.586Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:41.586Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:44.572Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:45.659Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:45.659Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:45.659Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:45.659Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:45.663Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:45.685Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:45.685Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:45.685Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:45.685Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:45.689Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:45.715Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:45.715Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:45.716Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:46.152Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.152Z [agentic-qe-fleet] [32minfo[39m: [SleepScheduler] Idle detected, triggering cycle {"idleDuration":70000,"cpu":"0.0%","memory":"48.2%"}
+2026-01-11T12:56:46.154Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.154Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Learning modules initialized
+2026-01-11T12:56:46.154Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.154Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting cycle {"id":"cycle-1768136206152"}
+2026-01-11T12:56:46.154Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.154Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N1_CAPTURE","maxDuration":300000}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.154Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Capturing experiences using ExperienceCapture
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Retrieved experiences {"count":0}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Captured experiences {"experienceCount":0,"agentTypes":0,"agents":[]}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] Idle detected - minimum duration reached {"idleDuration":69999,"cpu":"0.0","memory":"48.2"}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N2_PROCESS","maxDuration":600000}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N2] Processing patterns using PatternSynthesis
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [PatternSynthesis] Starting synthesis {"options":{"minSupport":2,"minConfidence":0.6,"maxPatterns":50,"agentTypes":[]}}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [PatternSynthesis] Insufficient experiences for synthesis {"found":0,"required":2}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N2] Pattern synthesis complete {"patternsFound":0,"clustersAnalyzed":0,"experiencesProcessed":0,"duration":0,"stats":{"successStrategies":0,"failureAvoidances":0,"efficiencyOptimizations":0,"averageConfidence":0}}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N3_CONSOLIDATE","maxDuration":900000}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N3] Consolidating memory and initiating cross-agent transfer
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N3] No high-confidence patterns to transfer
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"REM_DREAM","maxDuration":1200000}
+2026-01-11T12:56:46.155Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.155Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:REM] Activating DreamEngine for pattern discovery
+2026-01-11T12:56:46.156Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.156Z [agentic-qe-fleet] [32minfo[39m: [ConceptGraph] Initialized {"nodes":0,"edges":0}
+2026-01-11T12:56:46.156Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.156Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Loading experiences as concepts {"count":0}
+2026-01-11T12:56:46.156Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.156Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Loaded experiences as concepts {"experiences":0,"totalConcepts":0}
+2026-01-11T12:56:46.156Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.156Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Initialized {"concepts":0,"cycleDuration":1200000}
+2026-01-11T12:56:46.156Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.156Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Starting dream cycle {"cycleId":"dream-1768136206156-rrlaie","duration":1200000,"concepts":0}
+2026-01-11T12:56:46.189Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:46.189Z [agentic-qe-fleet] [32minfo[39m: [SpreadingActivation] Starting dream cycle {"durationMs":1200000}
+2026-01-11T12:56:49.003Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:49.485Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:49.485Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:49.485Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:49.485Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:49.489Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:49.510Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:49.510Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:49.510Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:49.510Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:49.515Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:49.544Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:49.544Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:49.544Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:52.780Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:53.334Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:53.335Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:53.335Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:53.335Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:53.338Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:53.356Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:53.356Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:53.356Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:53.356Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:53.359Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:53.380Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:53.380Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:53.380Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:56:56.226Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:56:56.265Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.265Z [agentic-qe-fleet] [32minfo[39m: [SpreadingActivation] Dream cycle complete {"duration":1200029,"totalAssociations":0,"novelAssociations":0,"randomActivations":0,"averageNovelty":"0.000"}
+2026-01-11T12:56:56.266Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.265Z [agentic-qe-fleet] [32minfo[39m: [InsightGenerator] Generating insights {"associations":0}
+2026-01-11T12:56:56.266Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.266Z [agentic-qe-fleet] [32minfo[39m: [InsightGenerator] Generation complete {"generated":0,"actionable":0,"duration":1}
+2026-01-11T12:56:56.278Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.278Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Dream cycle completed {"cycleId":"dream-1768135016223-cehrac","duration":1200043,"associations":0,"insights":0}
+2026-01-11T12:56:56.278Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.278Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:REM] Dream cycle complete {"insightsGenerated":0,"associationsFound":0,"duration":1200043,"status":"completed","actionableInsights":0}
+2026-01-11T12:56:56.278Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.278Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Cycle complete {"id":"cycle-1768135016138","duration":1200136,"phases":4,"patterns":0,"agents":0}
+2026-01-11T12:56:56.278Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-11T12:56:56.278Z [agentic-qe-fleet] [32minfo[39m: [SleepScheduler] Cycle completed {"duration":1200136,"patternsDiscovered":0,"patternsConsolidated":0,"agentsProcessed":0,"errors":0}
+2026-01-11T12:56:57.108Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:56:57.108Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:56:57.108Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:56:57.108Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:56:57.110Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:56:57.124Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:56:57.124Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:56:57.124Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:56:57.124Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:56:57.128Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:56:57.149Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:56:57.149Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:56:57.149Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:00.563Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:01.357Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:57:01.358Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:57:01.358Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:01.358Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:57:01.361Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:57:01.375Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:01.375Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:01.375Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:01.375Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:01.380Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:01.403Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:01.403Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:01.404Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:04.199Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:04.847Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:57:04.848Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:57:04.848Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:04.848Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:57:04.851Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:57:04.875Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:04.875Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:04.875Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:04.875Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:04.881Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:04.921Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:04.921Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:04.922Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:07.471Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:08.082Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:57:08.083Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:57:08.083Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:08.083Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:57:08.086Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:57:08.101Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:08.101Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:08.101Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:08.101Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:08.106Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:08.132Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:08.132Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:08.132Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:12.448Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:12.982Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:57:12.982Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:57:12.982Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:12.982Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:57:12.986Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:57:13.000Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:13.000Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:13.000Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:13.000Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:13.003Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:13.023Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:13.023Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:13.024Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-11T12:57:15.645Z [DEBUG] Stream started - received first chunk
+2026-01-11T12:57:16.646Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-11T12:57:16.646Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-11T12:57:16.646Z [DEBUG] Found 2 hook matchers in settings
+2026-01-11T12:57:16.647Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-11T12:57:16.652Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "npx vitest run:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-11T12:57:16.703Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-11T12:57:16.703Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-11T12:57:16.703Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-11T12:57:16.703Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-11T12:57:16.721Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-11T12:57:16.804Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-11T12:57:16.804Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-11T12:57:16.804Z [DEBUG] [API:auth] OAuth token check complete
