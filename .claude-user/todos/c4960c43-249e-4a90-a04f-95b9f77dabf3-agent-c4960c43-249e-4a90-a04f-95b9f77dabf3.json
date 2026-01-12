@@ -6,22 +6,27 @@
   },
   {
     "content": "Analyze crypto and merkle test coverage",
-    "status": "in_progress",
+    "status": "completed",
     "activeForm": "Analyzing crypto/merkle test coverage"
   },
   {
     "content": "Assess blockchain shell scripts security",
-    "status": "pending",
+    "status": "completed",
     "activeForm": "Assessing blockchain scripts security"
   },
   {
     "content": "Analyze geth-fork Go code quality",
-    "status": "pending",
+    "status": "completed",
     "activeForm": "Analyzing geth-fork Go code"
   },
   {
+    "content": "Analyze smart contracts security",
+    "status": "completed",
+    "activeForm": "Analyzing smart contracts"
+  },
+  {
     "content": "Generate quality report for Ethereum fork",
-    "status": "pending",
+    "status": "in_progress",
     "activeForm": "Generating Ethereum fork quality report"
   },
   {

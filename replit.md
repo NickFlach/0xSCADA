@@ -164,12 +164,33 @@ Defined in `shared/schema.ts`:
 - **Lucide React**: Icon library
 - **date-fns**: Date formatting utilities
 
+### Linux Kernel (`linux-fork/`)
+- **Source**: Fork of mainline Linux kernel (6.19.0-rc5)
+- **Purpose**: Custom kernel development for industrial SCADA hardware
+- **Helper Scripts** (`kernel/`):
+  - `configure.sh`: Kernel configuration (defconfig, menuconfig, tinyconfig)
+  - `build.sh`: Build kernel and modules
+  - `info.sh`: Display kernel information
+- **Key Subsystems**:
+  - `drivers/iio/`: Industrial I/O for sensors and actuators
+  - `drivers/gpio/`: General purpose I/O
+  - `drivers/spi/` & `drivers/i2c/`: Industrial bus protocols
+
 ### Development Tools
 - **Vite**: Frontend dev server with HMR
 - **tsx**: TypeScript execution for Node.js
 - **esbuild**: Production server bundling
 
 ## Recent Changes
+
+### January 12, 2026
+- **Linux Kernel Fork**: Forked mainline Linux kernel for custom industrial OS development
+  - Kernel version 6.19.0-rc5 from Linus Torvalds' repository
+  - Full source code in `linux-fork/` directory (1.7GB, 92,000+ files)
+  - Helper scripts in `kernel/` for configure, build, and info
+  - Support for Industrial I/O (IIO) subsystem for sensors/actuators
+  - Cross-compilation support for ARM64, RISC-V, and other architectures
+  - Foundation for real-time (PREEMPT_RT) industrial control kernels
 
 ### January 11, 2026
 - **Custom Blockchain Fork**: Forked go-ethereum for 0xSCADA private blockchain
