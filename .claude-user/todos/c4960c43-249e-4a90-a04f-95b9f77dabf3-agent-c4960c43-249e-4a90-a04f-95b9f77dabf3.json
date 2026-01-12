@@ -1,0 +1,32 @@
+[
+  {
+    "content": "Run existing Ethereum fork tests and verify quality",
+    "status": "completed",
+    "activeForm": "Running Ethereum fork tests"
+  },
+  {
+    "content": "Analyze crypto and merkle test coverage",
+    "status": "in_progress",
+    "activeForm": "Analyzing crypto/merkle test coverage"
+  },
+  {
+    "content": "Assess blockchain shell scripts security",
+    "status": "pending",
+    "activeForm": "Assessing blockchain scripts security"
+  },
+  {
+    "content": "Analyze geth-fork Go code quality",
+    "status": "pending",
+    "activeForm": "Analyzing geth-fork Go code"
+  },
+  {
+    "content": "Generate quality report for Ethereum fork",
+    "status": "pending",
+    "activeForm": "Generating Ethereum fork quality report"
+  },
+  {
+    "content": "Prepare QE plan for upcoming Linux fork",
+    "status": "pending",
+    "activeForm": "Preparing Linux fork QE plan"
+  }
+]

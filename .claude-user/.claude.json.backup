@@ -1,5 +1,6 @@
 {
-  "numStartups": 1,
+  "numStartups": 2,
+  "installMethod": "global",
   "tipsHistory": {
     "new-user-warmup": 1,
     "plan-mode-for-complex-tasks": 1,
@@ -17,7 +18,8 @@
     "double-esc-code-restore": 1,
     "continue": 1,
     "shift-tab": 1,
-    "image-paste": 1
+    "image-paste": 1,
+    "ultrathink-keyword": 1
   },
   "promptQueueUseCount": 2,
   "cachedStatsigGates": {
@@ -120,14 +122,14 @@
   "groveConfigCache": {
     "317b4091-55bf-40ea-879f-f53f195c4381": {
       "grove_enabled": true,
-      "timestamp": 1768133973845
+      "timestamp": 1768243037343
     }
   },
   "s1mAccessCache": {
     "3b91c6fd-4fd4-4b41-9ccb-862ffb1f2759": {
       "hasAccess": false,
       "hasAccessNotAsDefault": false,
-      "timestamp": 1768133974016
+      "timestamp": 1768243039206
     }
   },
   "officialMarketplaceAutoInstallAttempted": true,

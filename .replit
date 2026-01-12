@@ -4,7 +4,7 @@ hidden = [".config", ".git", "generated-icon.png", "node_modules", "dist"]
 
 [nix]
 channel = "stable-24_05"
-packages = ["go", "gcc", "gnumake"]
+packages = ["go", "gcc", "gnumake", "flex", "bison", "bc", "perl", "elfutils", "openssl", "ncurses", "pkg-config", "libelf", "zlib"]
 
 [deployment]
 deploymentTarget = "autoscale"
