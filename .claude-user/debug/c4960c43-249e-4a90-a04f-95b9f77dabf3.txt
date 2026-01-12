@@ -2806,3 +2806,4 @@ Available tools: mcp__agentic_qe__fleet_init, mcp__agentic_qe__agent_spawn, mcp_
 2026-01-12T19:04:21.310Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T19:04:21.310Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] Idle detected - minimum duration reached {"idleDuration":60000,"cpu":"0.0","memory":"68.5"}
 2026-01-12T19:04:31.313Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T19:04:31.313Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":70004}
 2026-01-12T19:05:41.311Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T19:05:41.310Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":60002}
+2026-01-12T19:06:51.311Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T19:06:51.311Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] Idle detected - minimum duration reached {"idleDuration":60000,"cpu":"0.0","memory":"66.8"}
