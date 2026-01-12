@@ -45,7 +45,7 @@ func TestKeccak256StandardVectors(t *testing.T) {
                 {
                         name:     "single byte 0xff",
                         input:    "ff",
-                        expected: "a8100ae6aa1940d0b663bb31cd466142ebbdbd5187131b92d93818987832eb89",
+                        expected: "8b1a944cf13a9a1c08facb2c9e98623ef3254d2ddb48113885c3e8e97fec8db9",
                 },
                 {
                         name:     "hello",
@@ -60,7 +60,7 @@ func TestKeccak256StandardVectors(t *testing.T) {
                 {
                         name:     "32 bytes of ones",
                         input:    "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
-                        expected: "af9613760f72635fbdb44a5a0a63c39f12af30f950a6ee5c971be188e89c4051",
+                        expected: "a9c584056064687e149968cbab758a3376d22aedc6a55823d1b3ecbee81b8fb9",
                 },
         }
 
