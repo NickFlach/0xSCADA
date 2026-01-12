@@ -1,0 +1,105 @@
+# 0xSCADA Kernel Configuration Fragment
+# Apply with: scripts/kconfig/merge_config.sh .config 0xscada/config/scada.config
+
+# ============================================================================
+# GENERAL SETUP - Industrial Optimizations
+# ============================================================================
+CONFIG_LOCALVERSION="-0xscada"
+CONFIG_PREEMPT=y
+# CONFIG_PREEMPT_VOLUNTARY is not set
+# CONFIG_PREEMPT_NONE is not set
+
+# High-resolution timers for deterministic timing
+CONFIG_HIGH_RES_TIMERS=y
+CONFIG_NO_HZ_FULL=y
+
+# ============================================================================
+# SECURITY HARDENING
+# ============================================================================
+# Stack protector
+CONFIG_STACKPROTECTOR=y
+CONFIG_STACKPROTECTOR_STRONG=y
+
+# Address space layout randomization
+CONFIG_RANDOMIZE_BASE=y
+CONFIG_RANDOMIZE_MEMORY=y
+
+# Kernel hardening
+CONFIG_HARDENED_USERCOPY=y
+CONFIG_FORTIFY_SOURCE=y
+CONFIG_INIT_ON_ALLOC_DEFAULT_ON=y
+
+# Seccomp for sandboxing
+CONFIG_SECCOMP=y
+CONFIG_SECCOMP_FILTER=y
+
+# Disable unused features for attack surface reduction
+# CONFIG_KEXEC is not set
+# CONFIG_CRASH_DUMP is not set
+
+# ============================================================================
+# NETWORKING - Industrial Protocols
+# ============================================================================
+CONFIG_NET=y
+CONFIG_INET=y
+CONFIG_IPV6=y
+
+# Industrial networking
+CONFIG_CAN=m
+CONFIG_CAN_RAW=m
+CONFIG_CAN_BCM=m
+
+# Packet filtering
+CONFIG_NETFILTER=y
+CONFIG_NF_CONNTRACK=y
+CONFIG_NETFILTER_XTABLES=y
+
+# ============================================================================
+# CRYPTOGRAPHY - Blockchain Support
+# ============================================================================
+CONFIG_CRYPTO=y
+CONFIG_CRYPTO_SHA256=y
+CONFIG_CRYPTO_SHA3=y
+CONFIG_CRYPTO_AES=y
+CONFIG_CRYPTO_ECDH=m
+CONFIG_CRYPTO_ECDSA=m
+
+# Hardware acceleration (if available)
+CONFIG_CRYPTO_AES_NI_INTEL=m
+CONFIG_CRYPTO_SHA256_SSSE3=m
+
+# ============================================================================
+# FILESYSTEM
+# ============================================================================
+CONFIG_EXT4_FS=y
+CONFIG_EXT4_FS_POSIX_ACL=y
+CONFIG_EXT4_FS_SECURITY=y
+
+# Overlay for containers
+CONFIG_OVERLAY_FS=m
+
+# ============================================================================
+# DEBUGGING & TESTING (Enable for development)
+# ============================================================================
+CONFIG_DEBUG_INFO=y
+CONFIG_DEBUG_INFO_DWARF5=y
+CONFIG_KUNIT=y
+CONFIG_KUNIT_ALL_TESTS=y
+
+# Tracing for performance analysis
+CONFIG_FTRACE=y
+CONFIG_FUNCTION_TRACER=y
+CONFIG_DYNAMIC_FTRACE=y
+
+# ============================================================================
+# EMBEDDED/GATEWAY OPTIMIZATIONS
+# ============================================================================
+# Disable unused features
+# CONFIG_SOUND is not set
+# CONFIG_DRM is not set
+# CONFIG_FB is not set
+
+# Minimal module support
+CONFIG_MODULES=y
+CONFIG_MODULE_UNLOAD=y
+# CONFIG_MODULE_FORCE_UNLOAD is not set

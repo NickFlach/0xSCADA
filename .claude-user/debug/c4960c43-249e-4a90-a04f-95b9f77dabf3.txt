@@ -1731,3 +1731,1063 @@ Available tools: mcp__agentic_qe__fleet_init, mcp__agentic_qe__agent_spawn, mcp_
 2026-01-12T18:50:51.577Z [DEBUG] [API:auth] OAuth token check starting
 2026-01-12T18:50:51.577Z [DEBUG] [API:auth] OAuth token check complete
 2026-01-12T18:50:53.232Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:51:00.189Z [DEBUG] Getting matching hook commands for Stop with query: undefined
+2026-01-12T18:51:00.189Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:51:00.189Z [DEBUG] Matched 1 unique hooks for query "no match query" (1 before deduplication)
+2026-01-12T18:51:00.190Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:51:00.229Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:51:00.229Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:51:00.229Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:51:00.270Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:51:02.783Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:51:09.207Z [DEBUG] Getting matching hook commands for SubagentStop with query: undefined
+2026-01-12T18:51:09.207Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:51:09.207Z [DEBUG] Matched 0 unique hooks for query "no match query" (0 before deduplication)
+2026-01-12T18:51:11.288Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:51:11.287Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":60001}
+2026-01-12T18:52:08.260Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:52:08.260Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:52:08.260Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:52:08.260Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:52:08.282Z [DEBUG] Getting matching hook commands for UserPromptSubmit with query: undefined
+2026-01-12T18:52:08.282Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:52:08.282Z [DEBUG] Matched 0 unique hooks for query "no match query" (0 before deduplication)
+2026-01-12T18:52:08.285Z [DEBUG] FileHistory: Making snapshot for message 2ac43c1f-a921-4099-9c02-bb532f66953c
+2026-01-12T18:52:08.285Z [DEBUG] FileHistory: Added snapshot for 2ac43c1f-a921-4099-9c02-bb532f66953c, tracking 0 files
+2026-01-12T18:52:08.305Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:08.314Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:08.314Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:08.314Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:08.339Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:52:08.354Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:08.354Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:08.354Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:08.816Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:10.547Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:16.111Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-12T18:52:16.123Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-12T18:52:16.123Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:16.123Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:52:16.145Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768243936145
+2026-01-12T18:52:16.145Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:52:16.145Z [DEBUG] Temp file written successfully, size: 871 bytes
+2026-01-12T18:52:16.145Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:52:16.145Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768243936145 to /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json
+2026-01-12T18:52:16.146Z [DEBUG] File /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json written atomically
+2026-01-12T18:52:16.157Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-12T18:52:16.157Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:16.157Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:52:16.178Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:52:16.178Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:52:16.178Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:52:16.178Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:52:16.205Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:52:16.220Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:16.220Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:16.220Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:19.050Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:21.299Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:52:21.291Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":60004}
+2026-01-12T18:52:22.666Z [DEBUG] executePreToolHooks called for tool: Glob
+2026-01-12T18:52:22.666Z [DEBUG] executePreToolHooks called for tool: Glob
+2026-01-12T18:52:22.666Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:22.678Z [DEBUG] Getting matching hook commands for PreToolUse with query: Glob
+2026-01-12T18:52:22.678Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:22.678Z [DEBUG] Matched 0 unique hooks for query "Glob" (0 before deduplication)
+2026-01-12T18:52:22.678Z [DEBUG] Getting matching hook commands for PreToolUse with query: Glob
+2026-01-12T18:52:22.678Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:22.678Z [DEBUG] Matched 0 unique hooks for query "Glob" (0 before deduplication)
+2026-01-12T18:52:22.678Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:22.678Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:22.678Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:22.765Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Read",
+        "ruleContent": "//usr/lib/**"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "session"
+  }
+]
+2026-01-12T18:52:22.795Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:52:22.824Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:52:22.824Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:52:22.824Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:23.610Z [DEBUG] Getting matching hook commands for PostToolUse with query: Glob
+2026-01-12T18:52:23.610Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:23.610Z [DEBUG] Matched 0 unique hooks for query "Glob" (0 before deduplication)
+2026-01-12T18:52:24.136Z [DEBUG] Getting matching hook commands for PostToolUse with query: Glob
+2026-01-12T18:52:24.136Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:24.136Z [DEBUG] Matched 0 unique hooks for query "Glob" (0 before deduplication)
+2026-01-12T18:52:26.915Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'session': ["Read(//usr/lib/**)"]
+2026-01-12T18:52:27.076Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:27.078Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:27.078Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:27.079Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:27.112Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:27.112Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:27.112Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:27.127Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:27.144Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:52:27.155Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:27.155Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:27.155Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:27.204Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:27.204Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:27.204Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:27.206Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:27.206Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:27.207Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:27.207Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:27.207Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:27.207Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:27.208Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:27.208Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:27.208Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:27.542Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:27.696Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:27.715Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:27.964Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:52:27.964Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:52:28.482Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:28.640Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "gcc:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-12T18:52:28.699Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:52:28.717Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:52:28.717Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:52:28.717Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:29.954Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243949954
+2026-01-12T18:52:29.954Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:52:29.955Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:52:29.956Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:52:29.956Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243949954 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:52:29.956Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:52:32.158Z [DEBUG] Persisting permission update: addRules to source 'localSettings'
+2026-01-12T18:52:32.158Z [DEBUG] Persisting 1 allow rule(s) to localSettings
+2026-01-12T18:52:32.160Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude/settings.local.json.tmp.254.1768243952160
+2026-01-12T18:52:32.160Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:52:32.161Z [DEBUG] Temp file written successfully, size: 250 bytes
+2026-01-12T18:52:32.161Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:52:32.161Z [DEBUG] Renaming /home/runner/workspace/.claude/settings.local.json.tmp.254.1768243952160 to /home/runner/workspace/.claude/settings.local.json
+2026-01-12T18:52:32.161Z [DEBUG] File /home/runner/workspace/.claude/settings.local.json written atomically
+2026-01-12T18:52:32.173Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'localSettings': ["Bash(gcc:*)"]
+2026-01-12T18:52:32.432Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:52:32.448Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:32.450Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:32.450Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:32.451Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:32.480Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:32.480Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:32.480Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:32.516Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:52:32.516Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:52:32.516Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:52:32.516Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:52:32.541Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:52:32.561Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:32.561Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:32.561Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:32.942Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:33.080Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:52:33.080Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:52:34.901Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243954901
+2026-01-12T18:52:34.901Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:52:34.901Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:52:34.901Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:52:34.901Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243954901 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:52:34.901Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:52:35.297Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:39.616Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:39.616Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:39.616Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:39.633Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:39.633Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:39.634Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:39.634Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:39.634Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:39.634Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:39.634Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:39.634Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:39.634Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:39.713Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:52:39.726Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:52:39.726Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:52:39.726Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:39.840Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:39.843Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:39.843Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:39.844Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:39.870Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:39.870Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:39.870Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:39.871Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:39.872Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:39.872Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:39.873Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:39.937Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:39.937Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:39.937Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:40.383Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:40.619Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:40.792Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:40.792Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:40.792Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:40.945Z [ERROR] MaxFileReadTokenExceededError: MaxFileReadTokenExceededError: File content (25965 tokens) exceeds maximum allowed tokens (25000). Please use offset and limit parameters to read specific portions of the file, or use the GrepTool to search for specific content.
+    at _eB (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1664:13298)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async Object.call (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1673:996)
+    at async file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:3160:1513
+2026-01-12T18:52:44.387Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:44.389Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:44.389Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:44.389Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:44.412Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:44.412Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:44.412Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:44.418Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:52:44.454Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:52:44.454Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:52:44.454Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:52:44.454Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:52:44.483Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:52:44.484Z [DEBUG] Loading skills from: managed=/etc/claude-code/.claude/skills, user=/home/runner/workspace/.claude-user/skills, project=[/home/runner/workspace/.claude/skills]
+2026-01-12T18:52:44.703Z [DEBUG] Loaded 55 unique skills (managed: 0, user: 0, project: 46, legacy commands: 9)
+2026-01-12T18:52:44.703Z [DEBUG] getSkills returning: 55 skill dir commands, 0 plugin skills, 0 bundled skills
+2026-01-12T18:52:44.705Z [DEBUG] Skills and commands included in Skill tool: accessibility-testing, agentic-quality-engineering, api-testing-patterns, brutal-honesty-review, bug-reporting-excellence, chaos-engineering-resilience, cicd-pipeline-qe-orchestrator, code-review-quality, compatibility-testing, compliance-testing, consultancy-practices, context-driven-testing, contract-testing, database-testing, exploratory-testing-advanced, holistic-testing-pact, localization-testing, mobile-testing, mutation-testing, n8n-expression-testing, n8n-integration-testing-patterns, n8n-security-testing, n8n-trigger-testing-strategies, n8n-workflow-testing-fundamentals, Pair Programming, performance-testing, quality-metrics, refactoring-patterns, regression-testing, risk-based-testing, security-testing, sherlock-review, shift-left-testing, shift-right-testing, six-thinking-hats, tdd-london-chicago, technical-writing, test-automation-strategy, test-data-management, test-design-techniques, test-environment-management, test-reporting-analytics, testability-scoring, Verification & Quality Assurance, visual-testing-advanced, xp-practices, aqe-report, aqe-costs, aqe-optimize, aqe-generate, aqe-fleet-status, aqe-execute, aqe-benchmark, aqe-analyze, aqe-chaos
+2026-01-12T18:52:44.713Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:44.713Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:44.713Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:44.935Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:45.192Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:52:45.192Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:52:47.404Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243967404
+2026-01-12T18:52:47.404Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:52:47.404Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:52:47.404Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:52:47.404Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243967404 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:52:47.404Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:52:48.572Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:51.293Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:52:51.292Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":10002}
+2026-01-12T18:52:52.940Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:52.940Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:52.940Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:52:52.954Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:52.954Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:52.954Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:52.954Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:52.954Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:52.954Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:52.954Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:52:52.954Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:52:52.954Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:53.095Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:53.097Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:53.097Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:53.098Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:53.131Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:53.131Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:53.131Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:53.180Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:53.182Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:53.182Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:53.183Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:53.209Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:53.209Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:53.209Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:53.517Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:52:53.518Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:53.518Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:53.519Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:53.552Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:52:53.552Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:52:53.552Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:52:53.593Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:52:53.593Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:52:53.593Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:52:53.593Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:52:53.673Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:52:53.701Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:52:53.701Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:52:53.702Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:52:53.774Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:53.979Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:54.035Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:56.043Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:52:59.982Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-12T18:53:00.006Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-12T18:53:00.006Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:00.006Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:53:00.033Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768243980033
+2026-01-12T18:53:00.033Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:53:00.033Z [DEBUG] Temp file written successfully, size: 858 bytes
+2026-01-12T18:53:00.033Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:53:00.033Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768243980033 to /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json
+2026-01-12T18:53:00.034Z [DEBUG] File /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json written atomically
+2026-01-12T18:53:00.050Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-12T18:53:00.050Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:00.050Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:53:00.074Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:53:00.074Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:53:00.074Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:53:00.074Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:53:00.118Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:53:00.148Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:00.148Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:00.148Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:02.786Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:06.120Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:53:06.136Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:53:06.136Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:06.136Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:06.160Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addDirectories",
+    "directories": [
+      "/home/runner/workspace/linux-fork/0xscada"
+    ],
+    "destination": "session"
+  },
+  {
+    "type": "setMode",
+    "mode": "acceptEdits",
+    "destination": "session"
+  }
+]
+2026-01-12T18:53:06.174Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:53:06.187Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:53:06.187Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:53:06.187Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:11.145Z [DEBUG] Applying permission update: Adding 1 directory with destination 'session': ["/home/runner/workspace/linux-fork/0xscada"]
+2026-01-12T18:53:11.145Z [DEBUG] Applying permission update: Setting mode to 'acceptEdits'
+2026-01-12T18:53:11.272Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:53:11.274Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:11.274Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:11.275Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:11.312Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:53:11.312Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:11.312Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:11.332Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:53:11.391Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:53:11.391Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:11.391Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:11.395Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:53:11.452Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:53:11.452Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:53:11.454Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:11.454Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:11.455Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:11.455Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:11.455Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:11.455Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:11.753Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:11.885Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:12.075Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:53:12.075Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:53:12.283Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:12.408Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "apt-get list:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-12T18:53:12.431Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:53:12.442Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:53:12.442Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:53:12.442Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:13.790Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243993790
+2026-01-12T18:53:13.790Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:53:13.790Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:53:13.790Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:53:13.790Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243993790 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:53:13.791Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:53:16.059Z [DEBUG] Persisting permission update: addRules to source 'localSettings'
+2026-01-12T18:53:16.059Z [DEBUG] Persisting 1 allow rule(s) to localSettings
+2026-01-12T18:53:16.061Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude/settings.local.json.tmp.254.1768243996061
+2026-01-12T18:53:16.061Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:53:16.061Z [DEBUG] Temp file written successfully, size: 280 bytes
+2026-01-12T18:53:16.061Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:53:16.061Z [DEBUG] Renaming /home/runner/workspace/.claude/settings.local.json.tmp.254.1768243996061 to /home/runner/workspace/.claude/settings.local.json
+2026-01-12T18:53:16.061Z [DEBUG] File /home/runner/workspace/.claude/settings.local.json written atomically
+2026-01-12T18:53:16.073Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'localSettings': ["Bash(apt-get list:*)"]
+2026-01-12T18:53:16.266Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:53:16.267Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:16.267Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:16.268Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:16.292Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:53:16.302Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:53:16.302Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:16.302Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:53:16.360Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:53:16.361Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:53:16.361Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:53:16.361Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:53:16.384Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:53:16.404Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:16.404Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:16.404Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:16.685Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:16.948Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:53:16.948Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:53:18.557Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243998557
+2026-01-12T18:53:18.557Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:53:18.557Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:53:18.557Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:53:18.557Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768243998557 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:53:18.557Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:53:19.405Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:28.506Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:53:28.516Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:53:28.516Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:28.516Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:53:28.586Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:53:28.649Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/README.md
+2026-01-12T18:53:28.681Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .md
+2026-01-12T18:53:29.625Z [DEBUG] rg error (signal=undefined, code=ABORT_ERR, stderr: ), 3326 results
+2026-01-12T18:53:29.625Z [ERROR] AbortError: AbortError: The operation was aborted
+    at abortChildProcess (node:child_process:717:27)
+    at AbortSignal.onAbortListener (node:child_process:787:7)
+    at [nodejs.internal.kHybridDispatch] (node:internal/event_target:827:20)
+    at AbortSignal.dispatchEvent (node:internal/event_target:762:26)
+    at runAbort (node:internal/abort_controller:486:10)
+    at abortSignal (node:internal/abort_controller:457:3)
+    at AbortController.abort (node:internal/abort_controller:505:5)
+    at Timeout._onTimeout (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4677:2036)
+    at listOnTimeout (node:internal/timers:588:17)
+    at process.processTimers (node:internal/timers:523:7)
+2026-01-12T18:53:29.629Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/README.md.tmp.254.1768244009629
+2026-01-12T18:53:29.629Z [DEBUG] Temp file written successfully, size: 1750 bytes
+2026-01-12T18:53:29.629Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/README.md.tmp.254.1768244009629 to /home/runner/workspace/linux-fork/0xscada/README.md
+2026-01-12T18:53:29.629Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/README.md written atomically
+2026-01-12T18:53:29.641Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:53:29.641Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:29.641Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:53:29.681Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:53:29.681Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:53:29.681Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:53:29.681Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:53:29.709Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:53:29.725Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:29.725Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:29.725Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:53:32.392Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:53:58.033Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:53:58.045Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:53:58.045Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:58.045Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:53:58.095Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:53:58.122Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/config/scada.config.tmp.254.1768244038122
+2026-01-12T18:53:58.122Z [DEBUG] Temp file written successfully, size: 3056 bytes
+2026-01-12T18:53:58.122Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/config/scada.config.tmp.254.1768244038122 to /home/runner/workspace/linux-fork/0xscada/config/scada.config
+2026-01-12T18:53:58.122Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/config/scada.config written atomically
+2026-01-12T18:53:58.137Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/config/scada.config
+2026-01-12T18:53:58.148Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .config
+2026-01-12T18:53:58.157Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:53:58.157Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:58.157Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:53:58.165Z [DEBUG] Language not supported while highlighting code, falling back to markdown: config
+2026-01-12T18:53:58.209Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:53:58.217Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:53:58.217Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:58.217Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:53:58.267Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:53:58.301Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/scripts/build.sh.tmp.254.1768244038301
+2026-01-12T18:53:58.301Z [DEBUG] Temp file written successfully, size: 1723 bytes
+2026-01-12T18:53:58.301Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/scripts/build.sh.tmp.254.1768244038301 to /home/runner/workspace/linux-fork/0xscada/scripts/build.sh
+2026-01-12T18:53:58.301Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/scripts/build.sh written atomically
+2026-01-12T18:53:58.312Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/scripts/build.sh
+2026-01-12T18:53:58.325Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .sh
+2026-01-12T18:53:58.337Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:53:58.337Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:58.337Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:53:58.402Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:53:58.410Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:53:58.410Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:53:58.410Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:53:58.497Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:53:58.551Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/scripts/run-tests.sh.tmp.254.1768244038551
+2026-01-12T18:53:58.551Z [DEBUG] Temp file written successfully, size: 1722 bytes
+2026-01-12T18:53:58.551Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/scripts/run-tests.sh.tmp.254.1768244038551 to /home/runner/workspace/linux-fork/0xscada/scripts/run-tests.sh
+2026-01-12T18:53:58.551Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/scripts/run-tests.sh written atomically
+2026-01-12T18:53:58.564Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/scripts/run-tests.sh
+2026-01-12T18:53:58.617Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .sh
+2026-01-12T18:53:58.676Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:53:58.676Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:53:58.676Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:53:58.683Z [DEBUG] Language not supported while highlighting code, falling back to markdown: config
+2026-01-12T18:53:58.737Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:53:58.737Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:53:58.737Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:53:58.737Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:53:58.766Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:53:58.810Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:53:58.810Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:53:58.810Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:54:01.008Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:54:21.292Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:54:21.291Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":60003}
+2026-01-12T18:54:31.018Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:54:31.030Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:54:31.030Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:54:31.030Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:54:31.057Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:54:31.058Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:54:31.058Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:54:31.059Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:54:31.482Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:54:31.571Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "chmod:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-12T18:54:31.601Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:54:31.610Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:54:31.610Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:54:31.610Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:54:43.606Z [DEBUG] Getting matching hook commands for Notification with query: permission_prompt
+2026-01-12T18:54:43.606Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:54:43.606Z [DEBUG] Matched 0 unique hooks for query "permission_prompt" (0 before deduplication)
+2026-01-12T18:54:58.933Z [DEBUG] Persisting permission update: addRules to source 'localSettings'
+2026-01-12T18:54:58.933Z [DEBUG] Persisting 1 allow rule(s) to localSettings
+2026-01-12T18:54:58.934Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244098934
+2026-01-12T18:54:58.934Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:54:58.935Z [DEBUG] Temp file written successfully, size: 303 bytes
+2026-01-12T18:54:58.935Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:54:58.935Z [DEBUG] Renaming /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244098934 to /home/runner/workspace/.claude/settings.local.json
+2026-01-12T18:54:58.935Z [DEBUG] File /home/runner/workspace/.claude/settings.local.json written atomically
+2026-01-12T18:54:58.951Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'localSettings': ["Bash(chmod:*)"]
+2026-01-12T18:54:59.139Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:54:59.141Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:54:59.141Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:54:59.142Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:54:59.189Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:54:59.189Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:54:59.189Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:54:59.205Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:54:59.248Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:54:59.278Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:54:59.278Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:54:59.278Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:54:59.331Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:54:59.357Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/tests/unit/.kunitconfig.tmp.254.1768244099357
+2026-01-12T18:54:59.357Z [DEBUG] Temp file written successfully, size: 485 bytes
+2026-01-12T18:54:59.357Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/tests/unit/.kunitconfig.tmp.254.1768244099357 to /home/runner/workspace/linux-fork/0xscada/tests/unit/.kunitconfig
+2026-01-12T18:54:59.357Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/tests/unit/.kunitconfig written atomically
+2026-01-12T18:54:59.404Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/tests/unit/.kunitconfig
+2026-01-12T18:54:59.417Z [DEBUG] [lspRecommendation] No file extension found
+2026-01-12T18:54:59.424Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:54:59.424Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:54:59.424Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:54:59.476Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:54:59.491Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:54:59.491Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:54:59.491Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:54:59.569Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:54:59.601Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:54:59.613Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/tests/unit/scada_kunit_test.c.tmp.254.1768244099613
+2026-01-12T18:54:59.613Z [DEBUG] Temp file written successfully, size: 5203 bytes
+2026-01-12T18:54:59.613Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/tests/unit/scada_kunit_test.c.tmp.254.1768244099613 to /home/runner/workspace/linux-fork/0xscada/tests/unit/scada_kunit_test.c
+2026-01-12T18:54:59.613Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/tests/unit/scada_kunit_test.c written atomically
+2026-01-12T18:54:59.629Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/tests/unit/scada_kunit_test.c
+2026-01-12T18:54:59.644Z [DEBUG] [lspRecommendation] Looking for LSP plugins for .c
+2026-01-12T18:54:59.657Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:54:59.657Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:54:59.657Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:54:59.707Z [DEBUG] [binaryCheck] Binary 'clangd' not found (exit code: 1)
+2026-01-12T18:54:59.707Z [DEBUG] [lspRecommendation] Skipping clangd-lsp@claude-plugins-official (binary 'clangd' not found)
+2026-01-12T18:54:59.739Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:54:59.750Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:54:59.750Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:54:59.750Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:54:59.829Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:54:59.864Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/tests/unit/Kconfig.tmp.254.1768244099864
+2026-01-12T18:54:59.864Z [DEBUG] Temp file written successfully, size: 446 bytes
+2026-01-12T18:54:59.864Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/tests/unit/Kconfig.tmp.254.1768244099864 to /home/runner/workspace/linux-fork/0xscada/tests/unit/Kconfig
+2026-01-12T18:54:59.864Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/tests/unit/Kconfig written atomically
+2026-01-12T18:54:59.871Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/tests/unit/Kconfig
+2026-01-12T18:54:59.884Z [DEBUG] [lspRecommendation] No file extension found
+2026-01-12T18:54:59.892Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:54:59.892Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:54:59.892Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:54:59.975Z [DEBUG] executePreToolHooks called for tool: Write
+2026-01-12T18:54:59.977Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:54:59.978Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:54:59.994Z [DEBUG] Getting matching hook commands for PreToolUse with query: Write
+2026-01-12T18:54:59.994Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:54:59.994Z [DEBUG] Matched 1 unique hooks for query "Write" (1 before deduplication)
+2026-01-12T18:55:00.068Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:55:00.174Z [DEBUG] Writing to temp file: /home/runner/workspace/linux-fork/0xscada/tests/unit/Makefile.tmp.254.1768244100174
+2026-01-12T18:55:00.174Z [DEBUG] Temp file written successfully, size: 89 bytes
+2026-01-12T18:55:00.174Z [DEBUG] Renaming /home/runner/workspace/linux-fork/0xscada/tests/unit/Makefile.tmp.254.1768244100174 to /home/runner/workspace/linux-fork/0xscada/tests/unit/Makefile
+2026-01-12T18:55:00.174Z [DEBUG] File /home/runner/workspace/linux-fork/0xscada/tests/unit/Makefile written atomically
+2026-01-12T18:55:00.205Z [DEBUG] FileHistory: Tracked file modification for /home/runner/workspace/linux-fork/0xscada/tests/unit/Makefile
+2026-01-12T18:55:00.221Z [DEBUG] [lspRecommendation] No file extension found
+2026-01-12T18:55:00.230Z [DEBUG] Getting matching hook commands for PostToolUse with query: Write
+2026-01-12T18:55:00.230Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:55:00.230Z [DEBUG] Matched 0 unique hooks for query "Write" (0 before deduplication)
+2026-01-12T18:55:00.296Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:55:00.296Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:55:00.296Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:55:00.296Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:55:00.344Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:55:00.364Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:00.364Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:00.364Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:01.301Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:55:01.295Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":30004}
+2026-01-12T18:55:01.733Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244101733
+2026-01-12T18:55:01.733Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:55:01.733Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:55:01.733Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:55:01.733Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244101733 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:55:01.734Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:55:03.262Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:05.936Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-12T18:55:05.965Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-12T18:55:05.965Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:55:05.965Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:55:05.990Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244105990
+2026-01-12T18:55:05.990Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:55:05.990Z [DEBUG] Temp file written successfully, size: 866 bytes
+2026-01-12T18:55:05.990Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:55:05.990Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244105990 to /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json
+2026-01-12T18:55:05.990Z [DEBUG] File /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json written atomically
+2026-01-12T18:55:06.003Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-12T18:55:06.003Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:55:06.003Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:55:06.030Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:55:06.030Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:55:06.030Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:55:06.030Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:55:06.057Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:55:06.072Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:06.072Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:06.072Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:08.955Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:11.256Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:55:11.272Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:55:11.272Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:55:11.272Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:55:11.311Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:55:11.311Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:55:11.313Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:11.313Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:11.313Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:11.313Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:11.314Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:11.314Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:11.753Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:11.823Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:11.926Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "python3:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-12T18:55:11.953Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:55:11.966Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:55:11.966Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:55:11.966Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:55:14.484Z [DEBUG] Persisting permission update: addRules to source 'localSettings'
+2026-01-12T18:55:14.484Z [DEBUG] Persisting 1 allow rule(s) to localSettings
+2026-01-12T18:55:14.485Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244114485
+2026-01-12T18:55:14.485Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:55:14.485Z [DEBUG] Temp file written successfully, size: 328 bytes
+2026-01-12T18:55:14.485Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:55:14.485Z [DEBUG] Renaming /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244114485 to /home/runner/workspace/.claude/settings.local.json
+2026-01-12T18:55:14.485Z [DEBUG] File /home/runner/workspace/.claude/settings.local.json written atomically
+2026-01-12T18:55:14.497Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'localSettings': ["Bash(python3:*)"]
+2026-01-12T18:55:14.618Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:55:14.620Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:14.620Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:14.621Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:14.639Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:55:14.639Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:55:14.639Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:55:14.664Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:55:14.664Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:55:14.664Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:55:14.664Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:55:14.695Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:55:14.701Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:55:14.745Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:55:14.745Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:55:14.745Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:55:14.982Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:15.324Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:55:15.324Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:55:16.964Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244116964
+2026-01-12T18:55:16.964Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:55:16.964Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:55:16.964Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:55:16.964Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244116964 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:55:16.964Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:55:17.218Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:55:19.698Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:55:19.713Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:55:19.713Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:55:19.713Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:56:11.295Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:56:11.295Z [agentic-qe-fleet] [32minfo[39m: [SleepScheduler] Idle detected, triggering cycle {"idleDuration":60003,"cpu":"0.0%","memory":"67.0%"}
+2026-01-12T18:56:11.304Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:56:11.299Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Learning modules initialized
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting cycle {"id":"cycle-1768244171295"}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N1_CAPTURE","maxDuration":300000}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Capturing experiences using ExperienceCapture
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Retrieved experiences {"count":0}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N1] Captured experiences {"experienceCount":0,"agentTypes":0,"agents":[]}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] Idle detected - minimum duration reached {"idleDuration":60002,"cpu":"0.0","memory":"67.0"}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N2_PROCESS","maxDuration":600000}
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N2] Processing patterns using PatternSynthesis
+2026-01-12T18:56:11.300Z [agentic-qe-fleet] [32minfo[39m: [PatternSynthesis] Starting synthesis {"options":{"minSupport":2,"minConfidence":0.6,"maxPatterns":50,"agentTypes":[]}}
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [PatternSynthesis] Insufficient experiences for synthesis {"found":0,"required":2}
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N2] Pattern synthesis complete {"patternsFound":0,"clustersAnalyzed":0,"experiencesProcessed":0,"duration":1,"stats":{"successStrategies":0,"failureAvoidances":0,"efficiencyOptimizations":0,"averageConfidence":0}}
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"N3_CONSOLIDATE","maxDuration":900000}
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N3] Consolidating memory and initiating cross-agent transfer
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:N3] No high-confidence patterns to transfer
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle] Starting phase {"phase":"REM_DREAM","maxDuration":1200000}
+2026-01-12T18:56:11.301Z [agentic-qe-fleet] [32minfo[39m: [SleepCycle:REM] Activating DreamEngine for pattern discovery
+2026-01-12T18:56:11.303Z [agentic-qe-fleet] [32minfo[39m: [ConceptGraph] Initialized {"nodes":0,"edges":0}
+2026-01-12T18:56:11.303Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Loading experiences as concepts {"count":0}
+2026-01-12T18:56:11.303Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Loaded experiences as concepts {"experiences":0,"totalConcepts":0}
+2026-01-12T18:56:11.303Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Initialized {"concepts":0,"cycleDuration":1200000}
+2026-01-12T18:56:11.303Z [agentic-qe-fleet] [32minfo[39m: [DreamEngine] Starting dream cycle {"cycleId":"dream-1768244171303-nnhnam","duration":1200000,"concepts":0}
+2026-01-12T18:56:11.318Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:56:11.316Z [agentic-qe-fleet] [32minfo[39m: [SpreadingActivation] Starting dream cycle {"durationMs":1200000}
+2026-01-12T18:57:19.882Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:57:19.885Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:19.885Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:19.885Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:19.916Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:57:19.916Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:19.916Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:57:19.933Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:57:19.960Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:57:19.960Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:57:19.960Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:57:20.073Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:57:20.075Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:20.075Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:20.076Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:20.095Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:57:20.095Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:20.095Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:57:20.128Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:57:20.129Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:57:20.129Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:57:20.129Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:57:20.158Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:57:20.184Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:20.184Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:20.184Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:20.281Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:20.722Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:23.141Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:30.429Z [DEBUG] executePreToolHooks called for tool: mcp__agentic-qe__mcp__agentic_qe__memory_store
+2026-01-12T18:57:30.474Z [DEBUG] Getting matching hook commands for PreToolUse with query: mcp__agentic-qe__mcp__agentic_qe__memory_store
+2026-01-12T18:57:30.474Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:57:30.475Z [DEBUG] Matched 0 unique hooks for query "mcp__agentic-qe__mcp__agentic_qe__memory_store" (0 before deduplication)
+2026-01-12T18:57:30.501Z [DEBUG] MCP server "agentic-qe": Calling MCP tool: mcp__agentic_qe__memory_store
+2026-01-12T18:57:30.530Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:57:30.522Z [agentic-qe-fleet] [32minfo[39m: Using AQE hooks fallback for post_edit (Claude Flow not detected)
+2026-01-12T18:57:30.523Z [agentic-qe-fleet] [32minfo[39m: Fallback hook executed: post_edit (0ms, success)
+2026-01-12T18:57:30.538Z [DEBUG] MCP server "agentic-qe": STDIO connection dropped after 1199s uptime
+2026-01-12T18:57:30.538Z [DEBUG] MCP server "agentic-qe": Connection error: Expected ',' or ']' after array element in JSON at position 5 (line 1 column 6)
+2026-01-12T18:57:30.539Z [DEBUG] MCP server "agentic-qe": Tool 'mcp__agentic_qe__memory_store' completed successfully in 38ms
+2026-01-12T18:57:30.551Z [DEBUG] Getting matching hook commands for PostToolUse with query: mcp__agentic-qe__mcp__agentic_qe__memory_store
+2026-01-12T18:57:30.551Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:30.551Z [DEBUG] Matched 0 unique hooks for query "mcp__agentic-qe__mcp__agentic_qe__memory_store" (0 before deduplication)
+2026-01-12T18:57:30.595Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:57:30.635Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:57:30.635Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:57:30.635Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:57:30.807Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:57:30.809Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:30.809Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:30.810Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:30.845Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:57:30.845Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:30.845Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:57:30.881Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:57:30.881Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:57:30.881Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:57:30.881Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:57:30.920Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:57:30.957Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:30.957Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:30.957Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:31.283Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:33.218Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:35.383Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-12T18:57:35.427Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-12T18:57:35.427Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:57:35.427Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:57:35.455Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244255455
+2026-01-12T18:57:35.455Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:57:35.455Z [DEBUG] Temp file written successfully, size: 2 bytes
+2026-01-12T18:57:35.455Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:57:35.455Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244255455 to /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json
+2026-01-12T18:57:35.456Z [DEBUG] File /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json written atomically
+2026-01-12T18:57:35.473Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-12T18:57:35.473Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:35.473Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:57:35.494Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:57:35.494Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:57:35.494Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:57:35.494Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:57:35.522Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:57:35.542Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:35.542Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:35.542Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:37.889Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:47.208Z [DEBUG] Getting matching hook commands for Stop with query: undefined
+2026-01-12T18:57:47.208Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:57:47.208Z [DEBUG] Matched 1 unique hooks for query "no match query" (1 before deduplication)
+2026-01-12T18:57:47.209Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:57:47.250Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:57:47.250Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:57:47.250Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:57:47.263Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:57:50.116Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:57:56.212Z [DEBUG] Getting matching hook commands for SubagentStop with query: undefined
+2026-01-12T18:57:56.212Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:57:56.212Z [DEBUG] Matched 0 unique hooks for query "no match query" (0 before deduplication)
+2026-01-12T18:58:10.836Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:58:10.836Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:58:10.836Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:58:10.836Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:58:10.872Z [DEBUG] Getting matching hook commands for UserPromptSubmit with query: undefined
+2026-01-12T18:58:10.872Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:58:10.872Z [DEBUG] Matched 0 unique hooks for query "no match query" (0 before deduplication)
+2026-01-12T18:58:10.877Z [DEBUG] FileHistory: Making snapshot for message 40a20c65-70ee-4bf8-9b35-5f99b539802f
+2026-01-12T18:58:10.896Z [DEBUG] FileHistory: Added snapshot for 40a20c65-70ee-4bf8-9b35-5f99b539802f, tracking 8 files
+2026-01-12T18:58:10.932Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:58:10.950Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:10.950Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:10.950Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:10.978Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:58:11.002Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:11.002Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:11.002Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:11.773Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:58:14.941Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:58:17.044Z [DEBUG] executePreToolHooks called for tool: TodoWrite
+2026-01-12T18:58:17.055Z [DEBUG] Getting matching hook commands for PreToolUse with query: TodoWrite
+2026-01-12T18:58:17.055Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:58:17.055Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:58:17.081Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244297081
+2026-01-12T18:58:17.081Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:58:17.081Z [DEBUG] Temp file written successfully, size: 499 bytes
+2026-01-12T18:58:17.081Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:17.081Z [DEBUG] Renaming /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json.tmp.254.1768244297081 to /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json
+2026-01-12T18:58:17.081Z [DEBUG] File /home/runner/workspace/.claude-user/todos/c4960c43-249e-4a90-a04f-95b9f77dabf3-agent-c4960c43-249e-4a90-a04f-95b9f77dabf3.json written atomically
+2026-01-12T18:58:17.092Z [DEBUG] Getting matching hook commands for PostToolUse with query: TodoWrite
+2026-01-12T18:58:17.092Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:58:17.092Z [DEBUG] Matched 0 unique hooks for query "TodoWrite" (0 before deduplication)
+2026-01-12T18:58:17.115Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:58:17.115Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:58:17.115Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:58:17.115Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:58:17.143Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:58:17.166Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:17.166Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:17.166Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:19.947Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:58:22.736Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:58:22.761Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:58:22.761Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:58:22.761Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:22.818Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:58:22.818Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:58:22.819Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:58:22.820Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:22.820Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:22.821Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:22.821Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:22.822Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:22.822Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:22.822Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:22.822Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:22.823Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:23.050Z [ERROR] Error streaming, falling back to non-streaming mode: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm7nGdmiPE7f9yEX7H"}
+2026-01-12T18:58:23.050Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:23.050Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:23.050Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:23.098Z [ERROR] Error streaming, falling back to non-streaming mode: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm7wwWtGKXwrMyc1Tw"}
+2026-01-12T18:58:23.099Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:23.099Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:23.099Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:23.245Z [ERROR] Error in non-streaming fallback: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm8qGg4bzSEXrB3jGp"}
+2026-01-12T18:58:23.246Z [ERROR] Error: Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm8qGg4bzSEXrB3jGp"}
+    at C9.generate (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:492:33793)
+    at qP.makeStatusError (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:2195)
+    at qP.makeRequest (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:5420)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async g81.model (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6290)
+    at async g81 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1064:97633)
+    at async gH9 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6444)
+    at async file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3557
+    at async AG0 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1065:1998)
+    at async Kd (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3528)
+2026-01-12T18:58:23.286Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:58:23.320Z [ERROR] Error in non-streaming fallback: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm8moHxfPpiL7Z4c3R"}
+2026-01-12T18:58:23.321Z [ERROR] Error: Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zm8moHxfPpiL7Z4c3R"}
+    at C9.generate (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:492:33793)
+    at qP.makeStatusError (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:2195)
+    at qP.makeRequest (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:5420)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async g81.model (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6290)
+    at async g81 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1064:97633)
+    at async gH9 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6444)
+    at async file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3557
+    at async AG0 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1065:1998)
+    at async Kd (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3528)
+2026-01-12T18:58:23.394Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Bash",
+        "ruleContent": "make:*"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "localSettings"
+  }
+]
+2026-01-12T18:58:23.410Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:58:23.421Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:58:23.421Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:58:23.421Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:26.089Z [DEBUG] Persisting permission update: addRules to source 'localSettings'
+2026-01-12T18:58:26.089Z [DEBUG] Persisting 1 allow rule(s) to localSettings
+2026-01-12T18:58:26.091Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244306091
+2026-01-12T18:58:26.091Z [DEBUG] Preserving file permissions: 100644
+2026-01-12T18:58:26.091Z [DEBUG] Temp file written successfully, size: 350 bytes
+2026-01-12T18:58:26.091Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:26.091Z [DEBUG] Renaming /home/runner/workspace/.claude/settings.local.json.tmp.254.1768244306091 to /home/runner/workspace/.claude/settings.local.json
+2026-01-12T18:58:26.092Z [DEBUG] File /home/runner/workspace/.claude/settings.local.json written atomically
+2026-01-12T18:58:26.113Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'localSettings': ["Bash(make:*)"]
+2026-01-12T18:58:26.298Z [DEBUG] Getting matching hook commands for PostToolUseFailure with query: Bash
+2026-01-12T18:58:26.298Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:58:26.298Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:26.319Z [DEBUG] executePreToolHooks called for tool: Bash
+2026-01-12T18:58:26.348Z [DEBUG] Getting matching hook commands for PreToolUse with query: Bash
+2026-01-12T18:58:26.348Z [DEBUG] Found 2 hook matchers in settings
+2026-01-12T18:58:26.348Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:26.357Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:58:26.402Z [DEBUG] Permission suggestions for Bash: [
+  {
+    "type": "addRules",
+    "rules": [
+      {
+        "toolName": "Read",
+        "ruleContent": "//usr/include/**"
+      }
+    ],
+    "behavior": "allow",
+    "destination": "session"
+  }
+]
+2026-01-12T18:58:26.438Z [DEBUG] executePermissionRequestHooks called for tool: Bash
+2026-01-12T18:58:26.452Z [DEBUG] Getting matching hook commands for PermissionRequest with query: Bash
+2026-01-12T18:58:26.452Z [DEBUG] Found 0 hook matchers in settings
+2026-01-12T18:58:26.452Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:27.051Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:58:27.051Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:58:28.560Z [DEBUG] Applying permission update: Adding 1 allow rule(s) to destination 'session': ["Read(//usr/include/**)"]
+2026-01-12T18:58:28.763Z [DEBUG] Tool search disabled for model 'claude-haiku-4-5-20251001': model does not support tool_reference blocks. This feature is only available on Claude Sonnet 4+, Opus 4+, and newer models.
+2026-01-12T18:58:28.765Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:28.765Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:28.766Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:28.800Z [DEBUG] Getting matching hook commands for PostToolUse with query: Bash
+2026-01-12T18:58:28.800Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:58:28.800Z [DEBUG] Matched 0 unique hooks for query "Bash" (0 before deduplication)
+2026-01-12T18:58:28.853Z [DEBUG] LSP Diagnostics: getLSPDiagnosticAttachments called
+2026-01-12T18:58:28.853Z [DEBUG] LSP Diagnostics: Checking registry - 0 pending
+2026-01-12T18:58:28.853Z [DEBUG] Hooks: Found 0 total hooks in registry
+2026-01-12T18:58:28.853Z [DEBUG] Hooks: checkForNewResponses returning 0 responses
+2026-01-12T18:58:28.860Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:58:28.934Z [DEBUG] Tool search disabled: MCPSearchTool is not available (may have been disallowed via disallowedTools).
+2026-01-12T18:58:28.961Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:28.961Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:28.962Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:29.399Z [ERROR] Error streaming, falling back to non-streaming mode: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zmaqTKj5DAtjfbt8Wy"}
+2026-01-12T18:58:29.400Z [DEBUG] [API:request] Creating client, ANTHROPIC_CUSTOM_HEADERS present: false, has Authorization header: false
+2026-01-12T18:58:29.400Z [DEBUG] [API:auth] OAuth token check starting
+2026-01-12T18:58:29.400Z [DEBUG] [API:auth] OAuth token check complete
+2026-01-12T18:58:29.558Z [DEBUG] Stream started - received first chunk
+2026-01-12T18:58:29.571Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244309571
+2026-01-12T18:58:29.571Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:58:29.571Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:58:29.571Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:29.571Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244309571 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:58:29.571Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:58:29.777Z [ERROR] Error in non-streaming fallback: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zmcPxoVgNVVGmGZCWE"}
+2026-01-12T18:58:29.777Z [ERROR] Error: Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"This request would exceed your account's rate limit. Please try again later."},"request_id":"req_011CX3zmcPxoVgNVVGmGZCWE"}
+    at C9.generate (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:492:33793)
+    at qP.makeStatusError (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:2195)
+    at qP.makeRequest (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:914:5420)
+    at process.processTicksAndRejections (node:internal/process/task_queues:105:5)
+    at async g81.model (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6290)
+    at async g81 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1064:97633)
+    at async gH9 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4346:6444)
+    at async file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3799
+    at async AG0 (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:1065:1998)
+    at async ZHA (file:///home/runner/workspace/node_modules/@anthropic-ai/claude-code/cli.js:4344:3769)
+2026-01-12T18:58:29.855Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244309855
+2026-01-12T18:58:29.855Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:58:29.855Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:58:29.855Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:29.855Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244309855 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:58:29.855Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:58:29.879Z [DEBUG] Getting matching hook commands for Stop with query: undefined
+2026-01-12T18:58:29.879Z [DEBUG] Found 1 hook matchers in settings
+2026-01-12T18:58:29.879Z [DEBUG] Matched 1 unique hooks for query "no match query" (1 before deduplication)
+2026-01-12T18:58:29.899Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:58:29.899Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:58:29.930Z [DEBUG] Hook output does not start with {, treating as plain text
+2026-01-12T18:58:31.786Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244311786
+2026-01-12T18:58:31.786Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:58:31.786Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:58:31.786Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:31.786Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244311786 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:58:31.787Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:58:36.800Z [DEBUG] AutoUpdaterWrapper: Installation type: unknown
+2026-01-12T18:58:37.460Z [DEBUG] AutoUpdater: Detected installation type: unknown
+2026-01-12T18:58:37.460Z [DEBUG] AutoUpdater: Unknown installation type, falling back to config
+2026-01-12T18:58:39.253Z [DEBUG] Writing to temp file: /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244319253
+2026-01-12T18:58:39.253Z [DEBUG] Preserving file permissions: 100600
+2026-01-12T18:58:39.253Z [DEBUG] Temp file written successfully, size: 4001 bytes
+2026-01-12T18:58:39.253Z [DEBUG] Applied original permissions to temp file
+2026-01-12T18:58:39.253Z [DEBUG] Renaming /home/runner/workspace/.claude-user/.claude.json.tmp.254.1768244319253 to /home/runner/workspace/.claude-user/.claude.json
+2026-01-12T18:58:39.254Z [DEBUG] File /home/runner/workspace/.claude-user/.claude.json written atomically
+2026-01-12T18:58:41.295Z [ERROR] MCP server "agentic-qe" Server stderr: 2026-01-12T18:58:41.294Z [agentic-qe-fleet] [32minfo[39m: [IdleDetector] System exited idle state {"idleDuration":210001}

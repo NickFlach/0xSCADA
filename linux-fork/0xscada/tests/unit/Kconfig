@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config SCADA_KUNIT_TEST
+	tristate "0xSCADA KUnit tests" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	depends on CRYPTO
+	depends on CRYPTO_SHA256
+	default KUNIT_ALL_TESTS
+	help
+	  KUnit tests for kernel functionality critical to 0xSCADA
+	  industrial applications, including:
+	  - Cryptographic hash verification (SHA256)
+	  - Timer precision and monotonicity
+	  - Memory allocation reliability
+
+	  If unsure, say N.

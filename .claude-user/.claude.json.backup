@@ -20,9 +20,10 @@
     "shift-tab": 1,
     "image-paste": 1,
     "ultrathink-keyword": 1,
-    "web-app": 2
+    "web-app": 2,
+    "mobile-app": 2
   },
-  "promptQueueUseCount": 6,
+  "promptQueueUseCount": 7,
   "cachedStatsigGates": {
     "tengu_prompt_suggestion": true
   },

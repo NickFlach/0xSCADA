@@ -1,0 +1,23 @@
+# 0xSCADA KUnit Test Configuration
+# Tests critical kernel subsystems for industrial applications
+
+CONFIG_KUNIT=y
+CONFIG_KUNIT_ALL_TESTS=y
+
+# Crypto tests (essential for blockchain operations)
+CONFIG_CRYPTO_MANAGER_DISABLE_TESTS=n
+CONFIG_CRYPTO_USER_API_HASH=y
+CONFIG_CRYPTO_USER_API_SKCIPHER=y
+CONFIG_CRYPTO_SHA256=y
+CONFIG_CRYPTO_SHA3=y
+
+# Memory management tests
+CONFIG_KASAN=n
+CONFIG_SLUB_DEBUG=y
+
+# Networking tests
+CONFIG_NET=y
+CONFIG_INET=y
+
+# Filesystem tests
+CONFIG_EXT4_FS=y

@@ -11,6 +11,31 @@ The keeper reads an RLP-encoded payload containing:
 
 It then executes the block statelessly and validates that the computed state root and receipt root match the values in the block header.
 
+## Exit Codes
+
+| Code | Constant | Meaning |
+|------|----------|---------|
+| 0 | ExitSuccess | Block validated successfully |
+| 10 | ExitStatelessFailed | Stateless execution failed |
+| 11 | ExitStateRootMismatch | Computed state root doesn't match block header |
+| 12 | ExitReceiptRootMismatch | Computed receipt root doesn't match block header |
+| 13 | ExitUnknownChainID | Unknown or unsupported chain ID |
+| 14 | ExitInvalidInput | Input validation failed (nil, empty, too large, not RLP list) |
+| 15 | ExitDecodeFailed | RLP decoding failed |
+| 16 | ExitValidationFailed | Payload semantic validation failed |
+
+## Input Validation
+
+The keeper performs multiple layers of input validation:
+
+1. **Bounds checking**: Input cannot be nil, empty, or exceed 100 MB
+2. **RLP prefix check**: Input must be an RLP list (prefix >= 0xc0)
+3. **Semantic validation**: ChainID must be non-zero, block and witness must be non-nil
+
+## Security
+
+For detailed security considerations and trust assumptions, see [TRUST_ASSUMPTIONS.md](./TRUST_ASSUMPTIONS.md).
+
 ## Building Keeper
 
 The keeper uses build tags to compile platform-specific input methods and chain configurations:
