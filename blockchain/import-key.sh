@@ -19,7 +19,7 @@ if [ ! -d "$DATA_DIR" ]; then
     exit 1
 fi
 
-HARDHAT_KEY="0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
+HARDHAT_KEY="ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 
 echo "Importing Hardhat default account #0 private key..."
 echo "(Address: 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266)"
