@@ -203,8 +203,8 @@ func TestKeccakStateSize(t *testing.T) {
         }
 }
 
-// TestKeccak256Hash tests the Hash return variant
-func TestKeccak256Hash(t *testing.T) {
+// TestKeccak256HashVariant tests the Hash return variant
+func TestKeccak256HashVariant(t *testing.T) {
         hash := Keccak256Hash([]byte("hello"))
 
         // Verify it's a common.Hash (32 bytes)
