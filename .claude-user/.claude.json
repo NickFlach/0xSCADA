@@ -23,7 +23,7 @@
     "web-app": 2,
     "mobile-app": 2
   },
-  "promptQueueUseCount": 7,
+  "promptQueueUseCount": 9,
   "cachedStatsigGates": {
     "tengu_prompt_suggestion": true
   },
