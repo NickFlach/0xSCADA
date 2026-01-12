@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm install:*)",
       "Bash(npx vitest:*)",
-      "mcp__agentic-qe__mcp__agentic_qe__memory_store"
+      "mcp__agentic-qe__mcp__agentic_qe__memory_store",
+      "mcp__agentic-qe__mcp__agentic_qe__test_report_comprehensive"
     ]
   }
 }
