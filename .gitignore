@@ -6,3 +6,10 @@ vite.config.ts.*
 *.tar.gz
 # Coverage reports
 coverage/
+
+# Claude Code local files
+.claude-user/
+.claude/settings.local.json
+
+# Agentic QE local database
+.agentic-qe/memory.db
