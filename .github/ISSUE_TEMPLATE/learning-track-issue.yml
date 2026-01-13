@@ -1,0 +1,131 @@
+name: Learning Track Issue
+description: Create an issue for the OxSCADA learning tracks (for contributors)
+title: "[Track X.Y.Z] "
+labels: ["status:ready"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## OxSCADA Learning Track Issue
+        This template is for creating structured issues that help contributors learn while building OxSCADA.
+
+  - type: dropdown
+    id: track
+    attributes:
+      label: Learning Track
+      description: Which track does this issue belong to?
+      options:
+        - "A - Frontend Engineering"
+        - "B - Backend Engineering"
+        - "C - Blockchain Engineering"
+        - "D - Systems Engineering"
+        - "E - Industrial Automation"
+        - "Q - Quality Engineering"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: level
+    attributes:
+      label: Difficulty Level
+      description: What skill level is required?
+      options:
+        - "Level 1 - Beginner (Foundation)"
+        - "Level 2 - Intermediate (Core Competency)"
+        - "Level 3 - Advanced"
+        - "Level 4 - Expert"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap Phase
+      description: Which phase does this contribute to?
+      options:
+        - "Phase 6 - Real-Time Industrial Communication"
+        - "Phase 7 - ISA-88 Batch Runtime"
+        - "Phase 8 - HMI/SCADA Visualization"
+        - "Phase 9 - OxSCADA Operating System"
+        - "Phase 10 - Decentralized Network"
+        - "Phase 11 - AI & Digital Twins"
+        - "Infrastructure / Cross-cutting"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: What needs to be built or implemented?
+      placeholder: Describe the task clearly...
+    validations:
+      required: true
+
+  - type: textarea
+    id: learning-objectives
+    attributes:
+      label: Learning Objectives
+      description: What will the contributor learn by completing this issue?
+      placeholder: |
+        By completing this issue, you will learn:
+        - Skill 1
+        - Skill 2
+        - Skill 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: How do we know the issue is complete?
+      placeholder: |
+        - [ ] Criterion 1
+        - [ ] Criterion 2
+        - [ ] Tests pass
+        - [ ] Documentation updated
+    validations:
+      required: true
+
+  - type: textarea
+    id: resources
+    attributes:
+      label: Learning Resources
+      description: Links to documentation, tutorials, or references that will help
+      placeholder: |
+        - [Resource Name](URL)
+        - /docs/relevant-file.md
+    validations:
+      required: false
+
+  - type: textarea
+    id: prerequisites
+    attributes:
+      label: Prerequisites
+      description: What issues or knowledge should be completed first?
+      placeholder: |
+        - Complete issue #123
+        - Familiarity with XYZ
+    validations:
+      required: false
+
+  - type: textarea
+    id: hints
+    attributes:
+      label: Implementation Hints
+      description: Optional hints for getting started (without giving away the solution)
+      placeholder: |
+        - Start by looking at server/xyz.ts
+        - Consider using the existing ABC pattern
+    validations:
+      required: false
+
+  - type: input
+    id: estimated-effort
+    attributes:
+      label: Estimated Effort
+      description: Approximate effort level (hours)
+      placeholder: "2-4 hours"
+    validations:
+      required: false

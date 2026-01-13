@@ -1,9 +1,10 @@
 # Contributing to 0xSCADA
 
-Thank you for your interest in contributing to 0xSCADA! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to 0xSCADA! We're building a decentralized public utility for industrial control systems, and we'd love your help.
 
 ## Table of Contents
 
+- [Learning Tracks](#learning-tracks)
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
 - [Development Setup](#development-setup)
@@ -12,6 +13,50 @@ Thank you for your interest in contributing to 0xSCADA! This document provides g
 - [Coding Standards](#coding-standards)
 - [Testing](#testing)
 - [Submitting Changes](#submitting-changes)
+- [Adding New Vendors](#adding-new-vendors)
+
+---
+
+## Learning Tracks
+
+OxSCADA is structured around **6 learning tracks** designed to help you grow while contributing:
+
+| Track | Focus | Entry Skills | Labels |
+|-------|-------|--------------|--------|
+| **A - Frontend** | React, visualization, UX | JavaScript basics | `track:frontend` |
+| **B - Backend** | APIs, databases, services | TypeScript basics | `track:backend` |
+| **C - Blockchain** | Smart contracts, consensus | JS + crypto basics | `track:blockchain` |
+| **D - Systems** | Kernel, drivers, security | Linux + C basics | `track:systems` |
+| **E - Automation** | PLCs, HMI, control systems | Programming basics | `track:automation` |
+| **Q - Quality** | Testing, automation, QE | Testing basics | `track:quality` |
+
+### Finding Issues by Track
+
+```bash
+# Good first issues for beginners
+label:"good-first-issue" label:"track:frontend"
+
+# Issues for your track and level
+label:"track:backend" label:"difficulty:intermediate"
+
+# Phase-specific issues
+label:"phase:6-realtime"
+```
+
+### Level Progression
+
+Each track has 4 levels. Complete issues at each level to earn badges:
+
+| Level | Badge | Description |
+|-------|-------|-------------|
+| 1 | Foundation | 3-5 beginner issues |
+| 2 | Core | 5-8 intermediate issues |
+| 3 | Advanced | 5-8 advanced issues |
+| 4 | Expert | 3-5 expert issues |
+
+See [docs/ROADMAP.md](docs/ROADMAP.md) for detailed track curricula.
+
+---
 
 ## Code of Conduct
 
@@ -102,7 +147,17 @@ The application will be available at `http://localhost:5000`.
 
 ### Branch Naming
 
-Use descriptive branch names:
+Use descriptive branch names with track prefix:
+```
+track-[a-q]/issue-[number]-[short-description]
+
+Examples:
+track-a/issue-42-trend-chart        # Frontend issue
+track-b/issue-103-opcua-driver      # Backend issue
+track-c/issue-77-merkle-proof       # Blockchain issue
+```
+
+Alternative formats for non-track work:
 - `feature/add-vendor-support`
 - `fix/code-generation-bug`
 - `docs/update-api-reference`

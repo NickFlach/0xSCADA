@@ -1,0 +1,363 @@
+{
+  "description": "Starter issues for OxSCADA learning tracks. Import with: gh issue create --title \"$title\" --body \"$body\" --label \"$labels\"",
+  "issues": [
+    {
+      "id": "A1.1",
+      "title": "[Track A1.1] Create Tag Status Card Component",
+      "track": "frontend",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:frontend", "difficulty:beginner", "good-first-issue", "component:client"],
+      "learning_objectives": [
+        "React functional components",
+        "TypeScript props interfaces",
+        "TailwindCSS styling basics",
+        "shadcn/ui Card component usage"
+      ],
+      "description": "Create a reusable TagStatusCard component that displays an industrial tag's name, value, unit, and status indicator.",
+      "acceptance_criteria": [
+        "Component accepts tag data as props",
+        "Displays tag name, current value, and engineering unit",
+        "Shows color-coded status indicator (green/yellow/red)",
+        "Responsive design using TailwindCSS",
+        "TypeScript interfaces for all props"
+      ],
+      "hints": [
+        "Look at client/src/components/ui/card.tsx for component patterns",
+        "Use the existing color scheme from client/src/index.css"
+      ],
+      "estimated_effort": "2-4 hours"
+    },
+    {
+      "id": "A1.2",
+      "title": "[Track A1.2] Add Loading Skeleton States",
+      "track": "frontend",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:frontend", "difficulty:beginner", "good-first-issue", "component:client"],
+      "learning_objectives": [
+        "Loading state patterns in React",
+        "Skeleton UI components",
+        "Conditional rendering"
+      ],
+      "description": "Add skeleton loading states to the Dashboard page cards while data is being fetched.",
+      "acceptance_criteria": [
+        "Skeleton appears while TanStack Query is loading",
+        "Matches the layout of actual content",
+        "Smooth transition when data loads"
+      ],
+      "hints": [
+        "Use shadcn/ui Skeleton component",
+        "Check TanStack Query isLoading state"
+      ],
+      "estimated_effort": "1-2 hours"
+    },
+    {
+      "id": "B1.1",
+      "title": "[Track B1.1] Add Pagination to Events API",
+      "track": "backend",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:backend", "difficulty:beginner", "good-first-issue", "component:server"],
+      "learning_objectives": [
+        "Express route handlers",
+        "SQL LIMIT/OFFSET pagination",
+        "Drizzle ORM query building",
+        "API response formatting"
+      ],
+      "description": "Add cursor-based pagination to the GET /api/events endpoint to handle large event volumes efficiently.",
+      "acceptance_criteria": [
+        "Accept page and limit query parameters",
+        "Return total count in response",
+        "Include next/prev page indicators",
+        "Default to 50 items per page"
+      ],
+      "hints": [
+        "Look at server/routes.ts for existing patterns",
+        "Use Drizzle's .limit() and .offset() methods"
+      ],
+      "estimated_effort": "2-3 hours"
+    },
+    {
+      "id": "B1.2",
+      "title": "[Track B1.2] Create Health Check Endpoint",
+      "track": "backend",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:backend", "difficulty:beginner", "good-first-issue", "component:server"],
+      "learning_objectives": [
+        "Express route creation",
+        "Database connectivity checks",
+        "Health check patterns"
+      ],
+      "description": "Create a /health endpoint that checks database connectivity and returns system status.",
+      "acceptance_criteria": [
+        "Returns 200 OK when healthy",
+        "Checks database connection",
+        "Returns component status (db, blockchain)",
+        "Response includes timestamp"
+      ],
+      "hints": [
+        "Use a simple SELECT 1 query to test DB",
+        "Return JSON with component statuses"
+      ],
+      "estimated_effort": "1-2 hours"
+    },
+    {
+      "id": "C1.1",
+      "title": "[Track C1.1] Write Unit Tests for EventAnchor Contract",
+      "track": "blockchain",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:blockchain", "difficulty:beginner", "good-first-issue", "component:blockchain"],
+      "learning_objectives": [
+        "Hardhat testing framework",
+        "Smart contract testing patterns",
+        "ethers.js contract interactions",
+        "Chai assertions"
+      ],
+      "description": "Write comprehensive unit tests for the EventAnchor.sol smart contract.",
+      "acceptance_criteria": [
+        "Test anchor() function with valid Merkle root",
+        "Test event emission",
+        "Test access control (only authorized signers)",
+        "Test getAnchor() retrieval",
+        "90%+ code coverage"
+      ],
+      "hints": [
+        "Look at contracts/test/ for existing test patterns",
+        "Use Hardhat's loadFixture for test setup"
+      ],
+      "estimated_effort": "3-4 hours"
+    },
+    {
+      "id": "Q1.1",
+      "title": "[Track Q1.1] Add Integration Tests for Sites API",
+      "track": "quality",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:quality", "difficulty:beginner", "good-first-issue", "type:test"],
+      "learning_objectives": [
+        "Vitest test framework",
+        "API integration testing",
+        "Test database setup/teardown",
+        "Supertest for HTTP testing"
+      ],
+      "description": "Create integration tests for the Sites CRUD API endpoints using real database queries.",
+      "acceptance_criteria": [
+        "Test GET /api/sites returns all sites",
+        "Test POST /api/sites creates new site",
+        "Test PUT /api/sites/:id updates site",
+        "Test DELETE /api/sites/:id removes site",
+        "Uses real database, not mocks"
+      ],
+      "hints": [
+        "Use beforeEach to seed test data",
+        "Clean up after tests with afterEach"
+      ],
+      "estimated_effort": "3-4 hours"
+    },
+    {
+      "id": "B2.1",
+      "title": "[Track B2.1] Implement WebSocket Event Stream",
+      "track": "backend",
+      "level": "intermediate",
+      "phase": "phase:6-realtime",
+      "labels": ["track:backend", "difficulty:intermediate", "phase:6-realtime", "component:server"],
+      "learning_objectives": [
+        "WebSocket protocol",
+        "Real-time data streaming",
+        "Event-driven architecture",
+        "Connection management"
+      ],
+      "description": "Implement a WebSocket endpoint that streams industrial events to connected clients in real-time.",
+      "acceptance_criteria": [
+        "WebSocket server on /ws/events",
+        "Broadcasts new events to all connected clients",
+        "Supports filtering by site/asset/type",
+        "Handles disconnection gracefully",
+        "Includes heartbeat mechanism"
+      ],
+      "hints": [
+        "Use the ws library already in dependencies",
+        "Look at server/index.ts for WebSocket setup"
+      ],
+      "estimated_effort": "4-6 hours"
+    },
+    {
+      "id": "A2.1",
+      "title": "[Track A2.1] Build Real-Time Event Stream Component",
+      "track": "frontend",
+      "level": "intermediate",
+      "phase": "phase:6-realtime",
+      "labels": ["track:frontend", "difficulty:intermediate", "phase:6-realtime", "component:client"],
+      "learning_objectives": [
+        "WebSocket client in React",
+        "Real-time state updates",
+        "Virtualized lists for performance",
+        "Connection status handling"
+      ],
+      "description": "Create a React component that displays a real-time stream of industrial events via WebSocket.",
+      "acceptance_criteria": [
+        "Connects to WebSocket on mount",
+        "Displays incoming events in a scrollable list",
+        "Shows connection status indicator",
+        "Supports auto-scroll toggle",
+        "Handles reconnection automatically"
+      ],
+      "hints": [
+        "Use useEffect for WebSocket lifecycle",
+        "Consider react-virtualized for long lists"
+      ],
+      "estimated_effort": "4-6 hours"
+    },
+    {
+      "id": "E1.1",
+      "title": "[Track E1.1] Define Control Module Types for Common Actuators",
+      "track": "automation",
+      "level": "beginner",
+      "phase": "infrastructure",
+      "labels": ["track:automation", "difficulty:beginner", "good-first-issue", "component:server"],
+      "learning_objectives": [
+        "IEC 61131-3 data types",
+        "ISA-88 control module concepts",
+        "Industrial I/O patterns",
+        "Database schema design"
+      ],
+      "description": "Create control module type definitions for common industrial actuators (valves, motors, etc.).",
+      "acceptance_criteria": [
+        "On/Off Valve CM type with typical I/O",
+        "Modulating Valve CM type with analog output",
+        "Motor Starter CM type with run/trip",
+        "All include standard feedback signals",
+        "Documented I/O definitions"
+      ],
+      "hints": [
+        "Look at existing CM types in the database",
+        "Follow ISA-88 naming conventions"
+      ],
+      "estimated_effort": "2-3 hours"
+    },
+    {
+      "id": "6.1.1",
+      "title": "[Epic 6.1] OPC-UA Protocol Driver",
+      "track": "backend",
+      "level": "advanced",
+      "phase": "phase:6-realtime",
+      "labels": ["track:backend", "difficulty:advanced", "phase:6-realtime", "epic", "component:gateway"],
+      "learning_objectives": [
+        "OPC-UA protocol fundamentals",
+        "Binary protocol parsing",
+        "Session and subscription management",
+        "Industrial communication patterns"
+      ],
+      "description": "Implement a production-ready OPC-UA client driver for the gateway service to communicate with industrial PLCs and servers.",
+      "acceptance_criteria": [
+        "Connect to OPC-UA servers",
+        "Browse server address space",
+        "Read/write variable values",
+        "Subscribe to value changes",
+        "Handle session reconnection",
+        "Certificate-based authentication"
+      ],
+      "child_issues": [
+        "6.1.1 - Connection manager",
+        "6.1.2 - Session handling",
+        "6.1.3 - Browse service",
+        "6.1.4 - Read/Write service",
+        "6.1.5 - Subscription service",
+        "6.1.6 - Security integration"
+      ],
+      "estimated_effort": "40-60 hours"
+    },
+    {
+      "id": "8.1.1",
+      "title": "[Epic 8.1] P&ID Diagram Renderer",
+      "track": "frontend",
+      "level": "advanced",
+      "phase": "phase:8-hmi",
+      "labels": ["track:frontend", "difficulty:advanced", "phase:8-hmi", "epic", "component:client"],
+      "learning_objectives": [
+        "SVG manipulation in React",
+        "Industrial symbology (ISA-5.1)",
+        "Real-time data binding",
+        "Canvas/WebGL performance"
+      ],
+      "description": "Build a P&ID (Piping & Instrumentation Diagram) rendering engine that displays industrial process graphics with real-time data binding.",
+      "acceptance_criteria": [
+        "Render ISA-5.1 standard symbols",
+        "Support valve, motor, tank, instrument symbols",
+        "Real-time value updates",
+        "Pan/zoom navigation",
+        "Symbol library extensible"
+      ],
+      "child_issues": [
+        "8.1.1 - SVG rendering engine",
+        "8.1.2 - Symbol library",
+        "8.1.3 - Data binding layer",
+        "8.1.4 - Navigation controls",
+        "8.1.5 - Animation system"
+      ],
+      "estimated_effort": "60-80 hours"
+    },
+    {
+      "id": "D1.1",
+      "title": "[Track D1.1] Write Hello World Kernel Module",
+      "track": "systems",
+      "level": "beginner",
+      "phase": "phase:9-os",
+      "labels": ["track:systems", "difficulty:beginner", "good-first-issue", "phase:9-os", "component:kernel"],
+      "learning_objectives": [
+        "Linux kernel module basics",
+        "Module init/exit functions",
+        "printk logging",
+        "Kernel compilation"
+      ],
+      "description": "Create a simple kernel module that logs messages on load/unload to verify the OxSCADA kernel development environment.",
+      "acceptance_criteria": [
+        "Module compiles against linux-fork kernel",
+        "Loads with insmod successfully",
+        "Prints version info on load",
+        "Cleans up on unload",
+        "Includes Makefile"
+      ],
+      "hints": [
+        "Look at linux-fork/0xscada/ for examples",
+        "Use linux-fork/0xscada/Makefile as template"
+      ],
+      "estimated_effort": "2-3 hours"
+    }
+  ],
+  "milestones": [
+    {
+      "title": "v2.1.0-realtime",
+      "description": "Phase 6: Real-Time Industrial Communication",
+      "due_on": "2026-03-31"
+    },
+    {
+      "title": "v2.2.0-batch",
+      "description": "Phase 7: ISA-88 Batch Runtime Engine",
+      "due_on": "2026-06-30"
+    },
+    {
+      "title": "v2.3.0-hmi",
+      "description": "Phase 8: HMI/SCADA Visualization Suite",
+      "due_on": "2026-09-30"
+    },
+    {
+      "title": "v3.0.0-os",
+      "description": "Phase 9: OxSCADA Operating System",
+      "due_on": "2026-12-31"
+    },
+    {
+      "title": "v3.1.0-decentralized",
+      "description": "Phase 10: Decentralized Network & Governance",
+      "due_on": "2027-03-31"
+    },
+    {
+      "title": "v3.2.0-ai",
+      "description": "Phase 11: AI & Digital Twins",
+      "due_on": "2027-06-30"
+    }
+  ]
+}

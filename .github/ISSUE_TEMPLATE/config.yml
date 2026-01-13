@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: OxSCADA Documentation
+    url: https://github.com/[org]/0xscada/tree/main/docs
+    about: Check the documentation before opening an issue
+  - name: Roadmap & Learning Tracks
+    url: https://github.com/[org]/0xscada/blob/main/docs/ROADMAP.md
+    about: View the roadmap and find issues for your learning track
+  - name: Discord Community
+    url: https://discord.gg/oxscada
+    about: Join our community for questions and discussions

@@ -1,0 +1,123 @@
+name: Epic
+description: Create an epic for a larger feature or initiative
+title: "[Epic] "
+labels: ["type:feature", "epic"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Epic Definition
+        Epics are large bodies of work that can be broken into smaller issues.
+
+  - type: input
+    id: epic-id
+    attributes:
+      label: Epic ID
+      description: "Format: [Phase].[Epic] (e.g., 6.1 for OPC-UA Driver)"
+      placeholder: "6.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: phase
+    attributes:
+      label: Roadmap Phase
+      description: Which phase does this epic belong to?
+      options:
+        - "Phase 6 - Real-Time Industrial Communication"
+        - "Phase 7 - ISA-88 Batch Runtime"
+        - "Phase 8 - HMI/SCADA Visualization"
+        - "Phase 9 - OxSCADA Operating System"
+        - "Phase 10 - Decentralized Network"
+        - "Phase 11 - AI & Digital Twins"
+    validations:
+      required: true
+
+  - type: textarea
+    id: overview
+    attributes:
+      label: Epic Overview
+      description: High-level description of this epic
+      placeholder: What does this epic accomplish?
+    validations:
+      required: true
+
+  - type: textarea
+    id: business-value
+    attributes:
+      label: Business/Technical Value
+      description: Why is this epic important for OxSCADA?
+      placeholder: How does this contribute to the vision of decentralized industrial control?
+    validations:
+      required: true
+
+  - type: textarea
+    id: user-stories
+    attributes:
+      label: User Stories
+      description: Key user stories this epic addresses
+      placeholder: |
+        - As an operator, I want to...
+        - As an engineer, I want to...
+        - As an administrator, I want to...
+    validations:
+      required: true
+
+  - type: textarea
+    id: child-issues
+    attributes:
+      label: Child Issues
+      description: Breakdown of issues that make up this epic
+      placeholder: |
+        - [ ] #issue1 - Description
+        - [ ] #issue2 - Description
+        - [ ] #issue3 - Description
+    validations:
+      required: false
+
+  - type: textarea
+    id: tracks
+    attributes:
+      label: Learning Tracks Involved
+      description: Which tracks will contribute to this epic?
+      placeholder: |
+        - Track A (Frontend): UI components
+        - Track B (Backend): API endpoints
+        - Track Q (Quality): Test coverage
+    validations:
+      required: true
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: What must be completed before this epic can start?
+      placeholder: |
+        - Epic 5.x must be complete
+        - External dependency on library X
+    validations:
+      required: false
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: Epic Acceptance Criteria
+      description: How do we know this epic is complete?
+      placeholder: |
+        - [ ] All child issues closed
+        - [ ] Integration tests pass
+        - [ ] Documentation complete
+        - [ ] Demo to stakeholders
+    validations:
+      required: true
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: Risks and Mitigations
+      description: What could go wrong and how will we address it?
+      placeholder: |
+        - Risk: X might not work
+          Mitigation: Y approach as backup
+    validations:
+      required: false
