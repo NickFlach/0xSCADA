@@ -1,0 +1,18 @@
+name: DCO Check
+
+on:
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  dco:
+    name: Developer Certificate of Origin
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check DCO
+        uses: dcoapp/app@v1
+        with:
+          # Require all commits to be signed off
+          # This enforces the Developer Certificate of Origin
+          # https://developercertificate.org/
+          require-signature: true

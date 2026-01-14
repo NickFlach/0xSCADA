@@ -4,6 +4,7 @@ Thank you for your interest in contributing to 0xSCADA! We're building a decentr
 
 ## Table of Contents
 
+- [Developer Certificate of Origin](#developer-certificate-of-origin)
 - [Learning Tracks](#learning-tracks)
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
@@ -14,6 +15,99 @@ Thank you for your interest in contributing to 0xSCADA! We're building a decentr
 - [Testing](#testing)
 - [Submitting Changes](#submitting-changes)
 - [Adding New Vendors](#adding-new-vendors)
+
+---
+
+## Developer Certificate of Origin
+
+This project uses the **Developer Certificate of Origin (DCO)** for all contributions. The DCO is a lightweight way for contributors to certify that they wrote or otherwise have the right to submit the code they are contributing.
+
+### The DCO Text
+
+```
+Developer Certificate of Origin
+Version 1.1
+
+Copyright (C) 2004, 2006 The Linux Foundation and its contributors.
+
+Everyone is permitted to copy and distribute verbatim copies of this
+license document, but changing it is not allowed.
+
+Developer's Certificate of Origin 1.1
+
+By making a contribution to this project, I certify that:
+
+(a) The contribution was created in whole or in part by me and I
+    have the right to submit it under the open source license
+    indicated in the file; or
+
+(b) The contribution is based upon previous work that, to the best
+    of my knowledge, is covered under an appropriate open source
+    license and I have the right under that license to submit that
+    work with modifications, whether created in whole or in part
+    by me, under the same open source license (unless I am
+    permitted to submit under a different license), as indicated
+    in the file; or
+
+(c) The contribution was provided directly to me by some other
+    person who certified (a), (b) or (c) and I have not modified
+    it.
+
+(d) I understand and agree that this project and the contribution
+    are public and that a record of the contribution (including all
+    personal information I submit with it, including my sign-off) is
+    maintained indefinitely and may be redistributed consistent with
+    this project or the open source license(s) involved.
+```
+
+### How to Sign Off Your Commits
+
+You must sign off each commit with your real name and email address:
+
+```bash
+git commit -s -m "feat(component): add new feature"
+```
+
+This adds a `Signed-off-by` line to your commit message:
+
+```
+feat(component): add new feature
+
+Signed-off-by: Your Name <your.email@example.com>
+```
+
+### Configure Git for Automatic Sign-Off
+
+Set up your Git identity:
+
+```bash
+git config --global user.name "Your Real Name"
+git config --global user.email "your.email@example.com"
+```
+
+### Fixing Unsigned Commits
+
+If you forgot to sign off commits, you can amend the most recent:
+
+```bash
+git commit --amend -s
+```
+
+Or rebase to sign off multiple commits:
+
+```bash
+git rebase --signoff HEAD~3  # Sign off last 3 commits
+```
+
+### Why DCO?
+
+The DCO was created by the Linux kernel community as a simple way to track contributions. It provides:
+
+- **Legal clarity** - Clear provenance of all contributions
+- **Lightweight process** - No CLAs or legal paperwork required
+- **Industry standard** - Used by Linux kernel, Kubernetes, and many major projects
+
+All pull requests are automatically checked for DCO compliance. PRs without proper sign-off will not be merged.
 
 ---
 
@@ -325,6 +419,7 @@ describe('CodeGenerator', () => {
 
 ### PR Requirements
 
+- [ ] All commits signed off (DCO)
 - [ ] All tests pass
 - [ ] Code follows style guidelines
 - [ ] Documentation updated (if needed)
