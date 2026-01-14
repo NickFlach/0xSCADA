@@ -10,6 +10,7 @@ import Blueprints from "@/pages/blueprints";
 import Vendors from "@/pages/vendors";
 import CodeGen from "@/pages/codegen";
 import Agents from "@/pages/agents";
+import DigitalTwin from "@/pages/digital-twin";
 import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
 
@@ -24,6 +25,7 @@ function Router() {
       <Route path="/vendors" component={Vendors} />
       <Route path="/codegen" component={CodeGen} />
       <Route path="/agents" component={Agents} />
+      <Route path="/digital-twin" component={DigitalTwin} />
       <Route component={NotFound} />
     </Switch>
   );

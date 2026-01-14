@@ -1,5 +1,5 @@
 import { Link } from "wouter";
-import { Terminal, Factory, Bot } from "lucide-react";
+import { Terminal, Factory, Bot, Box } from "lucide-react";
 
 export function Navbar() {
   return (
@@ -17,6 +17,10 @@ export function Navbar() {
         <Link href="/dashboard" className="hover:text-primary transition-colors uppercase">[Dashboard]</Link>
         <Link href="/sites" className="hover:text-primary transition-colors uppercase">[Sites]</Link>
         <Link href="/events" className="hover:text-primary transition-colors uppercase">[Events]</Link>
+        <Link href="/digital-twin" className="hover:text-primary transition-colors uppercase flex items-center gap-1" data-testid="nav-digital-twin">
+          <Box className="w-3 h-3" />
+          [Twin]
+        </Link>
         <Link href="/blueprints" className="hover:text-primary transition-colors uppercase flex items-center gap-1">
           <Factory className="w-3 h-3" />
           [Blueprints]

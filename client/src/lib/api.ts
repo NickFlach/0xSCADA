@@ -9,7 +9,10 @@ import type {
   Vendor,
   TemplatePackage,
   GeneratedCode,
-  Controller
+  Controller,
+  AssetAdministrationShell,
+  AASSubmodel,
+  AASSubmodelElement,
 } from "@shared/schema";
 
 const API_BASE = "/api";
@@ -344,5 +347,35 @@ export async function flushBatch(): Promise<{ success: boolean; batch?: any; mes
     method: "POST",
   });
   if (!response.ok) throw new Error("Failed to flush batch");
+  return response.json();
+}
+
+// ============================================================================
+// DIGITAL TWIN - ASSET ADMINISTRATION SHELL API
+// ============================================================================
+
+export async function fetchAASList(): Promise<AssetAdministrationShell[]> {
+  const response = await fetch(`${API_BASE}/aas`);
+  if (!response.ok) throw new Error("Failed to fetch AAS list");
+  return response.json();
+}
+
+export async function fetchAASById(aasId: string): Promise<AssetAdministrationShell & { submodels: AASSubmodel[] }> {
+  const response = await fetch(`${API_BASE}/aas/${aasId}`);
+  if (!response.ok) throw new Error("Failed to fetch AAS");
+  return response.json();
+}
+
+export async function fetchSubmodelWithElements(aasId: string, smId: string): Promise<AASSubmodel & { elements: AASSubmodelElement[] }> {
+  const response = await fetch(`${API_BASE}/aas/${aasId}/submodels/${smId}`);
+  if (!response.ok) throw new Error("Failed to fetch submodel");
+  return response.json();
+}
+
+export async function syncAAS(): Promise<{ message: string; synced: { sites: number; assets: number; controlModules: number; units: number } }> {
+  const response = await fetch(`${API_BASE}/aas/sync`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error("Failed to sync AAS");
   return response.json();
 }
