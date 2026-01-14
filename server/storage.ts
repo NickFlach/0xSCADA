@@ -35,6 +35,14 @@ import type {
   InsertDataTypeMapping,
   Controller,
   InsertController,
+  AssetAdministrationShell,
+  InsertAAS,
+  AASSubmodel,
+  InsertAASSubmodel,
+  AASSubmodelElement,
+  InsertAASSubmodelElement,
+  AASSubmodelTemplate,
+  InsertAASSubmodelTemplate,
 } from "@shared/schema";
 
 const { Pool } = pg;
@@ -124,6 +132,37 @@ export interface IStorage {
   getControllers(): Promise<Controller[]>;
   getControllersByVendor(vendorId: string): Promise<Controller[]>;
   getControllersBySite(siteId: string): Promise<Controller[]>;
+
+  // Asset Administration Shell (Digital Twin)
+  createAAS(aas: InsertAAS): Promise<AssetAdministrationShell>;
+  getAASList(): Promise<AssetAdministrationShell[]>;
+  getAASById(id: string): Promise<AssetAdministrationShell | undefined>;
+  getAASByGlobalId(globalId: string): Promise<AssetAdministrationShell | undefined>;
+  getAASBySiteId(siteId: string): Promise<AssetAdministrationShell[]>;
+  getAASByAssetId(assetId: string): Promise<AssetAdministrationShell | undefined>;
+  updateAAS(id: string, data: Partial<InsertAAS>): Promise<AssetAdministrationShell>;
+  deleteAAS(id: string): Promise<void>;
+
+  // AAS Submodels
+  createSubmodel(submodel: InsertAASSubmodel): Promise<AASSubmodel>;
+  getSubmodelsByAASId(aasId: string): Promise<AASSubmodel[]>;
+  getSubmodelById(id: string): Promise<AASSubmodel | undefined>;
+  getSubmodelByGlobalId(globalId: string): Promise<AASSubmodel | undefined>;
+  updateSubmodel(id: string, data: Partial<InsertAASSubmodel>): Promise<AASSubmodel>;
+  deleteSubmodel(id: string): Promise<void>;
+
+  // AAS Submodel Elements
+  createSubmodelElement(element: InsertAASSubmodelElement): Promise<AASSubmodelElement>;
+  getSubmodelElements(submodelId: string): Promise<AASSubmodelElement[]>;
+  getSubmodelElementById(id: string): Promise<AASSubmodelElement | undefined>;
+  updateSubmodelElement(id: string, data: Partial<InsertAASSubmodelElement>): Promise<AASSubmodelElement>;
+  deleteSubmodelElement(id: string): Promise<void>;
+
+  // AAS Submodel Templates
+  createSubmodelTemplate(template: InsertAASSubmodelTemplate): Promise<AASSubmodelTemplate>;
+  getSubmodelTemplates(): Promise<AASSubmodelTemplate[]>;
+  getSubmodelTemplateByName(name: string): Promise<AASSubmodelTemplate | undefined>;
+  getSubmodelTemplatesByType(submodelType: string): Promise<AASSubmodelTemplate[]>;
 }
 
 export class DatabaseStorage implements IStorage {
@@ -518,6 +557,189 @@ export class DatabaseStorage implements IStorage {
       .select()
       .from(schema.controllers)
       .where(eq(schema.controllers.siteId, siteId));
+  }
+
+  // ============================================================================
+  // DIGITAL TWIN - Asset Administration Shell
+  // ============================================================================
+
+  async createAAS(aas: InsertAAS): Promise<AssetAdministrationShell> {
+    const [newAAS] = await this.db.insert(schema.assetAdministrationShells).values(aas).returning();
+    return newAAS;
+  }
+
+  async getAASList(): Promise<AssetAdministrationShell[]> {
+    return await this.db
+      .select()
+      .from(schema.assetAdministrationShells)
+      .orderBy(desc(schema.assetAdministrationShells.createdAt));
+  }
+
+  async getAASById(id: string): Promise<AssetAdministrationShell | undefined> {
+    const [aas] = await this.db
+      .select()
+      .from(schema.assetAdministrationShells)
+      .where(eq(schema.assetAdministrationShells.id, id));
+    return aas;
+  }
+
+  async getAASByGlobalId(globalId: string): Promise<AssetAdministrationShell | undefined> {
+    const [aas] = await this.db
+      .select()
+      .from(schema.assetAdministrationShells)
+      .where(eq(schema.assetAdministrationShells.globalId, globalId));
+    return aas;
+  }
+
+  async getAASBySiteId(siteId: string): Promise<AssetAdministrationShell[]> {
+    return await this.db
+      .select()
+      .from(schema.assetAdministrationShells)
+      .where(eq(schema.assetAdministrationShells.siteId, siteId));
+  }
+
+  async getAASByAssetId(assetId: string): Promise<AssetAdministrationShell | undefined> {
+    const [aas] = await this.db
+      .select()
+      .from(schema.assetAdministrationShells)
+      .where(eq(schema.assetAdministrationShells.assetId, assetId));
+    return aas;
+  }
+
+  async updateAAS(id: string, data: Partial<InsertAAS>): Promise<AssetAdministrationShell> {
+    const [updated] = await this.db
+      .update(schema.assetAdministrationShells)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.assetAdministrationShells.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteAAS(id: string): Promise<void> {
+    await this.db
+      .delete(schema.assetAdministrationShells)
+      .where(eq(schema.assetAdministrationShells.id, id));
+  }
+
+  // ============================================================================
+  // DIGITAL TWIN - AAS Submodels
+  // ============================================================================
+
+  async createSubmodel(submodel: InsertAASSubmodel): Promise<AASSubmodel> {
+    const [newSubmodel] = await this.db.insert(schema.aasSubmodels).values(submodel).returning();
+    return newSubmodel;
+  }
+
+  async getSubmodelsByAASId(aasId: string): Promise<AASSubmodel[]> {
+    return await this.db
+      .select()
+      .from(schema.aasSubmodels)
+      .where(eq(schema.aasSubmodels.aasId, aasId));
+  }
+
+  async getSubmodelById(id: string): Promise<AASSubmodel | undefined> {
+    const [submodel] = await this.db
+      .select()
+      .from(schema.aasSubmodels)
+      .where(eq(schema.aasSubmodels.id, id));
+    return submodel;
+  }
+
+  async getSubmodelByGlobalId(globalId: string): Promise<AASSubmodel | undefined> {
+    const [submodel] = await this.db
+      .select()
+      .from(schema.aasSubmodels)
+      .where(eq(schema.aasSubmodels.globalId, globalId));
+    return submodel;
+  }
+
+  async updateSubmodel(id: string, data: Partial<InsertAASSubmodel>): Promise<AASSubmodel> {
+    const [updated] = await this.db
+      .update(schema.aasSubmodels)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.aasSubmodels.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSubmodel(id: string): Promise<void> {
+    await this.db
+      .delete(schema.aasSubmodels)
+      .where(eq(schema.aasSubmodels.id, id));
+  }
+
+  // ============================================================================
+  // DIGITAL TWIN - AAS Submodel Elements
+  // ============================================================================
+
+  async createSubmodelElement(element: InsertAASSubmodelElement): Promise<AASSubmodelElement> {
+    const [newElement] = await this.db.insert(schema.aasSubmodelElements).values(element).returning();
+    return newElement;
+  }
+
+  async getSubmodelElements(submodelId: string): Promise<AASSubmodelElement[]> {
+    return await this.db
+      .select()
+      .from(schema.aasSubmodelElements)
+      .where(eq(schema.aasSubmodelElements.submodelId, submodelId))
+      .orderBy(schema.aasSubmodelElements.orderIndex);
+  }
+
+  async getSubmodelElementById(id: string): Promise<AASSubmodelElement | undefined> {
+    const [element] = await this.db
+      .select()
+      .from(schema.aasSubmodelElements)
+      .where(eq(schema.aasSubmodelElements.id, id));
+    return element;
+  }
+
+  async updateSubmodelElement(id: string, data: Partial<InsertAASSubmodelElement>): Promise<AASSubmodelElement> {
+    const [updated] = await this.db
+      .update(schema.aasSubmodelElements)
+      .set({ ...data, updatedAt: new Date() })
+      .where(eq(schema.aasSubmodelElements.id, id))
+      .returning();
+    return updated;
+  }
+
+  async deleteSubmodelElement(id: string): Promise<void> {
+    await this.db
+      .delete(schema.aasSubmodelElements)
+      .where(eq(schema.aasSubmodelElements.id, id));
+  }
+
+  // ============================================================================
+  // DIGITAL TWIN - AAS Submodel Templates
+  // ============================================================================
+
+  async createSubmodelTemplate(template: InsertAASSubmodelTemplate): Promise<AASSubmodelTemplate> {
+    const [newTemplate] = await this.db.insert(schema.aasSubmodelTemplates).values(template).returning();
+    return newTemplate;
+  }
+
+  async getSubmodelTemplates(): Promise<AASSubmodelTemplate[]> {
+    return await this.db
+      .select()
+      .from(schema.aasSubmodelTemplates)
+      .where(eq(schema.aasSubmodelTemplates.isActive, true));
+  }
+
+  async getSubmodelTemplateByName(name: string): Promise<AASSubmodelTemplate | undefined> {
+    const [template] = await this.db
+      .select()
+      .from(schema.aasSubmodelTemplates)
+      .where(eq(schema.aasSubmodelTemplates.name, name));
+    return template;
+  }
+
+  async getSubmodelTemplatesByType(submodelType: string): Promise<AASSubmodelTemplate[]> {
+    return await this.db
+      .select()
+      .from(schema.aasSubmodelTemplates)
+      .where(and(
+        eq(schema.aasSubmodelTemplates.submodelType, submodelType),
+        eq(schema.aasSubmodelTemplates.isActive, true)
+      ));
   }
 }
 

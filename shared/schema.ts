@@ -864,3 +864,245 @@ export const insertChangeIntentSchema = createInsertSchema(changeIntents).omit({
 
 export type InsertChangeIntent = z.infer<typeof insertChangeIntentSchema>;
 export type ChangeIntent = typeof changeIntents.$inferSelect;
+
+// =============================================================================
+// DIGITAL TWIN: ASSET ADMINISTRATION SHELL (IEC 63278)
+// =============================================================================
+
+// Asset kinds for AAS
+export const ASSET_KINDS = ["Instance", "Type"] as const;
+
+// Submodel types following Industry 4.0 standards
+export const SUBMODEL_TYPES = [
+  "Nameplate",           // IEC 61406 identification
+  "TechnicalData",       // Performance specifications
+  "OperationalData",     // Real-time telemetry binding
+  "Documentation",       // Manuals, certs, P&IDs
+  "SimulationModel",     // FMU reference for physics twin
+  "AIModel",             // Surrogate model endpoint
+  "BlockchainAnchor",    // 0xSCADA: on-chain proof refs
+  "MaintenanceSchedule", // Predictive maintenance data
+  "DigitalTwinCapabilities", // Twin capabilities descriptor
+] as const;
+
+// Submodel element types
+export const SUBMODEL_ELEMENT_TYPES = [
+  "Property",
+  "MultiLanguageProperty",
+  "Range",
+  "Blob",
+  "File",
+  "ReferenceElement",
+  "RelationshipElement",
+  "AnnotatedRelationshipElement",
+  "Capability",
+  "SubmodelElementCollection",
+  "SubmodelElementList",
+  "Operation",
+  "BasicEventElement",
+  "Entity",
+] as const;
+
+// Asset Administration Shell (main entity)
+export const assetAdministrationShells = pgTable("asset_administration_shells", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // IEC 63278: Shell identification
+  idShort: text("id_short").notNull(), // e.g., "PID_Controller_001"
+  globalId: text("global_id").notNull().unique(), // Globally unique IRI
+  
+  // Asset information
+  globalAssetId: text("global_asset_id").notNull(), // Links to blockchain registry
+  assetKind: text("asset_kind").notNull().default("Instance"), // Instance or Type
+  assetType: text("asset_type"), // Optional: semantic type of the asset
+  
+  // Display information
+  displayName: text("display_name"),
+  description: text("description"),
+  
+  // 0xSCADA integration: Link to existing entities
+  siteId: text("site_id").references(() => sites.id),
+  assetId: text("asset_id").references(() => assets.id),
+  controlModuleInstanceId: text("control_module_instance_id").references(() => controlModuleInstances.id),
+  unitInstanceId: text("unit_instance_id").references(() => unitInstances.id),
+  
+  // Administration
+  version: text("version").notNull().default("1.0.0"),
+  revision: text("revision"),
+  
+  // Blockchain anchoring
+  contentHash: text("content_hash"), // Hash of serialized AAS
+  anchorTxHash: text("anchor_tx_hash"),
+  anchoredAt: timestamp("anchored_at"),
+  
+  // External AAS federation
+  federationEndpoint: text("federation_endpoint"), // URL for external AAS registry
+  federatedAt: timestamp("federated_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAASSchema = createInsertSchema(assetAdministrationShells).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAAS = z.infer<typeof insertAASSchema>;
+export type AssetAdministrationShell = typeof assetAdministrationShells.$inferSelect;
+
+// Submodels (modular capability descriptors)
+export const aasSubmodels = pgTable("aas_submodels", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Parent shell reference
+  aasId: text("aas_id").notNull().references(() => assetAdministrationShells.id, { onDelete: "cascade" }),
+  
+  // IEC 63278: Submodel identification
+  idShort: text("id_short").notNull(), // e.g., "TechnicalData"
+  globalId: text("global_id").notNull().unique(), // Globally unique IRI
+  
+  // Semantic reference (ECLASS or IEC CDD)
+  semanticIdType: text("semantic_id_type"), // e.g., "GlobalReference", "ModelReference"
+  semanticIdValue: text("semantic_id_value"), // ECLASS or IEC CDD reference
+  
+  // Submodel type from standard library
+  submodelType: text("submodel_type").notNull(), // One of SUBMODEL_TYPES
+  
+  // Display information
+  displayName: text("display_name"),
+  description: text("description"),
+  
+  // Administration
+  version: text("version").notNull().default("1.0.0"),
+  revision: text("revision"),
+  
+  // Content kind
+  kind: text("kind").notNull().default("Instance"), // Instance or Template
+  
+  // Qualifiers (additional constraints/metadata)
+  qualifiers: jsonb("qualifiers").default(sql`'[]'::jsonb`),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAASSubmodelSchema = createInsertSchema(aasSubmodels).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAASSubmodel = z.infer<typeof insertAASSubmodelSchema>;
+export type AASSubmodel = typeof aasSubmodels.$inferSelect;
+
+// Submodel Elements (properties, operations, collections)
+export const aasSubmodelElements = pgTable("aas_submodel_elements", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Parent submodel reference
+  submodelId: text("submodel_id").notNull().references(() => aasSubmodels.id, { onDelete: "cascade" }),
+  
+  // For nested elements (collections, lists)
+  parentElementId: text("parent_element_id").references((): any => aasSubmodelElements.id, { onDelete: "cascade" }),
+  
+  // IEC 63278: Element identification
+  idShort: text("id_short").notNull(), // e.g., "MaxTemperature"
+  
+  // Element type
+  elementType: text("element_type").notNull(), // One of SUBMODEL_ELEMENT_TYPES
+  
+  // Semantic reference
+  semanticIdType: text("semantic_id_type"),
+  semanticIdValue: text("semantic_id_value"),
+  
+  // Display information
+  displayName: text("display_name"),
+  description: text("description"),
+  
+  // Value (for properties, ranges, etc.)
+  valueType: text("value_type"), // xs:string, xs:integer, xs:double, etc.
+  value: text("value"),
+  
+  // For Range type
+  minValue: text("min_value"),
+  maxValue: text("max_value"),
+  
+  // For File/Blob type
+  contentType: text("content_type"),
+  filePath: text("file_path"),
+  
+  // For Operation type
+  inputVariables: jsonb("input_variables").default(sql`'[]'::jsonb`),
+  outputVariables: jsonb("output_variables").default(sql`'[]'::jsonb`),
+  inoutputVariables: jsonb("inoutput_variables").default(sql`'[]'::jsonb`),
+  
+  // For ReferenceElement
+  referenceType: text("reference_type"),
+  referenceKeys: jsonb("reference_keys").default(sql`'[]'::jsonb`),
+  
+  // Real-time data binding (0xSCADA specific)
+  dataBindingType: text("data_binding_type"), // "tag", "websocket", "polling"
+  dataBindingPath: text("data_binding_path"), // OPC-UA node, tag path, etc.
+  dataBindingInterval: integer("data_binding_interval"), // ms
+  
+  // Ordering for collections/lists
+  orderIndex: integer("order_index").default(0),
+  
+  // Qualifiers
+  qualifiers: jsonb("qualifiers").default(sql`'[]'::jsonb`),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAASSubmodelElementSchema = createInsertSchema(aasSubmodelElements).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAASSubmodelElement = z.infer<typeof insertAASSubmodelElementSchema>;
+export type AASSubmodelElement = typeof aasSubmodelElements.$inferSelect;
+
+// Submodel Templates (reusable submodel definitions)
+export const aasSubmodelTemplates = pgTable("aas_submodel_templates", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Template identification
+  name: text("name").notNull().unique(), // e.g., "Nameplate_IEC61406"
+  submodelType: text("submodel_type").notNull(), // One of SUBMODEL_TYPES
+  
+  // Display information
+  displayName: text("display_name"),
+  description: text("description"),
+  
+  // Semantic reference
+  semanticIdType: text("semantic_id_type"),
+  semanticIdValue: text("semantic_id_value"),
+  
+  // Template definition (JSON schema for elements)
+  elementDefinitions: jsonb("element_definitions").notNull().default(sql`'[]'::jsonb`),
+  
+  // Applicable asset types
+  applicableAssetTypes: jsonb("applicable_asset_types").default(sql`'[]'::jsonb`),
+  
+  // Version
+  version: text("version").notNull().default("1.0.0"),
+  
+  // Active flag
+  isActive: boolean("is_active").notNull().default(true),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAASSubmodelTemplateSchema = createInsertSchema(aasSubmodelTemplates).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertAASSubmodelTemplate = z.infer<typeof insertAASSubmodelTemplateSchema>;
+export type AASSubmodelTemplate = typeof aasSubmodelTemplates.$inferSelect;
