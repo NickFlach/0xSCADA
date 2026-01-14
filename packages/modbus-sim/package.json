@@ -1,0 +1,30 @@
+{
+  "name": "@oxscada/modbus-sim",
+  "version": "0.1.0",
+  "description": "Modbus TCP simulator for OxSCADA development and testing",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "test": "vitest"
+  },
+  "keywords": [
+    "modbus",
+    "scada",
+    "simulator",
+    "industrial"
+  ],
+  "author": "OxSCADA Team",
+  "license": "MIT",
+  "dependencies": {
+    "modbus-serial": "^8.0.17"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.0",
+    "vitest": "^1.2.0"
+  }
+}
