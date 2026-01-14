@@ -15,9 +15,9 @@
 
 <br/>
 
-![SYSTEM STATUS](https://img.shields.io/badge/SYSTEM-ONLINE-00FF9C?style=for-the-badge&labelColor=0D0D0D&logo=statuspal&logoColor=00FF9C)
-![BLOCKCHAIN](https://img.shields.io/badge/BLOCKCHAIN-ANCHORED-c592ff?style=for-the-badge&labelColor=0D0D0D&logo=ethereum&logoColor=c592ff)
-![NETWORK](https://img.shields.io/badge/NETWORK-DECENTRALIZED-0ABDC9?style=for-the-badge&labelColor=0D0D0D&logo=polywork&logoColor=0ABDC9)
+![VERSION](https://img.shields.io/badge/VERSION-v2.0.0-00FF9C?style=for-the-badge&labelColor=0D0D0D&logo=semver&logoColor=00FF9C)
+![CHAIN ID](https://img.shields.io/badge/CHAIN_ID-0x5CADA-c592ff?style=for-the-badge&labelColor=0D0D0D&logo=ethereum&logoColor=c592ff)
+![KERNEL](https://img.shields.io/badge/KERNEL-6.19--rc5-0ABDC9?style=for-the-badge&labelColor=0D0D0D&logo=linux&logoColor=0ABDC9)
 
 <br/>
 
@@ -26,12 +26,13 @@
 ![React](https://img.shields.io/badge/REACT-18-0ABDC9?style=flat-square&labelColor=100D23&logo=react&logoColor=0ABDC9)
 ![Solidity](https://img.shields.io/badge/SOLIDITY-0.8-c592ff?style=flat-square&labelColor=100D23&logo=solidity&logoColor=c592ff)
 ![PostgreSQL](https://img.shields.io/badge/POSTGRESQL-15-ff4081?style=flat-square&labelColor=100D23&logo=postgresql&logoColor=ff4081)
+![Go](https://img.shields.io/badge/GO-1.21-00FF9C?style=flat-square&labelColor=100D23&logo=go&logoColor=00FF9C)
 
 ---
 
 <sub>
 
-**[ [INITIALIZE](#-initialize) • [ARCHITECTURE](#-architecture) • [PROTOCOL](#-protocol) • [CODEGEN](#-codegen) • [MANIFESTO](#-manifesto) ]**
+**[ [INITIALIZE](#-initialize) • [ARCHITECTURE](#-architecture) • [PROTOCOL](#-protocol) • [CODEGEN](#-codegen) • [AGENTS](#-agents) • [MANIFESTO](#-manifesto) • [ROADMAP](#-roadmap) ]**
 
 </sub>
 
@@ -67,6 +68,8 @@ A system where the machines that pump your water, refine your fuel, and generate
 │   ◉ REAL-TIME CONTROL     →   OFF-CHAIN  →  Safety-critical, deterministic  │
 │   ◉ IDENTITY & AUDIT      →   ON-CHAIN   →  Immutable, tamper-evident       │
 │   ◉ CODE GENERATION       →   HYBRID     →  Vendor-agnostic, reproducible   │
+│   ◉ BATCH ANCHORING       →   MERKLE     →  95-99% gas savings              │
+│   ◉ INDUSTRIAL OS         →   LINUX      →  Real-time kernel (PREEMPT_RT)   │
 │                                                                              │
 │   "We write code so that machines may be free."                              │
 │                                                                              │
@@ -77,11 +80,59 @@ A system where the machines that pump your water, refine your fuel, and generate
 
 ---
 
+## ▓▓ WHAT'S NEW
+
+```
+╔══════════════════════════════════════════════════════════════════════════════╗
+║                         JANUARY 2026 // MAJOR UPDATES                        ║
+╠══════════════════════════════════════════════════════════════════════════════╣
+║                                                                              ║
+║   🔗 CUSTOM BLOCKCHAIN FORK                                                  ║
+║      ▸ Chain ID: 380634 (0x5CADA) - Our own industrial blockchain            ║
+║      ▸ Clique PoA consensus with 5-second block time                         ║
+║      ▸ Forked go-ethereum in geth-fork/ directory                            ║
+║      ▸ Pre-funded accounts for development                                   ║
+║                                                                              ║
+║   🐧 LINUX KERNEL FORK                                                       ║
+║      ▸ Kernel 6.19.0-rc5 from Linus Torvalds' mainline                       ║
+║      ▸ Foundation for real-time (PREEMPT_RT) industrial control              ║
+║      ▸ Industrial I/O (IIO) subsystem for sensors/actuators                  ║
+║      ▸ Cross-compilation: ARM64, RISC-V, x86_64                              ║
+║                                                                              ║
+║   📦 BATCH ANCHORING SYSTEM                                                  ║
+║      ▸ Merkle tree batching for high-volume event anchoring                  ║
+║      ▸ 95-99% gas savings vs individual event anchoring                      ║
+║      ▸ On-chain Merkle proof verification                                    ║
+║      ▸ Configurable batch cadence (size/time triggers)                       ║
+║                                                                              ║
+║   🌊 EIP-4844 BLOB SUPPORT (Prototype)                                       ║
+║      ▸ Ultra-high-throughput data availability                               ║
+║      ▸ KZG commitment preparation                                            ║
+║      ▸ Cost estimation API                                                   ║
+║                                                                              ║
+║   🪜 LADDER LOGIC AGENT                                                      ║
+║      ▸ AI-driven ladder logic for Rockwell Studio 5000                       ║
+║      ▸ All standard instructions (XIC, XIO, OTE, TON, CTU, etc.)             ║
+║      ▸ Batch rung generation with CSV substitution                           ║
+║      ▸ RungBuilder fluent API                                                ║
+║                                                                              ║
+║   🤖 AGENTIC GOVERNANCE                                                      ║
+║      ▸ Ops Agent: Monitoring and operations                                  ║
+║      ▸ ChangeControl Agent: Approval workflows                               ║
+║      ▸ Compliance Agent: Regulatory verification                             ║
+║                                                                              ║
+╚══════════════════════════════════════════════════════════════════════════════╝
+```
+
+<br/>
+
+---
+
 ## ▓▓ INITIALIZE
 
 ```bash
 # ═══════════════════════════════════════════════════════════════════
-# BOOT SEQUENCE // 0xSCADA INDUSTRIAL CONTROL FABRIC
+# BOOT SEQUENCE // 0xSCADA INDUSTRIAL CONTROL FABRIC v2.0.0
 # ═══════════════════════════════════════════════════════════════════
 
 # [01] CLONE THE PROTOCOL
@@ -109,6 +160,7 @@ npm run dev
 # ▸ AUDIT LOGS    http://localhost:5000/events
 # ▸ BLUEPRINTS    http://localhost:5000/blueprints
 # ▸ CODEGEN       http://localhost:5000/codegen
+# ▸ AGENTS        http://localhost:5000/agents
 #
 ```
 
@@ -120,7 +172,41 @@ npm run dev
 |-----------|-------------|---------|
 | `Node.js` | **18+** | Runtime environment |
 | `PostgreSQL` | **15+** | Event & asset persistence |
-| `Hardhat` | _optional_ | Local blockchain network |
+| `Go` | **1.21+** | Custom geth blockchain (optional) |
+| `Hardhat` | _included_ | Smart contract development |
+| `Linux Headers` | _optional_ | Kernel module development |
+
+<br/>
+
+### ADVANCED SETUP
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# OPTIONAL: BUILD CUSTOM BLOCKCHAIN (0x5CADA CHAIN)
+# ═══════════════════════════════════════════════════════════════════
+
+# Build geth from our fork
+cd geth-fork && make geth
+
+# Initialize the chain
+./blockchain/init-chain.sh
+
+# Start the node (PoA consensus, 5s blocks)
+./blockchain/start-node.sh
+
+# ═══════════════════════════════════════════════════════════════════
+# OPTIONAL: BUILD INDUSTRIAL LINUX KERNEL
+# ═══════════════════════════════════════════════════════════════════
+
+# Configure kernel
+./kernel/configure.sh menuconfig
+
+# Build (requires cross-compilation toolchain for ARM64/RISC-V)
+./kernel/build.sh
+
+# View kernel info
+./kernel/info.sh
+```
 
 <br/>
 
@@ -132,13 +218,19 @@ npm run dev
 ╔══════════════════════════════════════════════════════════════════════════════╗
 ║                                                                              ║
 ║   ██████████████████████████████████████████████████████████████████████     ║
-║   █                      0xSCADA CONTROL FABRIC                        █     ║
+║   █                   0xSCADA CONTROL FABRIC v2.0.0                    █     ║
 ║   ██████████████████████████████████████████████████████████████████████     ║
 ║                                                                              ║
 ║   ┌─────────────────┐  ┌─────────────────┐  ┌─────────────────┐              ║
-║   │   ░░ REACT ░░   │  │  ░░ EXPRESS ░░  │  │ ░░ BLUEPRINTS ░░│              ║
-║   │   Dashboard     │◄─┤   API Gateway   ├─►│   Engine        │              ║
-║   │   Operations    │  │   REST + WS     │  │   ISA-88        │              ║
+║   │   ░░ REACT ░░   │  │  ░░ EXPRESS ░░  │  │  ░░ AGENTS ░░   │              ║
+║   │   Dashboard     │◄─┤   API Gateway   ├─►│   Ops/Change/   │              ║
+║   │   Operations    │  │   REST + WS     │  │   Compliance    │              ║
+║   └────────┬────────┘  └────────┬────────┘  └────────┬────────┘              ║
+║            │                    │                    │                       ║
+║   ┌────────┴────────┐  ┌────────┴────────┐  ┌────────┴────────┐              ║
+║   │ ░░ BLUEPRINTS ░░│  │░░ BATCH ANCHOR ░│  │  ░░ CODEGEN ░░  │              ║
+║   │   ISA-88 Model  │  │   Merkle Trees  │  │   Multi-Vendor  │              ║
+║   │   Phase Types   │  │   EIP-4844 Blob │  │   SCL/L5X/LAD   │              ║
 ║   └────────┬────────┘  └────────┬────────┘  └────────┬────────┘              ║
 ║            │                    │                    │                       ║
 ║            └────────────────────┼────────────────────┘                       ║
@@ -148,12 +240,12 @@ npm run dev
 ║         ▼                       ▼                       ▼                    ║
 ║   ┌───────────┐           ┌───────────┐           ┌───────────┐              ║
 ║   │░░░░░░░░░░░│           │░░░░░░░░░░░│           │░░░░░░░░░░░│              ║
-║   │ POSTGRES  │           │ BLOCKCHAIN│           │ CODEGEN   │              ║
-║   │           │           │   (EVM)   │           │           │              ║
-║   │ ▸ Sites   │           │ ▸ Anchors │           │ ▸ SCL     │              ║
-║   │ ▸ Assets  │           │ ▸ Registry│           │ ▸ AOI/L5X │              ║
-║   │ ▸ Events  │           │ ▸ Hashes  │           │ ▸ IEC61131│              ║
-║   │ ▸ Blueprts│           │           │           │           │              ║
+║   │ POSTGRES  │           │ 0x5CADA   │           │ LINUX     │              ║
+║   │           │           │ CHAIN     │           │ KERNEL    │              ║
+║   │ ▸ Sites   │           │           │           │           │              ║
+║   │ ▸ Assets  │           │ ▸ Geth PoA│           │ ▸ 6.19-rc5│              ║
+║   │ ▸ Events  │           │ ▸ 5s Block│           │ ▸ PREEMPT │              ║
+║   │ ▸ Batches │           │ ▸ Registry│           │ ▸ IIO     │              ║
 ║   └───────────┘           └───────────┘           └───────────┘              ║
 ║                                                                              ║
 ╠══════════════════════════════════════════════════════════════════════════════╣
@@ -176,10 +268,15 @@ npm run dev
 ```
 ┌─────────────────────────────────────────────────────────────────────────────┐
 │                                                                             │
-│  [FIELD]              [GATEWAY]              [LEDGER]                       │
+│  [FIELD]          [BATCH]            [MERKLE]           [CHAIN]             │
 │                                                                             │
-│   PLC/RTU   ─────►   Hash Event   ─────►   Anchor TX   ─────►   IMMUTABLE   │
-│   Event              SHA-256              On-Chain              Record      │
+│   PLC/RTU  ─────►  Queue   ─────►   Build Tree  ─────►  Anchor   ─────►  ∞  │
+│   Event           Events           Merkle Root          Root TX             │
+│                                                                             │
+│   ┌─────────────────────────────────────────────────────────────────────┐   │
+│   │  INDIVIDUAL: 1 event = 1 tx = ~50,000 gas                           │   │
+│   │  BATCHED:    N events = 1 tx = ~30,000 gas  (95-99% savings)        │   │
+│   └─────────────────────────────────────────────────────────────────────┘   │
 │                                                                             │
 │   "What happens in the field, stays on the chain."                          │
 │                                                                             │
@@ -220,6 +317,29 @@ GET    /api/blockchain/status        # Chain connectivity status
 
 <br/>
 
+### BATCH ANCHORING (High-Volume)
+
+```bash
+# ═══════════════════════════════════════════════════════════════════
+# MERKLE BATCH ANCHORING // 95-99% GAS SAVINGS
+# ═══════════════════════════════════════════════════════════════════
+GET    /api/batch/stats              # Batch service stats & config
+GET    /api/batch/history            # Recent batch anchoring history
+GET    /api/batch/pending            # Pending events in queue
+POST   /api/batch/flush              # Force immediate batch flush
+PUT    /api/batch/config             # Update batch config (size, age, enabled)
+GET    /api/batch/:batchId/proof/:eventId   # Get Merkle proof for event
+
+# ═══════════════════════════════════════════════════════════════════
+# EIP-4844 BLOB ANCHORING // ULTRA-HIGH-THROUGHPUT
+# ═══════════════════════════════════════════════════════════════════
+GET    /api/batch/blob/config        # Get blob configuration
+PUT    /api/batch/blob/config        # Update blob configuration
+POST   /api/batch/blob/estimate      # Estimate blob vs calldata costs
+```
+
+<br/>
+
 ### BLUEPRINTS ENGINE
 
 ```bash
@@ -227,8 +347,12 @@ GET    /api/blockchain/status        # Chain connectivity status
 # ISA-88 BATCH CONTROL
 # ═══════════════════════════════════════════════════════════════════
 GET    /api/blueprints/cm-types      # Control Module Types
+GET    /api/blueprints/cm-instances  # Control Module Instances
 GET    /api/blueprints/unit-types    # Unit Types
+GET    /api/blueprints/unit-instances # Unit Instances
 GET    /api/blueprints/phase-types   # Phase Types
+GET    /api/blueprints/phase-instances # Phase Instances
+GET    /api/blueprints/design-specs  # Design Specifications
 POST   /api/blueprints/import        # Import blueprint package
 GET    /api/blueprints/summary       # Statistics
 
@@ -268,12 +392,21 @@ GET    /api/controllers              # PLC/DCS definitions
 
 ```bash
 # ═══════════════════════════════════════════════════════════════════
-# CODE GENERATION // DETERMINISTIC OUTPUT
+# STRUCTURED TEXT & SCL // DETERMINISTIC OUTPUT
 # ═══════════════════════════════════════════════════════════════════
 POST   /api/generate/control-module/:id   # Generate CM code
 POST   /api/generate/phase/:id            # Generate phase code
 GET    /api/generated-code                # Audit trail
 POST   /api/generated-code/:id/anchor     # Anchor to blockchain
+
+# ═══════════════════════════════════════════════════════════════════
+# LADDER LOGIC AGENT // ROCKWELL STUDIO 5000
+# ═══════════════════════════════════════════════════════════════════
+GET    /api/ladder-logic/instructions     # Instruction library
+POST   /api/generate/ladder-logic/control-module/:id  # Generate ladder CM
+POST   /api/generate/ladder-logic/phase/:id           # Generate ladder phase
+POST   /api/ladder-logic/batch            # Batch rung generation (CSV)
+POST   /api/ladder-logic/ai-context/:id   # AI prompt context for external AI
 ```
 
 <br/>
@@ -318,6 +451,34 @@ END_FUNCTION_BLOCK
 
 ---
 
+## ▓▓ AGENTS
+
+> *"Human-in-the-loop for critical changes. Autonomous for everything else."*
+
+<br/>
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         AGENTIC GOVERNANCE LAYER                            │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐    ┌──────────────┐    ┌──────────────┐                  │
+│   │   OPS AGENT  │    │ CHANGECONTROL│    │  COMPLIANCE  │                  │
+│   │              │    │    AGENT     │    │    AGENT     │                  │
+│   │ ▸ Monitoring │    │ ▸ Approvals  │    │ ▸ Regulatory │                  │
+│   │ ▸ Alerting   │    │ ▸ Workflows  │    │ ▸ Audit      │                  │
+│   │ ▸ Triage     │    │ ▸ Rollback   │    │ ▸ Reporting  │                  │
+│   └──────────────┘    └──────────────┘    └──────────────┘                  │
+│                                                                             │
+│   "Agentic governance: machines propose, humans approve, chains record."    │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+<br/>
+
+---
+
 ## ▓▓ ENVIRONMENT
 
 ```bash
@@ -328,20 +489,44 @@ END_FUNCTION_BLOCK
 # DATABASE
 DATABASE_URL="postgresql://..."          # PostgreSQL connection
 
-# BLOCKCHAIN (optional)
-BLOCKCHAIN_RPC_URL="http://127.0.0.1:8545"   # Ethereum RPC
+# BLOCKCHAIN (optional - defaults to localhost:8545)
+BLOCKCHAIN_RPC_URL="http://127.0.0.1:8545"   # Ethereum/Geth RPC
 BLOCKCHAIN_PRIVATE_KEY="0x..."               # Signing key
 
 # SIMULATOR
 SIMULATOR_ENABLED="true"                 # Field event simulator
 SIMULATOR_INTERVAL_MS="10000"            # Event frequency
+
+# BATCH ANCHORING
+BATCH_MAX_SIZE="100"                     # Events per batch
+BATCH_MAX_AGE_MS="60000"                 # Max wait time before flush
+BATCH_ENABLED="true"                     # Enable Merkle batching
 ```
 
 <br/>
 
-### ENABLE BLOCKCHAIN ANCHORING
+### ENABLE CUSTOM BLOCKCHAIN (0x5CADA)
 
 ```bash
+# ═══════════════════════════════════════════════════════════════════
+# OPTION A: Use our custom PoA chain (recommended for production)
+# ═══════════════════════════════════════════════════════════════════
+
+# Build geth from fork
+cd geth-fork && make geth
+
+# Initialize and start
+./blockchain/init-chain.sh
+./blockchain/start-node.sh
+
+# Chain ID: 380634 (0x5CADA)
+# Block Time: 5 seconds
+# Consensus: Clique PoA
+
+# ═══════════════════════════════════════════════════════════════════
+# OPTION B: Use Hardhat local network (for development)
+# ═══════════════════════════════════════════════════════════════════
+
 # Terminal 1: Start local EVM
 npx hardhat node
 
@@ -380,6 +565,7 @@ npm run dev
 ║   ▸ Transparent systems, not obscured databases                             ║
 ║   ▸ Cryptographic proof, not paper certifications                           ║
 ║   ▸ Decentralized identity, not corporate gatekeepers                       ║
+║   ▸ Quantum-resistant infrastructure, not legacy vulnerabilities            ║
 ║                                                                              ║
 ║   "Cypherpunks write code. We know that someone has to write software       ║
 ║    to defend privacy, and since we can't get privacy unless we all do,      ║
@@ -403,7 +589,9 @@ npm run dev
 | **Access Control** | Role-based permissions (production) |
 | **Rate Limiting** | API rate limits for public endpoints |
 | **Audit Trail** | SHA-256 hashing + blockchain anchoring |
+| **Batch Verification** | Merkle proofs for individual event verification |
 | **Safety Isolation** | Control logic OFF-chain. Always. |
+| **Quantum Roadmap** | Post-quantum cryptography planned (Phase 12) |
 
 <br/>
 
@@ -417,14 +605,53 @@ npm run dev
 │   [████████████████████████████████████████░░░░░░░░░░░░░░░░░░░░]  60%      │
 │                                                                             │
 │   ✓ PHASE 1-4   Core platform, multi-vendor blueprints, code generation    │
-│   ◐ PHASE 5     Visual blueprint editor, import wizard, drag-drop I/O      │
-│   ○ PHASE 6     Real-time PLC comms (OPC-UA, S7, EtherNet/IP)              │
-│   ○ PHASE 7     ISA-88 batch runtime engine                                 │
-│   ○ PHASE 8     HMI/SCADA visualization generation                          │
-│   ○ PHASE 9     AI-assisted codegen, digital twins                          │
+│   ✓ PHASE 5     Batch anchoring, ladder logic agent, agentic governance    │
+│   ◐ PHASE 6     Real-time PLC comms (OPC-UA, S7, EtherNet/IP, Modbus)      │
+│   ○ PHASE 7     ISA-88 batch runtime engine, recipe management             │
+│   ○ PHASE 8     HMI/SCADA visualization suite, P&ID renderer               │
+│   ○ PHASE 9     OxSCADA Operating System (custom Linux, PREEMPT_RT)        │
+│   ○ PHASE 10    Decentralized network, site federation, DIDs               │
+│   ○ PHASE 11    AI & digital twins, predictive maintenance                 │
+│   ○ PHASE 12    Quantum integration, post-quantum cryptography             │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   TARGET RELEASES:                                                          │
+│                                                                             │
+│   v2.1.0  Q1 2026   Real-time industrial communication                      │
+│   v2.2.0  Q2 2026   ISA-88 batch runtime                                    │
+│   v2.3.0  Q3 2026   HMI/SCADA visualization                                 │
+│   v3.0.0  Q4 2026   OxSCADA operating system                                │
+│   v3.1.0  Q1 2027   Decentralized network                                   │
+│   v3.2.0  Q2 2027   AI & digital twins                                      │
+│   v3.3.0  Q3 2027   Quantum integration                                     │
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+<br/>
+
+---
+
+## ▓▓ LEARNING TRACKS
+
+> *"We don't just build software. We build engineers."*
+
+<br/>
+
+0xSCADA offers structured learning paths for contributors at all levels:
+
+| Track | Focus | Skills |
+|-------|-------|--------|
+| **A: Frontend** | React, visualization, real-time UI | D3.js, WebGL, P&ID rendering |
+| **B: Backend** | APIs, services, protocols | Express, Drizzle, Modbus/OPC-UA |
+| **C: Blockchain** | Smart contracts, consensus | Solidity, ethers.js, PoA |
+| **D: Systems** | Linux kernel, drivers | C, device drivers, PREEMPT_RT |
+| **E: Automation** | PLC programming, ISA-88 | IEC 61131-3, batch control |
+| **Q: Quality** | Testing, automation | Vitest, Playwright, mutation testing |
+| **F: Quantum** | Post-quantum crypto | Lattice crypto, QAOA, Qiskit |
+
+Each track has 4 levels with progressive challenges. See [docs/ROADMAP.md](docs/ROADMAP.md) for full details.
 
 <br/>
 
@@ -444,6 +671,15 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full protocol.
 
 <br/>
 
+### GOOD FIRST ISSUES
+
+Look for issues tagged with:
+- `👋 Good First Issue` - Perfect for newcomers
+- `🌱 Beginner` - Foundation-level tasks
+- `📚 Documentation` - Docs improvements
+
+<br/>
+
 ---
 
 ## ▓▓ LICENSE
@@ -451,7 +687,7 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the full protocol.
 ```
 Apache License 2.0
 
-Copyright 2024 The ESCO Group
+Copyright 2024-2026 The ESCO Group
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -494,7 +730,7 @@ limitations under the License.
 
 <sub>
 
-**[ DECENTRALIZED • IMMUTABLE • TRUSTLESS ]**
+**[ DECENTRALIZED • IMMUTABLE • TRUSTLESS • QUANTUM-READY ]**
 
 </sub>
 
