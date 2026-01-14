@@ -112,6 +112,37 @@
 
 ---
 
+## 🚀 Acceleration Initiative
+
+> **Parallel track to accelerate development while expanding learning opportunities.**
+> See [ACCELERATION.md](./ACCELERATION.md) for full details.
+
+### Vertical Slice: Tank Level Monitor
+End-to-end proof of life: Modbus device → Gateway → HMI → Blockchain anchor.
+
+### Cross-Track Capstone Projects
+
+| Capstone | Tracks | Deliverable |
+|----------|--------|-------------|
+| **CAP-1: Tank Farm Monitor** | A + B + E | 3-tank HMI with alarms and trends |
+| **CAP-2: Batch Recipe Editor** | A + E + C | Visual ISA-88 editor with blockchain audit |
+| **CAP-3: PLC Code Generator** | E + B + Q | Control module → multi-vendor IEC 61131-3 |
+| **CAP-4: Protocol Compliance** | D + Q + B | Kernel inspection + QE fuzzing suite |
+
+### Development Agentics
+
+| Agent | Purpose |
+|-------|---------|
+| `qe-hmi-generator` | P&ID → React component scaffolding |
+| `qe-plc-codegen` | Control spec → Structured Text / Ladder |
+| `qe-protocol-validator` | Modbus/OPC-UA/DNP3 compliance testing |
+| `qe-isa88-validator` | Batch sequence state model verification |
+
+### Protocol Simulators
+Virtual plant environment with Modbus, OPC-UA, DNP3, and IEC-104 simulators enables all tracks to develop without physical hardware.
+
+---
+
 ## 🎓 Learning Tracks for Contributors
 
 ### Track A: Frontend Engineering
@@ -369,6 +400,16 @@ status:blocked:        "🔴 Blocked"
 status:needs-review:   "🟡 Needs Review"
 status:good-first-issue: "👋 Good First Issue"
 status:help-wanted:    "🆘 Help Wanted"
+
+# Acceleration Labels
+accel:vertical-slice:  "🎯 Vertical Slice"
+accel:capstone:        "🏆 Capstone Project"
+accel:simulator:       "🔧 Simulator"
+accel:agent-dev:       "🤖 Agent Development"
+capstone:1-tankfarm:   "CAP-1: Tank Farm"
+capstone:2-recipe:     "CAP-2: Recipe Editor"
+capstone:3-plcgen:     "CAP-3: PLC Generator"
+capstone:4-protocol:   "CAP-4: Protocol Suite"
 
 # Component Labels
 component:server:      "Server"
