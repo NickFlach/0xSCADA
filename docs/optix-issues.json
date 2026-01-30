@@ -1,0 +1,310 @@
+{
+  "metadata": {
+    "project": "0xSCADA Optix Learning & Development Tract",
+    "created": "2026-01-30",
+    "total_issues": 30,
+    "labels": ["optix", "learning", "integration", "rockwell"]
+  },
+  "issues": [
+    {
+      "id": 1,
+      "title": "[Optix/Foundation] Implement NetLogic CheatSheet patterns for 0xSCADA",
+      "path": "Path 1: Foundation",
+      "priority": "P0",
+      "repository": "NetLogic_CheatSheet",
+      "stars": 74,
+      "labels": ["optix", "foundation", "netlogic", "P0"],
+      "body": "## Overview\nIntegrate patterns from [NetLogic_CheatSheet](https://github.com/FactoryTalk-Optix/NetLogic_CheatSheet) (74 stars) into 0xSCADA's Rockwell adapter.\n\n## Repository Purpose\nCollection of C# snippets ready for copy-paste, covering runtime and design-time NetLogic operations.\n\n## 0xSCADA Integration Goals\n- [ ] Extract reusable C# patterns for Ubiquity SDK extension\n- [ ] Identify runtime patterns for event generation\n- [ ] Document design-time patterns for code generation\n- [ ] Create TypeScript equivalents where applicable\n\n## Acceptance Criteria\n- NetLogic patterns documented in `/docs/optix/netlogic-patterns.md`\n- At least 5 patterns integrated into existing Rockwell adapter\n- Integration tests per CLAUDE.md integrity rules (real DB, no mocks)\n\n## References\n- Ubiquity SDK integration: `server/services/ubiquity/`\n- Rockwell adapter: `server/routes/rockwell-adapter.ts`"
+    },
+    {
+      "id": 2,
+      "title": "[Optix/Foundation] Study FeaturesDemo2 for comprehensive Optix capabilities",
+      "path": "Path 1: Foundation",
+      "priority": "P1",
+      "repository": "FeaturesDemo2",
+      "stars": 18,
+      "labels": ["optix", "foundation", "demo", "P1"],
+      "body": "## Overview\nAnalyze [FeaturesDemo2](https://github.com/FactoryTalk-Optix/FeaturesDemo2) (18 stars) to understand full Optix platform capabilities.\n\n## Repository Purpose\nSecond version of the famous Features Demo - demonstrates reporting, samples, OPC UA, and all major Optix capabilities.\n\n## 0xSCADA Integration Goals\n- [ ] Document all Optix capabilities relevant to 0xSCADA\n- [ ] Identify OPC UA patterns for gateway protocol driver\n- [ ] Extract reporting patterns for audit trail reports\n- [ ] Map capabilities to 0xSCADA feature roadmap\n\n## Acceptance Criteria\n- Capability matrix in `/docs/optix/capabilities-matrix.md`\n- Architecture diagram showing Optix-to-0xSCADA mapping\n- Prioritized list of features for implementation\n\n## References\n- Gateway protocols: `server/gateway/index.ts`\n- Event system: `server/events/index.ts`"
+    },
+    {
+      "id": 3,
+      "title": "[Optix/OPC-UA] Implement arbitrary OPC UA read for gateway driver",
+      "path": "Path 2: OPC UA & Industrial Protocols",
+      "priority": "P0",
+      "repository": "Optix_Sample_ArbitraryOpcUaRead",
+      "stars": 1,
+      "labels": ["optix", "opc-ua", "gateway", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_ArbitraryOpcUaRead](https://github.com/FactoryTalk-Optix/Optix_Sample_ArbitraryOpcUaRead) patterns into 0xSCADA's OPC UA gateway driver.\n\n## Repository Purpose\nDemonstrates arbitrary read operations from OPC UA servers in FactoryTalk Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Extend `ProtocolDriver` interface with OPC UA read patterns\n- [ ] Add flexible node addressing to OPC_UA protocol driver\n- [ ] Implement browse operations for tag discovery\n- [ ] Create telemetry events from OPC UA reads\n\n## Acceptance Criteria\n- OPC UA driver supports arbitrary node reads\n- Integration test with real OPC UA server (node-opcua test server)\n- Events generated per `server/events/index.ts` patterns\n\n## References\n- Gateway: `server/gateway/index.ts` (OPC_UA protocol)\n- Event types: `EventType.TELEMETRY`"
+    },
+    {
+      "id": 4,
+      "title": "[Optix/OPC-UA] Implement OPC UA Alarms & Events subscription",
+      "path": "Path 2: OPC UA & Industrial Protocols",
+      "priority": "P0",
+      "repository": "BoilerDemo_Client",
+      "stars": 1,
+      "labels": ["optix", "opc-ua", "alarms", "P0"],
+      "body": "## Overview\nIntegrate [BoilerDemo_Client](https://github.com/FactoryTalk-Optix/BoilerDemo_Client) OPC UA Alarm & Events patterns.\n\n## Repository Purpose\nBoilerDemo Client using OPC UA to monitor alarms via the OPC/UA Alarm and Events protocol.\n\n## 0xSCADA Integration Goals\n- [ ] Implement OPC UA A&E subscription in gateway driver\n- [ ] Map OPC UA alarm events to 0xSCADA alarm model\n- [ ] Support alarm acknowledgment over OPC UA\n- [ ] Create signed alarm events with blockchain anchoring\n\n## Acceptance Criteria\n- OPC UA driver subscribes to A&E events\n- Alarms stored in `events` table with proper signatures\n- Acknowledgments create `EventType.ACKNOWLEDGEMENT` events\n- Integration test with OPC UA server alarm simulation\n\n## References\n- Alarm events: `createAlarmEvent()` in `server/events/index.ts`\n- Schema: `events` table in `shared/schema.ts`"
+    },
+    {
+      "id": 5,
+      "title": "[Optix/MQTT] Integrate Azure IoT Operations for cloud telemetry",
+      "path": "Path 3: MQTT & IoT",
+      "priority": "P0",
+      "repository": "Optix_Sample_AzureIoTOperations",
+      "stars": 9,
+      "labels": ["optix", "azure", "iot", "mqtt", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_AzureIoTOperations](https://github.com/FactoryTalk-Optix/Optix_Sample_AzureIoTOperations) (9 stars) for Azure IoT connectivity.\n\n## Repository Purpose\nSample communication between FactoryTalk Optix and Microsoft Azure IoT Operations.\n\n## 0xSCADA Integration Goals\n- [ ] Add AZURE_IOT protocol type to gateway\n- [ ] Implement Azure IoT Hub client in Node.js\n- [ ] Create telemetry pipeline from Optix to Azure to 0xSCADA\n- [ ] Support Digital Twin sync with Azure Digital Twins\n\n## Acceptance Criteria\n- `AZURE_IOT` protocol driver operational\n- Telemetry events flow from Azure IoT Hub\n- Integration with existing Ubiquity SDK layer\n- Test with Azure IoT Hub emulator or real instance\n\n## References\n- Protocol drivers: `server/gateway/index.ts`\n- Ubiquity integration: `server/services/ubiquity/`"
+    },
+    {
+      "id": 6,
+      "title": "[Optix/MQTT] Implement custom MQTT payload formats",
+      "path": "Path 3: MQTT & IoT",
+      "priority": "P0",
+      "repository": "Optix_Sample_MqttCustomPayload",
+      "stars": 1,
+      "labels": ["optix", "mqtt", "protocol", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_MqttCustomPayload](https://github.com/FactoryTalk-Optix/Optix_Sample_MqttCustomPayload) for flexible MQTT messaging.\n\n## Repository Purpose\nDemonstrates how to use custom payload formats for Optix MQTT communication.\n\n## 0xSCADA Integration Goals\n- [ ] Define 0xSCADA-standard MQTT payload schema\n- [ ] Support SparkplugB encoding for industrial compatibility\n- [ ] Implement payload transformation in gateway\n- [ ] Create event mapping from MQTT payloads\n\n## Acceptance Criteria\n- MQTT driver supports multiple payload formats\n- SparkplugB and JSON payloads supported\n- Events created with deterministic serialization\n- Integration test with MQTT broker (mosquitto)\n\n## References\n- Event serialization: `canonicalize()` in `server/crypto/`\n- MQTT protocol: Add to `server/gateway/index.ts`"
+    },
+    {
+      "id": 7,
+      "title": "[Optix/Database] Implement PostgreSQL connection patterns",
+      "path": "Path 4: Database & Data Persistence",
+      "priority": "P0",
+      "repository": "postgres_example",
+      "stars": 3,
+      "labels": ["optix", "database", "postgres", "P0"],
+      "body": "## Overview\nStudy [postgres_example](https://github.com/FactoryTalk-Optix/postgres_example) (3 stars) for PostgreSQL integration patterns.\n\n## Repository Purpose\nPostgres connection widget example with SSH tunnel option for secure database access.\n\n## 0xSCADA Integration Goals\n- [ ] Document Optix PostgreSQL connection patterns\n- [ ] Implement SSH tunnel support for edge-to-cloud DB sync\n- [ ] Create data replication patterns for distributed 0xSCADA\n- [ ] Add connection pooling for high-throughput scenarios\n\n## Acceptance Criteria\n- SSH tunnel connection option in Drizzle config\n- Documentation in `/docs/optix/database-patterns.md`\n- Edge-to-cloud sync prototype working\n- Integration test with real PostgreSQL\n\n## References\n- Database config: `server/db.ts`\n- Schema: `shared/schema.ts`"
+    },
+    {
+      "id": 8,
+      "title": "[Optix/Database] Implement stored procedures for complex operations",
+      "path": "Path 4: Database & Data Persistence",
+      "priority": "P0",
+      "repository": "Optix_Sample_StoredProceduresNetLogic",
+      "stars": 3,
+      "labels": ["optix", "database", "stored-procedures", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_StoredProceduresNetLogic](https://github.com/FactoryTalk-Optix/Optix_Sample_StoredProceduresNetLogic) (3 stars) patterns.\n\n## Repository Purpose\nDemonstrates stored procedures and System.Data.SqlClient usage in FactoryTalk Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Create stored procedures for batch event insertion\n- [ ] Implement atomic Merkle tree updates in database\n- [ ] Add stored procedure for anchor status updates\n- [ ] Optimize high-volume telemetry ingestion\n\n## Acceptance Criteria\n- Stored procedures in `/db/procedures/`\n- Drizzle migrations include procedure creation\n- 10x improvement in batch insert performance\n- Integration tests per CLAUDE.md integrity rules\n\n## References\n- Merkle batching: `server/merkle/`\n- Event storage: `events` table"
+    },
+    {
+      "id": 9,
+      "title": "[Optix/Database] Integrate InfluxDB for time-series historian",
+      "path": "Path 4: Database & Data Persistence",
+      "priority": "P1",
+      "repository": "Optix_Sample_InfluxDB",
+      "stars": 1,
+      "labels": ["optix", "database", "influxdb", "historian", "P1"],
+      "body": "## Overview\nIntegrate [Optix_Sample_InfluxDB](https://github.com/FactoryTalk-Optix/Optix_Sample_InfluxDB) for time-series data storage.\n\n## Repository Purpose\nDemonstrates how to interface with local and remote InfluxDB stores.\n\n## 0xSCADA Integration Goals\n- [ ] Add InfluxDB as historian backend option\n- [ ] Create telemetry pipeline to InfluxDB\n- [ ] Implement downsampling for long-term storage\n- [ ] Add Grafana dashboard templates\n\n## Acceptance Criteria\n- InfluxDB client in `server/services/historian/`\n- Telemetry events dual-written to PostgreSQL + InfluxDB\n- Grafana dashboards in `/docker/grafana/`\n- Integration test with InfluxDB container\n\n## References\n- Event model: `server/events/index.ts`\n- Docker compose: `docker-compose.yml`"
+    },
+    {
+      "id": 10,
+      "title": "[Optix/REST] Implement REST/WebSocket server patterns",
+      "path": "Path 5: REST APIs & Web Services",
+      "priority": "P0",
+      "repository": "REST_WEB_WS_Server",
+      "stars": 3,
+      "labels": ["optix", "rest", "websocket", "api", "P0"],
+      "body": "## Overview\nIntegrate [REST_WEB_WS_Server](https://github.com/FactoryTalk-Optix/REST_WEB_WS_Server) (3 stars) patterns.\n\n## Repository Purpose\nSample of hosting a REST, WEB, and WebSocket Server in Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Document Optix REST server patterns\n- [ ] Implement WebSocket streaming for real-time events\n- [ ] Add SSE endpoint for event subscriptions\n- [ ] Create unified API pattern for edge devices\n\n## Acceptance Criteria\n- WebSocket endpoint at `/ws/events`\n- SSE endpoint at `/api/events/stream`\n- Documentation in `/docs/optix/api-patterns.md`\n- Integration test for streaming endpoints\n\n## References\n- Express routes: `server/routes.ts`\n- Event subscription: `EventService.onEvent()`"
+    },
+    {
+      "id": 11,
+      "title": "[Optix/REST] Integrate ChatGPT REST pattern for AI agents",
+      "path": "Path 5: REST APIs & Web Services",
+      "priority": "P1",
+      "repository": "ChatGPT_RestAPI",
+      "stars": 3,
+      "labels": ["optix", "rest", "ai", "agents", "P1"],
+      "body": "## Overview\nStudy [ChatGPT_RestAPI](https://github.com/FactoryTalk-Optix/ChatGPT_RestAPI) (3 stars) for AI integration patterns.\n\n## Repository Purpose\nChatGPT integration via RestAPI from FactoryTalk Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Document AI service integration pattern\n- [ ] Create abstraction for LLM providers (OpenAI, Anthropic)\n- [ ] Implement agent-based code generation workflow\n- [ ] Add AI-assisted alarm analysis\n\n## Acceptance Criteria\n- AI service abstraction in `server/services/ai/`\n- Claude integration for code generation\n- Alarm pattern analysis prototype\n- Integration test with mock AI service\n\n## References\n- Agent system: Agentic QE Fleet patterns\n- Code generation events: `EventType.CODE_GENERATION`"
+    },
+    {
+      "id": 12,
+      "title": "[Optix/Alarms] Implement custom alarm management engine",
+      "path": "Path 6: Alarms & Events",
+      "priority": "P0",
+      "repository": "Optix_Sample_CustomAlarmsManagement",
+      "stars": 0,
+      "labels": ["optix", "alarms", "events", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_CustomAlarmsManagement](https://github.com/FactoryTalk-Optix/Optix_Sample_CustomAlarmsManagement) patterns.\n\n## Repository Purpose\nCustom alarms management engine using a database for alarm configuration and state.\n\n## 0xSCADA Integration Goals\n- [ ] Study database-backed alarm configuration\n- [ ] Implement alarm templates in schema\n- [ ] Add runtime alarm generation from templates\n- [ ] Create alarm-to-event transformation\n\n## Acceptance Criteria\n- Alarm templates table in schema\n- Runtime alarm instantiation working\n- Events created with proper signatures\n- Integration test with real database\n\n## References\n- Alarm events: `createAlarmEvent()` in `server/events/index.ts`\n- Schema: `shared/schema.ts`"
+    },
+    {
+      "id": 13,
+      "title": "[Optix/Alarms] Implement alarm event subscription and observer pattern",
+      "path": "Path 6: Alarms & Events",
+      "priority": "P0",
+      "repository": "Optix_Sample_AlarmEventsObserver",
+      "stars": 0,
+      "labels": ["optix", "alarms", "events", "observer", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_AlarmEventsObserver](https://github.com/FactoryTalk-Optix/Optix_Sample_AlarmEventsObserver) patterns.\n\n## Repository Purpose\nSubscribe to alarm changes via the IEventRegistration interface to trigger custom actions when alarms get interacted with.\n\n## 0xSCADA Integration Goals\n- [ ] Implement alarm observer pattern in TypeScript\n- [ ] Create pub/sub for alarm state changes\n- [ ] Add webhook notifications for alarm events\n- [ ] Support multi-subscriber alarm routing\n\n## Acceptance Criteria\n- Alarm observer service in `server/services/alarms/`\n- WebSocket push for alarm updates\n- Webhook integration for external systems\n- Integration test with alarm simulation\n\n## References\n- Event subscription: `EventService.onEvent()`\n- Alarm events: `EventType.ALARM`"
+    },
+    {
+      "id": 14,
+      "title": "[Optix/Alarms] Implement multi-alarm acknowledgment with comments",
+      "path": "Path 6: Alarms & Events",
+      "priority": "P0",
+      "repository": "Optix_Sample_AcknowledgeAndConfirmMultipleAlarms",
+      "stars": 2,
+      "labels": ["optix", "alarms", "acknowledgment", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_AcknowledgeAndConfirmMultipleAlarms](https://github.com/FactoryTalk-Optix/Optix_Sample_AcknowledgeAndConfirmMultipleAlarms) (2 stars) patterns.\n\n## Repository Purpose\nDemonstrates how to acknowledge and confirm multiple alarms with additional comments from an AlarmGrid.\n\n## 0xSCADA Integration Goals\n- [ ] Implement batch alarm acknowledgment API\n- [ ] Add comment/reason field to acknowledgments\n- [ ] Create audit trail for all acknowledgments\n- [ ] Support electronic signature for compliance\n\n## Acceptance Criteria\n- `POST /api/alarms/acknowledge-batch` endpoint\n- Comments stored with acknowledgment events\n- Signed acknowledgment events created\n- Integration test with batch acknowledgment\n\n## References\n- Acknowledgment events: `createAcknowledgementEvent()`\n- API routes: `server/routes.ts`"
+    },
+    {
+      "id": 15,
+      "title": "[Optix/Recipes] Implement CFR21-compliant recipe auditing",
+      "path": "Path 7: Recipes & Production",
+      "priority": "P0",
+      "repository": "Optix_Sample_RecipesWithAudit",
+      "stars": 1,
+      "labels": ["optix", "recipes", "cfr21", "compliance", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_RecipesWithAudit](https://github.com/FactoryTalk-Optix/Optix_Sample_RecipesWithAudit) for regulated industries.\n\n## Repository Purpose\nSample recipes auditing for CFR21-like use cases in pharmaceutical and regulated manufacturing.\n\n## 0xSCADA Integration Goals\n- [ ] Add recipe table to schema with version control\n- [ ] Implement recipe change events with signatures\n- [ ] Create audit report generation\n- [ ] Support electronic signatures per 21 CFR Part 11\n\n## Acceptance Criteria\n- Recipe schema with audit fields\n- Recipe change events blockchain-anchored\n- CFR21-compliant audit report generator\n- Integration test with recipe lifecycle\n\n## References\n- Event signing: `signEvent()` in `server/crypto/`\n- Blockchain anchoring: `server/merkle/`"
+    },
+    {
+      "id": 16,
+      "title": "[Optix/Security] Implement two-factor authentication",
+      "path": "Path 8: Authentication & Security",
+      "priority": "P0",
+      "repository": "Optix_Sample_TwoFactorsAuthentication",
+      "stars": 0,
+      "labels": ["optix", "security", "2fa", "authentication", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_TwoFactorsAuthentication](https://github.com/FactoryTalk-Optix/Optix_Sample_TwoFactorsAuthentication) patterns.\n\n## Repository Purpose\nDemonstrates how to implement two-factors authentication (OTP, MFA) in FactoryTalk Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Add TOTP-based 2FA to user authentication\n- [ ] Implement backup codes for recovery\n- [ ] Create 2FA enrollment workflow\n- [ ] Add hardware key support (WebAuthn)\n\n## Acceptance Criteria\n- 2FA toggle in user settings\n- TOTP verification on login\n- Backup codes generated and stored encrypted\n- Integration test with OTP verification\n\n## References\n- User schema: `users` table\n- Authentication: `server/auth/`"
+    },
+    {
+      "id": 17,
+      "title": "[Optix/Security] Implement advanced user management and RBAC",
+      "path": "Path 8: Authentication & Security",
+      "priority": "P0",
+      "repository": "Optix_Sample_AdvancedUsersManagement",
+      "stars": 1,
+      "labels": ["optix", "security", "rbac", "users", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_AdvancedUsersManagement](https://github.com/FactoryTalk-Optix/Optix_Sample_AdvancedUsersManagement) patterns.\n\n## Repository Purpose\nCustom users management with advanced features including groups, roles, and permissions.\n\n## 0xSCADA Integration Goals\n- [ ] Enhance RBAC with site-level permissions\n- [ ] Add hierarchical role inheritance\n- [ ] Implement permission delegation\n- [ ] Create audit log for permission changes\n\n## Acceptance Criteria\n- Site-scoped permissions working\n- Role hierarchy in schema\n- Permission change events generated\n- Integration test with permission checks\n\n## References\n- User roles: `userRoles` table\n- Sites: `sites` table"
+    },
+    {
+      "id": 18,
+      "title": "[Optix/Security] Implement RFID hardware authentication",
+      "path": "Path 8: Authentication & Security",
+      "priority": "P1",
+      "repository": "Login_By_RFID",
+      "stars": 1,
+      "labels": ["optix", "security", "rfid", "hardware", "P1"],
+      "body": "## Overview\nStudy [Login_By_RFID](https://github.com/FactoryTalk-Optix/Login_By_RFID) for hardware authentication patterns.\n\n## Repository Purpose\nLogin via pcProx RFID reader or keyboard emulation hardware.\n\n## 0xSCADA Integration Goals\n- [ ] Document RFID integration patterns\n- [ ] Add hardware token support to auth flow\n- [ ] Create physical access logging events\n- [ ] Support badge-in/badge-out tracking\n\n## Acceptance Criteria\n- RFID auth documentation complete\n- Hardware token schema additions\n- Physical access events created\n- Integration design documented\n\n## References\n- Authentication: `server/auth/`\n- Events: `server/events/index.ts`"
+    },
+    {
+      "id": 19,
+      "title": "[Optix/Observability] Implement Prometheus metrics exporter",
+      "path": "Path 9: Monitoring & Observability",
+      "priority": "P0",
+      "repository": "Optix_Sample_PrometheusMetricsExporter",
+      "stars": 0,
+      "labels": ["optix", "observability", "prometheus", "metrics", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Sample_PrometheusMetricsExporter](https://github.com/FactoryTalk-Optix/Optix_Sample_PrometheusMetricsExporter) patterns.\n\n## Repository Purpose\nDemonstrates how to create a Prometheus endpoint to expose custom metrics from Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Add `/metrics` endpoint with Prometheus format\n- [ ] Export event throughput metrics\n- [ ] Export batch anchoring metrics\n- [ ] Create Grafana dashboard templates\n\n## Acceptance Criteria\n- Prometheus metrics endpoint at `/metrics`\n- Key metrics: events/sec, batch latency, anchor status\n- Grafana dashboard in `/docker/grafana/`\n- Integration test for metrics endpoint\n\n## References\n- Express app: `server/index.ts`\n- Event batching: `server/merkle/`"
+    },
+    {
+      "id": 20,
+      "title": "[Optix/Observability] Implement data aggregation dashboard patterns",
+      "path": "Path 9: Monitoring & Observability",
+      "priority": "P1",
+      "repository": "Optix_Sample_DataAggregatorDashboard",
+      "stars": 2,
+      "labels": ["optix", "observability", "dashboard", "aggregation", "P1"],
+      "body": "## Overview\nStudy [Optix_Sample_DataAggregatorDashboard](https://github.com/FactoryTalk-Optix/Optix_Sample_DataAggregatorDashboard) (2 stars) patterns.\n\n## Repository Purpose\nDemonstration of usage of FT Optix as data aggregator and dashboarding application.\n\n## 0xSCADA Integration Goals\n- [ ] Document multi-site data aggregation patterns\n- [ ] Create aggregation service for cross-site metrics\n- [ ] Implement rollup queries for historical data\n- [ ] Add fleet-wide dashboard capabilities\n\n## Acceptance Criteria\n- Data aggregation service in `server/services/aggregation/`\n- Multi-site query API endpoints\n- Fleet dashboard prototype in client\n- Integration test with multi-site data\n\n## References\n- Sites schema: `sites` table\n- Events: `events` table"
+    },
+    {
+      "id": 21,
+      "title": "[Optix/Edge] Integrate Docker container deployment patterns",
+      "path": "Path 10: Edge & Containerization",
+      "priority": "P0",
+      "repository": "Optix_Docker_FTOptixUpdateServer",
+      "stars": 22,
+      "labels": ["optix", "docker", "edge", "deployment", "P0"],
+      "body": "## Overview\nIntegrate [Optix_Docker_FTOptixUpdateServer](https://github.com/FactoryTalk-Optix/Optix_Docker_FTOptixUpdateServer) (22 stars) patterns.\n\n## Repository Purpose\nDescribes how to create an FT Optix Docker container where users can deploy their FT Optix applications.\n\n## 0xSCADA Integration Goals\n- [ ] Study Optix containerization patterns\n- [ ] Create unified edge container with 0xSCADA + Optix\n- [ ] Implement OTA update mechanism\n- [ ] Add container health monitoring\n\n## Acceptance Criteria\n- Edge container Dockerfile in `/docker/edge/`\n- OTA update service design documented\n- Health check endpoints implemented\n- Container deployment tested\n\n## References\n- Docker compose: `docker-compose.yml`\n- Ubiquity bridge: `ubiquity-bridge/Dockerfile`"
+    },
+    {
+      "id": 22,
+      "title": "[Optix/Edge] Study OptixEdge module source for edge integration",
+      "path": "Path 10: Edge & Containerization",
+      "priority": "P0",
+      "repository": "OptixEdge_WizardApp",
+      "stars": 7,
+      "labels": ["optix", "edge", "hardware", "module", "P0"],
+      "body": "## Overview\nStudy [OptixEdge_WizardApp](https://github.com/FactoryTalk-Optix/OptixEdge_WizardApp) (7 stars) for hardware edge patterns.\n\n## Repository Purpose\nSource code of the default application running on the AB OptixEdge module.\n\n## 0xSCADA Integration Goals\n- [ ] Understand OptixEdge hardware capabilities\n- [ ] Document edge module integration patterns\n- [ ] Plan Ubiquity SDK deployment to OptixEdge\n- [ ] Create edge-to-cloud sync architecture\n\n## Acceptance Criteria\n- Edge hardware documentation in `/docs/optix/edge-hardware.md`\n- Integration architecture diagram\n- Ubiquity SDK edge deployment plan\n- Hardware requirements documented\n\n## References\n- Ubiquity SDK: `ubiquity-bridge/`\n- Gateway: `server/gateway/index.ts`"
+    },
+    {
+      "id": 23,
+      "title": "[Optix/Protocols] Implement Modbus TCP server capability",
+      "path": "Path 2: OPC UA & Industrial Protocols",
+      "priority": "P2",
+      "repository": "ModbusServerTCP",
+      "stars": 3,
+      "labels": ["optix", "modbus", "protocol", "server", "P2"],
+      "body": "## Overview\nStudy [ModbusServerTCP](https://github.com/FactoryTalk-Optix/ModbusServerTCP) (3 stars) for Modbus server patterns.\n\n## Repository Purpose\nUse FactoryTalk Optix as a Modbus TCP server to expose data to Modbus clients.\n\n## 0xSCADA Integration Goals\n- [ ] Add Modbus server capability to gateway\n- [ ] Expose 0xSCADA data via Modbus registers\n- [ ] Create register mapping configuration\n- [ ] Support legacy HMI integration\n\n## Acceptance Criteria\n- Modbus TCP server in gateway\n- Register mapping table in schema\n- Legacy HMI can read 0xSCADA data\n- Integration test with Modbus client\n\n## References\n- Gateway: `server/gateway/index.ts`\n- Protocol drivers: `ProtocolType` enum"
+    },
+    {
+      "id": 24,
+      "title": "[Optix/MQTT] Implement MQTT store-and-forward for offline resilience",
+      "path": "Path 3: MQTT & IoT",
+      "priority": "P1",
+      "repository": "StoreAndForward_Server",
+      "stars": 0,
+      "labels": ["optix", "mqtt", "resilience", "offline", "P1"],
+      "body": "## Overview\nIntegrate [StoreAndForward_Server](https://github.com/FactoryTalk-Optix/StoreAndForward_Server) + [StoreAndForward_Client](https://github.com/FactoryTalk-Optix/StoreAndForward_Client) patterns.\n\n## Repository Purpose\nDemonstrates how to create a Store and Forward server/client via MQTT for network resilience.\n\n## 0xSCADA Integration Goals\n- [ ] Implement event buffering for offline scenarios\n- [ ] Create sync protocol for reconnection\n- [ ] Add conflict resolution for late events\n- [ ] Ensure event ordering preserved\n\n## Acceptance Criteria\n- Event buffer service in `server/services/buffer/`\n- Automatic sync on reconnection\n- Events maintain causal ordering\n- Integration test with network interruption simulation\n\n## References\n- Events: `server/events/index.ts`\n- Merkle batching: `server/merkle/`"
+    },
+    {
+      "id": 25,
+      "title": "[Optix/Foundation] Study Runtime NetLogic training for event generation",
+      "path": "Path 1: Foundation",
+      "priority": "P0",
+      "repository": "Training_NetLogicRuntime",
+      "stars": 6,
+      "labels": ["optix", "foundation", "netlogic", "runtime", "P0"],
+      "body": "## Overview\nStudy [Training_NetLogicRuntime](https://github.com/FactoryTalk-Optix/Training_NetLogicRuntime) (6 stars) for runtime patterns.\n\n## Repository Purpose\nRuntime NetLogic are C# snippets that can be executed while the runtime is running.\n\n## 0xSCADA Integration Goals\n- [ ] Document runtime NetLogic patterns\n- [ ] Identify event generation patterns\n- [ ] Create TypeScript equivalents for Node.js\n- [ ] Map to 0xSCADA event model\n\n## Acceptance Criteria\n- Runtime patterns documented\n- At least 3 patterns converted to TypeScript\n- Event generation patterns identified\n- Documentation in `/docs/optix/runtime-patterns.md`\n\n## References\n- Events: `server/events/index.ts`\n- Ubiquity client: `server/services/ubiquity/`"
+    },
+    {
+      "id": 26,
+      "title": "[Optix/Foundation] Study Design-Time NetLogic for code generation tooling",
+      "path": "Path 1: Foundation",
+      "priority": "P0",
+      "repository": "Training_NetLogicDesignTime",
+      "stars": 8,
+      "labels": ["optix", "foundation", "netlogic", "designtime", "P0"],
+      "body": "## Overview\nStudy [Training_NetLogicDesignTime](https://github.com/FactoryTalk-Optix/Training_NetLogicDesignTime) (8 stars) for design-time patterns.\n\n## Repository Purpose\nDesignTime NetLogic are bits of C# code used to speed up project development through automation.\n\n## 0xSCADA Integration Goals\n- [ ] Document design-time automation patterns\n- [ ] Identify code generation patterns\n- [ ] Plan AI-assisted code generation integration\n- [ ] Create tooling for Optix project automation\n\n## Acceptance Criteria\n- Design-time patterns documented\n- Code generation workflow defined\n- AI integration points identified\n- Documentation in `/docs/optix/designtime-patterns.md`\n\n## References\n- Code generation events: `EventType.CODE_GENERATION`\n- Deployment intents: `EventType.DEPLOYMENT_INTENT`"
+    },
+    {
+      "id": 27,
+      "title": "[Optix/Database] Implement NetLogic database interaction patterns",
+      "path": "Path 4: Database & Data Persistence",
+      "priority": "P0",
+      "repository": "Optix_Sample_NetLogicDatabaseInteraction",
+      "stars": 1,
+      "labels": ["optix", "database", "netlogic", "queries", "P0"],
+      "body": "## Overview\nStudy [Optix_Sample_NetLogicDatabaseInteraction](https://github.com/FactoryTalk-Optix/Optix_Sample_NetLogicDatabaseInteraction) for database patterns.\n\n## Repository Purpose\nExamples on how to perform queries using NetLogic code in FactoryTalk Optix.\n\n## 0xSCADA Integration Goals\n- [ ] Document Optix database query patterns\n- [ ] Create equivalent Drizzle ORM queries\n- [ ] Identify optimization opportunities\n- [ ] Plan query standardization\n\n## Acceptance Criteria\n- Query patterns documented\n- Drizzle equivalents created\n- Performance comparison documented\n- Pattern library in `/docs/optix/query-patterns.md`\n\n## References\n- Drizzle ORM: `server/db.ts`\n- Schema: `shared/schema.ts`"
+    },
+    {
+      "id": 28,
+      "title": "[Optix/Protocols] Implement OPC UA M2M synchronization",
+      "path": "Path 2: OPC UA & Industrial Protocols",
+      "priority": "P1",
+      "repository": "FeaturesDemo2_M2M_Client",
+      "stars": 1,
+      "labels": ["optix", "opc-ua", "m2m", "sync", "P1"],
+      "body": "## Overview\nStudy [FeaturesDemo2_M2M_Client](https://github.com/FactoryTalk-Optix/FeaturesDemo2_M2M_Client) for M2M sync patterns.\n\n## Repository Purpose\nOPC/UA synchronization of screens, tags, and alarms between machines.\n\n## 0xSCADA Integration Goals\n- [ ] Implement multi-site data synchronization\n- [ ] Create OPC UA-based event replication\n- [ ] Add conflict resolution for concurrent updates\n- [ ] Support hierarchical site topology\n\n## Acceptance Criteria\n- M2M sync service in `server/services/sync/`\n- Cross-site event replication working\n- Conflict resolution strategy implemented\n- Integration test with multi-site scenario\n\n## References\n- Sites: `sites` table\n- Events: `events` table"
+    },
+    {
+      "id": 29,
+      "title": "[Optix/Foundation] Integrate ToolboX utility classes",
+      "path": "Path 1: Foundation",
+      "priority": "P1",
+      "repository": "ToolboX",
+      "stars": 3,
+      "labels": ["optix", "foundation", "utilities", "P1"],
+      "body": "## Overview\nStudy [ToolboX](https://github.com/FactoryTalk-Optix/ToolboX) (3 stars) for reusable utility patterns.\n\n## Repository Purpose\nUseful classes for Runtime or Design-time NetLogics - a utility library.\n\n## 0xSCADA Integration Goals\n- [ ] Identify reusable utility patterns\n- [ ] Create TypeScript equivalents\n- [ ] Add to 0xSCADA utility library\n- [ ] Document usage patterns\n\n## Acceptance Criteria\n- Utility patterns identified and documented\n- TypeScript implementations in `server/utils/`\n- Usage examples in documentation\n- Unit tests for utilities\n\n## References\n- Existing utilities: `server/utils/` (if exists)\n- Services: `server/services/`"
+    },
+    {
+      "id": 30,
+      "title": "[Optix/MQTT] Implement MQTT data aggregator pattern",
+      "path": "Path 3: MQTT & IoT",
+      "priority": "P1",
+      "repository": "MQTT_DataAggregator",
+      "stars": 1,
+      "labels": ["optix", "mqtt", "aggregation", "P1"],
+      "body": "## Overview\nStudy [MQTT_DataAggregator](https://github.com/FactoryTalk-Optix/MQTT_DataAggregator) + [MQTT_Field](https://github.com/FactoryTalk-Optix/MQTT_Field) patterns.\n\n## Repository Purpose\nMQTT Data Aggregator application that works with field devices for centralized data collection.\n\n## 0xSCADA Integration Goals\n- [ ] Implement central MQTT aggregation service\n- [ ] Create field device subscription management\n- [ ] Add topic-based event routing\n- [ ] Support high-volume message ingestion\n\n## Acceptance Criteria\n- MQTT aggregator service in `server/services/mqtt/`\n- Dynamic topic subscription\n- Event creation from MQTT messages\n- Integration test with MQTT broker\n\n## References\n- Events: `server/events/index.ts`\n- Gateway: `server/gateway/index.ts`"
+    }
+  ]
+}
