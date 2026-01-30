@@ -1,0 +1,414 @@
+name: Dependency Management
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Check for dependency updates daily at 1 AM UTC
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+
+jobs:
+  # ==========================================================================
+  # DEPENDENCY AUDIT
+  # ==========================================================================
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run npm audit
+        run: npm audit --audit-level=high
+        continue-on-error: true
+
+      - name: Run Snyk security scan
+        uses: snyk/actions/node@master
+        continue-on-error: true
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+        with:
+          args: --severity-threshold=high
+
+      - name: Check for outdated dependencies
+        run: |
+          echo "Checking for outdated dependencies..."
+          npm outdated > outdated.txt || true
+          
+          if [ -s outdated.txt ]; then
+            echo "⚠️ Outdated dependencies found:"
+            cat outdated.txt
+          else
+            echo "✅ All dependencies are up to date"
+          fi
+
+      - name: Upload outdated dependencies report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: outdated-dependencies
+          path: outdated.txt
+          retention-days: 7
+
+  # ==========================================================================
+  # DEPENDENCY UPDATES
+  # ==========================================================================
+  dependency-updates:
+    name: Dependency Updates
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update patch dependencies
+        run: |
+          echo "Updating patch dependencies..."
+          npm update --save
+          
+          # Check if any dependencies were updated
+          if git diff --quiet package*.json; then
+            echo "No patch updates available"
+          else
+            echo "Patch dependencies updated"
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add package*.json
+            git commit -m "chore: update patch dependencies"
+            git push
+          fi
+
+      - name: Create PR for minor updates
+        run: |
+          echo "Creating PR for minor updates..."
+          
+          # Create a new branch for minor updates
+          git checkout -b chore/dependency-updates-$(date +%Y%m%d)
+          
+          # Update minor dependencies
+          npx npm-check-updates -u --target minor
+          npm install
+          
+          # Check if any dependencies were updated
+          if git diff --quiet package*.json; then
+            echo "No minor updates available"
+            git checkout main
+            git branch -D chore/dependency-updates-$(date +%Y%m%d)
+          else
+            echo "Minor dependencies updated"
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add package*.json
+            git commit -m "chore: update minor dependencies"
+            git push --set-upstream origin chore/dependency-updates-$(date +%Y%m%d)
+            
+            # Create pull request
+            gh pr create --title "chore: update minor dependencies" --body "Automated dependency updates for minor versions" --base main --head chore/dependency-updates-$(date +%Y%m%d) || true
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ==========================================================================
+  # LICENSE COMPLIANCE
+  # ==========================================================================
+  license-compliance:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check license compliance
+        run: |
+          echo "Checking license compliance..."
+          
+          # Generate license report
+          npx license-checker --json > licenses.json
+          
+          # Check for forbidden licenses
+          FORBIDDEN_LICENSES=("GPL" "AGPL" "LGPL" "UNLICENSED")
+          
+          for license in "${FORBIDDEN_LICENSES[@]}"; do
+            if grep -q "\"licenses.*$license" licenses.json; then
+              echo "❌ Forbidden license found: $license"
+              grep "\"licenses.*$license" licenses.json
+              exit 1
+            fi
+          done
+          
+          echo "✅ All licenses are compliant"
+
+      - name: Generate license report
+        run: |
+          # Generate human-readable license report
+          npx license-checker --csv > licenses.csv
+          
+          echo "License report generated"
+          head -20 licenses.csv
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: licenses.json,licenses.csv
+          retention-days: 30
+
+  # ==========================================================================
+  # SECURITY ADVISORIES
+  # ==========================================================================
+  security-advisories:
+    name: Security Advisories
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Check for security advisories
+        run: |
+          echo "Checking for security advisories..."
+          
+          # Run npm audit with JSON output
+          npm audit --json > audit-report.json || true
+          
+          # Check for high/critical vulnerabilities
+          HIGH_VULNS=$(jq '.vulnerabilities | map(select(.severity >= 7)) | length' audit-report.json 2>/dev/null || echo "0")
+          CRITICAL_VULNS=$(jq '.vulnerabilities | map(select(.severity >= 9)) | length' audit-report.json 2>/dev/null || echo "0")
+          
+          echo "High vulnerabilities: $HIGH_VULNS"
+          echo "Critical vulnerabilities: $CRITICAL_VULNS"
+          
+          if [ "$CRITICAL_VULNS" -gt 0 ]; then
+            echo "❌ Critical vulnerabilities found!"
+            jq '.vulnerabilities | map(select(.severity >= 9)) | .[] | {name: .name, severity: .severity, url: .url}' audit-report.json
+            exit 1
+          elif [ "$HIGH_VULNS" -gt 0 ]; then
+            echo "⚠️ High vulnerabilities found!"
+            jq '.vulnerabilities | map(select(.severity >= 7 and .severity < 9)) | .[] | {name: .name, severity: .severity, url: .url}' audit-report.json
+          else
+            echo "✅ No high or critical vulnerabilities found"
+          fi
+
+      - name: Create security advisory PR
+        if: env.HIGH_VULNS > 0 || env.CRITICAL_VULNS > 0
+        run: |
+          echo "Creating security advisory PR..."
+          
+          # Create a new branch for security updates
+          git checkout -b security/security-updates-$(date +%Y%m%d)
+          
+          # Update vulnerable dependencies
+          npm audit fix --force
+          
+          # Check if any dependencies were updated
+          if git diff --quiet package*.json; then
+            echo "No security updates available"
+            git checkout main
+            git branch -D security/security-updates-$(date +%Y%m%d)
+          else
+            echo "Security dependencies updated"
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add package*.json
+            git commit -m "security: update vulnerable dependencies"
+            git push --set-upstream origin security/security-updates-$(date +%Y%m%d)
+            
+            # Create pull request
+            gh pr create --title "security: update vulnerable dependencies" --body "Automated security updates to address high/critical vulnerabilities" --base main --head security/security-updates-$(date +%Y%m%d) || true
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HIGH_VULNS: ${{ env.HIGH_VULNS }}
+          CRITICAL_VULNS: ${{ env.CRITICAL_VULNS }}
+
+      - name: Upload security report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-report
+          path: audit-report.json
+          retention-days: 30
+
+  # ==========================================================================
+  # DEPENDENCY GRAPH ANALYSIS
+  # ==========================================================================
+  dependency-graph:
+    name: Dependency Graph Analysis
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate dependency graph
+        run: |
+          echo "Generating dependency graph..."
+          
+          # Install dependency graph generator
+          npm install -g dependency-cruiser
+          
+          # Generate dependency graph
+          npx depcruise --output-type dot src/ > dependency-graph.dot
+          
+          # Convert to SVG if possible
+          if command -v dot &> /dev/null; then
+            dot -Tsvg dependency-graph.dot -o dependency-graph.svg
+          fi
+          
+          echo "Dependency graph generated"
+
+      - name: Analyze dependency metrics
+        run: |
+          echo "Analyzing dependency metrics..."
+          
+          # Get dependency count
+          DEP_COUNT=$(npx depcruise --output-type json src/ | jq '.summary.totalDependencies')
+          echo "Total dependencies: $DEP_COUNT"
+          
+          # Check for circular dependencies
+          CIRCULAR_DEPS=$(npx depcruise --output-type json src/ | jq '.summary.circular')
+          echo "Circular dependencies: $CIRCULAR_DEPS"
+          
+          if [ "$CIRCULAR_DEPS" -gt 0 ]; then
+            echo "⚠️ Circular dependencies found!"
+            npx depcruise --output-type err src/ || true
+          else
+            echo "✅ No circular dependencies found"
+          fi
+
+      - name: Upload dependency graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: dependency-graph
+          path: dependency-graph.dot,dependency-graph.svg
+          retention-days: 30
+
+  # ==========================================================================
+  # DEPENDENCY CLEANUP
+  # ==========================================================================
+  dependency-cleanup:
+    name: Dependency Cleanup
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Find unused dependencies
+        run: |
+          echo "Finding unused dependencies..."
+          
+          # Install depcheck
+          npx depcheck . --json > unused-deps.json || true
+          
+          # Check for unused dependencies
+          UNUSED_DEPS=$(jq '.dependencies | length' unused-deps.json 2>/dev/null || echo "0")
+          DEV_UNUSED_DEPS=$(jq '.devDependencies | length' unused-deps.json 2>/dev/null || echo "0")
+          
+          echo "Unused production dependencies: $UNUSED_DEPS"
+          echo "Unused development dependencies: $DEV_UNUSED_DEPS"
+          
+          if [ "$UNUSED_DEPS" -gt 0 ] || [ "$DEV_UNUSED_DEPS" -gt 0 ]; then
+            echo "⚠️ Unused dependencies found:"
+            cat unused-deps.json
+          else
+            echo "✅ No unused dependencies found"
+          fi
+
+      - name: Create cleanup PR
+        if: env.UNUSED_DEPS > 0 || env.DEV_UNUSED_DEPS > 0
+        run: |
+          echo "Creating cleanup PR..."
+          
+          # Create a new branch for cleanup
+          git checkout -b chore/dependency-cleanup-$(date +%Y%m%d)
+          
+          # Remove unused dependencies
+          npx depcheck . --skip-cmd || true
+          
+          # Check if any dependencies were removed
+          if git diff --quiet package*.json; then
+            echo "No dependencies to remove"
+            git checkout main
+            git branch -D chore/dependency-cleanup-$(date +%Y%m%d)
+          else
+            echo "Unused dependencies removed"
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add package*.json
+            git commit -m "chore: remove unused dependencies"
+            git push --set-upstream origin chore/dependency-cleanup-$(date +%Y%m%d)
+            
+            # Create pull request
+            gh pr create --title "chore: remove unused dependencies" --body "Automated removal of unused dependencies" --base main --head chore/dependency-cleanup-$(date +%Y%m%d) || true
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          UNUSED_DEPS: ${{ env.UNUSED_DEPS }}
+          DEV_UNUSED_DEPS: ${{ env.DEV_UNUSED_DEPS }}
+
+      - name: Upload cleanup report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: cleanup-report
+          path: unused-deps.json
+          retention-days: 7

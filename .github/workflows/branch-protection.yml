@@ -1,0 +1,93 @@
+name: Branch Protection Check
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+jobs:
+  branch-protection:
+    name: Branch Protection Validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR requirements
+        run: |
+          echo "Checking PR requirements for main branch..."
+          
+          # Check if PR has description
+          PR_BODY="${{ github.event.pull_request.body }}"
+          if [ -z "$PR_BODY" ]; then
+            echo "❌ PR must have a description"
+            exit 1
+          fi
+          
+          # Check if PR is not a draft
+          if [ "${{ github.event.pull_request.draft }}" == "true" ]; then
+            echo "❌ PR cannot be in draft state for main branch"
+            exit 1
+          fi
+          
+          echo "✅ PR requirements validated"
+
+  required-checks:
+    name: Required Status Checks
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for required checks
+        uses: lewagon/wait-on-check-action@v1.3.4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          wait-interval: 10
+          check-regexp: '^(DCO|Lint|Tests|Build|Security).*'
+          allowed-conclusions: success
+
+  size-limit:
+    name: PR Size Limit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check PR size
+        run: |
+          # Get the number of changed lines
+          CHANGED_LINES=$(git diff --stat HEAD~1 HEAD | tail -n1 | awk '{print $4}')
+          
+          # Warn if PR is too large (>1000 lines)
+          if [ "$CHANGED_LINES" -gt 1000 ]; then
+            echo "⚠️ Warning: PR is large ($CHANGED_LINES lines). Consider splitting into smaller PRs."
+          fi
+          
+          echo "📊 PR size: $CHANGED_LINES lines changed"
+
+  conventional-commits:
+    name: Conventional Commits
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Check commit messages
+        run: |
+          # Get all commits in the PR
+          COMMITS=$(git log --format=%s HEAD~1..HEAD)
+          
+          # Check each commit message follows conventional commits
+          while IFS= read -r commit; do
+            if [[ ! "$commit" =~ ^(feat|fix|docs|style|refactor|test|chore|perf|ci|build|revert)(\(.+\))?: .+ ]]; then
+              echo "❌ Commit message doesn't follow conventional commits: $commit"
+              echo "Expected format: type(scope): description"
+              exit 1
+            fi
+          done <<< "$COMMITS"
+          
+          echo "✅ All commit messages follow conventional commits"

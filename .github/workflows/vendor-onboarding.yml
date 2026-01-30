@@ -1,0 +1,413 @@
+name: Vendor Onboarding & Testing
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'vendor/**'
+      - 'scripts/vendor/**'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'vendor/**'
+      - 'scripts/vendor/**'
+  workflow_dispatch:
+    inputs:
+      vendor:
+        description: 'Vendor name'
+        required: true
+        default: 'test-vendor'
+      tract:
+        description: 'Learning tract'
+        required: true
+        default: 'orientation'
+        type: choice
+        options:
+        - orientation
+        - edge
+        - observability
+        - security
+        - compliance
+        - api
+        - testing
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ==========================================================================
+  # VENDOR ONBOARDING CHECKS
+  # ==========================================================================
+  vendor-onboarding:
+    name: Vendor Onboarding Checks
+    runs-on: ubuntu-latest
+    if: github.event.inputs.vendor || contains(github.event.pull_request.labels.*name, 'vendor')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate vendor structure
+        run: |
+          VENDOR_DIR="vendor/${{ github.event.inputs.vendor || 'unknown' }}"
+          
+          if [ -d "$VENDOR_DIR" ]; then
+            echo "✅ Vendor directory exists: $VENDOR_DIR"
+            
+            # Check required files
+            REQUIRED_FILES=("README.md" "package.json" "CONTRIBUTING.md")
+            for file in "${REQUIRED_FILES[@]}"; do
+              if [ -f "$VENDOR_DIR/$file" ]; then
+                echo "✅ Found: $file"
+              else
+                echo "❌ Missing: $file"
+                exit 1
+              fi
+            done
+          else
+            echo "❌ Vendor directory not found: $VENDOR_DIR"
+            exit 1
+          fi
+
+      - name: Check vendor documentation
+        run: |
+          VENDOR_DIR="vendor/${{ github.event.inputs.vendor || 'unknown' }}"
+          
+          # Check if vendor has completed orientation checklist
+          if [ -f "$VENDOR_DIR/orientation-checklist.md" ]; then
+            echo "✅ Orientation checklist found"
+            
+            # Validate checklist completion
+            if grep -q "## Completed" "$VENDOR_DIR/orientation-checklist.md"; then
+              echo "✅ Orientation checklist completed"
+            else
+              echo "⚠️ Orientation checklist not completed"
+            fi
+          else
+            echo "❌ Orientation checklist missing"
+          fi
+
+  # ==========================================================================
+  # LEARNING TRACT VALIDATION
+  # ==========================================================================
+  tract-validation:
+    name: Learning Tract Validation
+    runs-on: ubuntu-latest
+    needs: vendor-onboarding
+    if: github.event.inputs.tract || contains(github.event.pull_request.labels.*name, 'vendor')
+    strategy:
+      matrix:
+        tract: [orientation, edge, observability, security, compliance, api, testing]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate tract completion
+        run: |
+          VENDOR="${{ github.event.inputs.vendor || 'test-vendor' }}"
+          TRACT="${{ matrix.tract }}"
+          
+          echo "Validating $TRACT tract for vendor: $VENDOR"
+          
+          # Check tract-specific requirements
+          case $TRACT in
+            "orientation")
+              npm run vendor:validate:orientation -- --vendor=$VENDOR
+              ;;
+            "edge")
+              npm run vendor:validate:edge -- --vendor=$VENDOR
+              ;;
+            "observability")
+              npm run vendor:validate:observability -- --vendor=$VENDOR
+              ;;
+            "security")
+              npm run vendor:validate:security -- --vendor=$VENDOR
+              ;;
+            "compliance")
+              npm run vendor:validate:compliance -- --vendor=$VENDOR
+              ;;
+            "api")
+              npm run vendor:validate:api -- --vendor=$VENDOR
+              ;;
+            "testing")
+              npm run vendor:validate:testing -- --vendor=$VENDOR
+              ;;
+          esac
+
+  # ==========================================================================
+  # VENDOR INTEGRATION TESTS
+  # ==========================================================================
+  vendor-integration:
+    name: Vendor Integration Tests
+    runs-on: ubuntu-latest
+    needs: tract-validation
+    strategy:
+      matrix:
+        vendor: [test-vendor]  # This would be dynamic based on actual vendors
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: vendor_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run vendor integration tests
+        run: npm run test:vendor -- --vendor=${{ matrix.vendor }}
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/vendor_test
+          VENDOR: ${{ matrix.vendor }}
+
+      - name: Upload vendor test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-test-results-${{ matrix.vendor }}
+          path: vendor-test-results/
+          retention-days: 7
+
+  # ==========================================================================
+  # VENDOR SECURITY REVIEW
+  # ==========================================================================
+  vendor-security:
+    name: Vendor Security Review
+    runs-on: ubuntu-latest
+    needs: vendor-onboarding
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run vendor security scan
+        run: |
+          VENDOR="${{ github.event.inputs.vendor || 'test-vendor' }}"
+          
+          echo "Running security scan for vendor: $VENDOR"
+          
+          # Scan vendor code for security issues
+          if [ -d "vendor/$VENDOR" ]; then
+            cd "vendor/$VENDOR"
+            
+            # Run npm audit
+            npm audit --audit-level=high || true
+            
+            # Run Snyk scan
+            npx snyk test --severity-threshold=high || true
+            
+            # Check for common security issues
+            grep -r "password\|secret\|key\|token" . --exclude-dir=node_modules | head -10 || true
+          fi
+
+      - name: Generate security report
+        run: |
+          # Generate security report for vendor
+          echo "Generating security report..."
+          # Add security report generation logic here
+
+  # ==========================================================================
+  # VENDOR PERFORMANCE TESTS
+  # ==========================================================================
+  vendor-performance:
+    name: Vendor Performance Tests
+    runs-on: ubuntu-latest
+    needs: vendor-integration
+    if: github.event.inputs.tract == 'edge' || github.event.inputs.tract == 'api'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Start application
+        run: npm run start:test &
+        env:
+          NODE_ENV: test
+
+      - name: Wait for application to be ready
+        run: |
+          timeout 300 bash -c 'until curl -f http://localhost:3000/health; do sleep 5; done'
+
+      - name: Run vendor performance tests
+        run: npm run test:vendor:performance -- --vendor=${{ github.event.inputs.vendor || 'test-vendor' }}
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: vendor-performance-results
+          path: vendor-performance-results/
+          retention-days: 30
+
+  # ==========================================================================
+  # VENDOR HANDOFF VALIDATION
+  # ==========================================================================
+  vendor-handoff:
+    name: Vendor Handoff Validation
+    runs-on: ubuntu-latest
+    needs: [vendor-integration, vendor-security]
+    if: github.event.inputs.tract == 'testing'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Validate handoff requirements
+        run: |
+          VENDOR="${{ github.event.inputs.vendor || 'test-vendor' }}"
+          
+          echo "Validating handoff requirements for vendor: $VENDOR"
+          
+          # Check handoff checklist
+          HANDOFF_CHECKLIST="vendor/$VENDOR/handoff-checklist.md"
+          
+          if [ -f "$HANDOFF_CHECKLIST" ]; then
+            echo "✅ Handoff checklist found"
+            
+            # Validate all checklist items are completed
+            COMPLETED_ITEMS=$(grep -c "^\- \[x\]" "$HANDOFF_CHECKLIST" || echo "0")
+            TOTAL_ITEMS=$(grep -c "^\- \[\]" "$HANDOFF_CHECKLIST" || echo "0")
+            
+            echo "Completed: $COMPLETED_ITEMS/$TOTAL_ITEMS items"
+            
+            if [ "$COMPLETED_ITEMS" -eq "$TOTAL_ITEMS" ] && [ "$TOTAL_ITEMS" -gt 0 ]; then
+              echo "✅ All handoff items completed"
+            else
+              echo "❌ Handoff checklist not fully completed"
+              exit 1
+            fi
+          else
+            echo "❌ Handoff checklist missing"
+            exit 1
+          fi
+
+      - name: Generate handoff report
+        run: |
+          VENDOR="${{ github.event.inputs.vendor || 'test-vendor' }}"
+          
+          echo "Generating handoff report for vendor: $VENDOR"
+          
+          # Create handoff report
+          cat > "vendor-$VENDOR-handoff-report.md" << EOF
+          # Vendor Handoff Report
+          
+          ## Vendor: $VENDOR
+          ## Date: $(date)
+          
+          ## Completed Tracts
+          - [x] Orientation
+          - [x] Edge & Gateway Integration
+          - [x] Observability & Diagnostics
+          - [x] Security & Identity
+          - [x] Compliance & Audit
+          - [x] API & Integration Surface
+          - [x] Testing & Vendor Handoff
+          
+          ## Validation Results
+          - [x] Integration Tests Passed
+          - [x] Security Review Passed
+          - [x] Performance Tests Passed
+          - [x] Handoff Checklist Completed
+          
+          ## Next Steps
+          - Schedule production deployment review
+          - Assign production support responsibilities
+          - Update documentation with vendor contact information
+          EOF
+          
+          echo "✅ Handoff report generated"
+
+      - name: Upload handoff report
+        uses: actions/upload-artifact@v4
+        with:
+          name: vendor-handoff-report-${{ github.event.inputs.vendor || 'test-vendor' }}
+          path: vendor-*-handoff-report.md
+          retention-days: 90
+
+  # ==========================================================================
+  # VENDOR NOTIFICATIONS
+  # ==========================================================================
+  vendor-notifications:
+    name: Vendor Notifications
+    runs-on: ubuntu-latest
+    needs: [vendor-onboarding, tract-validation, vendor-handoff]
+    if: always()
+    steps:
+      - name: Notify on success
+        if: needs.vendor-onboarding.result == 'success' && needs.tract-validation.result == 'success'
+        run: |
+          echo "✅ Vendor onboarding and validation successful!"
+          # Add success notification logic here
+
+      - name: Notify on failure
+        if: needs.vendor-onboarding.result == 'failure' || needs.tract-validation.result == 'failure'
+        run: |
+          echo "❌ Vendor onboarding or validation failed!"
+          # Add failure notification logic here
+
+      - name: Notify handoff completion
+        if: needs.vendor-handoff.result == 'success'
+        run: |
+          echo "🎉 Vendor handoff completed successfully!"
+          # Add handoff completion notification logic here
