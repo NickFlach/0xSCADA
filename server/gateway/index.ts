@@ -19,7 +19,7 @@ import { generateRandomKey } from "../crypto";
 // GATEWAY TYPES
 // =============================================================================
 
-export type ProtocolType = "OPC_UA" | "MODBUS_TCP" | "ETHERNET_IP" | "PROFINET" | "S7";
+export type ProtocolType = "OPC_UA" | "MODBUS_TCP" | "ETHERNET_IP" | "PROFINET" | "S7" | "UBIQUITY_CLOUD";
 
 export interface GatewayConfig {
   id: string;
@@ -250,6 +250,125 @@ export class ModbusTcpDriver implements ProtocolDriver {
         unit: tags[i].unit,
       }));
       
+      this.subscriptionCallback(enrichedValues);
+    }, minScanRate);
+  }
+
+  unsubscribe(): void {
+    if (this.subscriptionInterval) {
+      clearInterval(this.subscriptionInterval);
+      this.subscriptionInterval = undefined;
+    }
+    this.subscriptionCallback = undefined;
+  }
+}
+
+// =============================================================================
+// UBIQUITY CLOUD DRIVER
+// =============================================================================
+
+export class UbiquityCloudDriver implements ProtocolDriver {
+  protocol: ProtocolType = "UBIQUITY_CLOUD";
+  private connected = false;
+  private bridgeUrl: string;
+  private deviceId: string;
+  private subscriptionCallback?: (values: TagValue[]) => void;
+  private subscriptionInterval?: NodeJS.Timeout;
+
+  constructor(bridgeUrl: string, deviceId: string) {
+    this.bridgeUrl = bridgeUrl;
+    this.deviceId = deviceId;
+  }
+
+  async connect(): Promise<void> {
+    console.log(`🔌 Ubiquity Cloud: Connecting to device ${this.deviceId} via ${this.bridgeUrl}`);
+
+    try {
+      // Check device status via bridge
+      const response = await fetch(`${this.bridgeUrl}/api/devices/${this.deviceId}/status`);
+      if (response.ok) {
+        this.connected = true;
+        console.log(`✅ Ubiquity Cloud: Connected to device ${this.deviceId}`);
+      } else {
+        throw new Error(`Device ${this.deviceId} not reachable`);
+      }
+    } catch (error) {
+      console.error(`❌ Ubiquity Cloud: Connection failed`, error);
+      throw error;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    this.unsubscribe();
+    this.connected = false;
+    console.log(`🔌 Ubiquity Cloud: Disconnected from device ${this.deviceId}`);
+  }
+
+  isConnected(): boolean {
+    return this.connected;
+  }
+
+  async readTag(address: string): Promise<TagValue> {
+    if (!this.connected) throw new Error("Not connected");
+
+    // Read via Ubiquity bridge process monitor
+    try {
+      const response = await fetch(`${this.bridgeUrl}/api/processes/${this.deviceId}/metrics`);
+      const metrics = await response.json();
+
+      // Map address to metric (simplified)
+      let value: number | string | boolean = 0;
+      if (address.includes("cpu")) value = metrics.cpuUsage;
+      else if (address.includes("memory")) value = metrics.memoryUsage;
+      else if (address.includes("disk")) value = metrics.diskUsage;
+
+      return {
+        tag: address,
+        value,
+        quality: "GOOD",
+        timestamp: new Date(),
+      };
+    } catch (error) {
+      return {
+        tag: address,
+        value: 0,
+        quality: "BAD",
+        timestamp: new Date(),
+      };
+    }
+  }
+
+  async readTags(addresses: string[]): Promise<TagValue[]> {
+    return Promise.all(addresses.map(addr => this.readTag(addr)));
+  }
+
+  async writeTag(address: string, value: number | string | boolean): Promise<boolean> {
+    if (!this.connected) throw new Error("Not connected");
+
+    console.log(`📝 Ubiquity Cloud: Write ${address} = ${value} (via process action)`);
+
+    // Writing would involve process actions via the bridge
+    // This is a placeholder - actual implementation depends on what's being controlled
+    return true;
+  }
+
+  subscribe(tags: TagDefinition[], callback: (values: TagValue[]) => void): void {
+    this.subscriptionCallback = callback;
+
+    const minScanRate = Math.min(...tags.map(t => t.scanRate));
+
+    this.subscriptionInterval = setInterval(async () => {
+      if (!this.connected || !this.subscriptionCallback) return;
+
+      const values = await this.readTags(tags.map(t => t.address));
+
+      const enrichedValues = values.map((v, i) => ({
+        ...v,
+        tag: tags[i].name,
+        assetId: tags[i].assetId,
+        unit: tags[i].unit,
+      }));
+
       this.subscriptionCallback(enrichedValues);
     }, minScanRate);
   }

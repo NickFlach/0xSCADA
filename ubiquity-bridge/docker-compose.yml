@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  ubiquity-bridge:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - Ubiquity__DefaultTimeout=30000
+      - Ubiquity__MaxRetries=3
+      - Cors__AllowedOrigins__0=http://localhost:5000
+      - Cors__AllowedOrigins__1=http://localhost:3000
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - oxscada-network
+
+networks:
+  oxscada-network:
+    external: true

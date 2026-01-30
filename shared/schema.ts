@@ -1106,3 +1106,247 @@ export const insertAASSubmodelTemplateSchema = createInsertSchema(aasSubmodelTem
 
 export type InsertAASSubmodelTemplate = z.infer<typeof insertAASSubmodelTemplateSchema>;
 export type AASSubmodelTemplate = typeof aasSubmodelTemplates.$inferSelect;
+
+// =============================================================================
+// UBIQUITY IOT INTEGRATION (Rockwell FactoryTalk Optix)
+// =============================================================================
+
+// Connection status enum values
+export const UBIQUITY_CONNECTION_STATUSES = ["OFFLINE", "CONNECTING", "ONLINE", "ERROR", "MAINTENANCE"] as const;
+export const UBIQUITY_TRANSFER_DIRECTIONS = ["UPLOAD", "DOWNLOAD"] as const;
+export const UBIQUITY_TRANSFER_STATUSES = ["PENDING", "IN_PROGRESS", "COMPLETED", "FAILED", "CANCELLED"] as const;
+export const UBIQUITY_SESSION_TYPES = ["REMOTE_DESKTOP", "PROCESS_MONITOR"] as const;
+export const UBIQUITY_SESSION_STATUSES = ["PENDING", "CONNECTING", "CONNECTED", "DISCONNECTED", "ERROR"] as const;
+
+// Ubiquity Credentials (encrypted storage)
+export const ubiquityCredentials = pgTable("ubiquity_credentials", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+
+  // Encrypted credentials (AES-256-GCM)
+  encryptedUsername: text("encrypted_username").notNull(),
+  encryptedPassword: text("encrypted_password").notNull(),
+  encryptedApiKey: text("encrypted_api_key"),
+
+  // Encryption metadata
+  keyId: text("key_id").notNull(), // Reference to encryption key
+  iv: text("iv").notNull(), // Initialization vector
+  authTag: text("auth_tag").notNull(), // GCM auth tag
+
+  // Access control
+  createdBy: text("created_by").notNull(),
+  lastUsedAt: timestamp("last_used_at"),
+  expiresAt: timestamp("expires_at"),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUbiquityCredentialsSchema = createInsertSchema(ubiquityCredentials).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUbiquityCredentials = z.infer<typeof insertUbiquityCredentialsSchema>;
+export type UbiquityCredentials = typeof ubiquityCredentials.$inferSelect;
+
+// Ubiquity Domains (cloud accounts)
+export const ubiquityDomains = pgTable("ubiquity_domains", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+
+  // Cloud connection info
+  cloudEndpoint: text("cloud_endpoint").notNull(),
+  tenantId: text("tenant_id"), // Ubiquity account identifier
+
+  // Credential reference
+  credentialId: text("credential_id").notNull().references(() => ubiquityCredentials.id),
+
+  // Connection status
+  status: text("status").notNull().default("OFFLINE"),
+  lastConnected: timestamp("last_connected"),
+  errorMessage: text("error_message"),
+
+  // Bridge service endpoint
+  bridgeEndpoint: text("bridge_endpoint"), // URL to .NET bridge service
+
+  // Link to site
+  siteId: text("site_id").references(() => sites.id),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUbiquityDomainSchema = createInsertSchema(ubiquityDomains).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUbiquityDomain = z.infer<typeof insertUbiquityDomainSchema>;
+export type UbiquityDomain = typeof ubiquityDomains.$inferSelect;
+
+// Ubiquity Devices (edge devices managed via Ubiquity cloud)
+export const ubiquityDevices = pgTable("ubiquity_devices", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  domainId: text("domain_id").notNull().references(() => ubiquityDomains.id),
+
+  // Device identification
+  ubiquityDeviceId: text("ubiquity_device_id").notNull(), // ID from Ubiquity SDK
+  name: text("name").notNull(),
+  displayName: text("display_name"),
+  description: text("description"),
+
+  // Device metadata
+  deviceType: text("device_type"), // PLC, HMI, Gateway, etc.
+  model: text("model"),
+  serialNumber: text("serial_number"),
+  firmwareVersion: text("firmware_version"),
+  osVersion: text("os_version"),
+  macAddress: text("mac_address"),
+  ipAddress: text("ip_address"),
+
+  // Connectivity status
+  connectionStatus: text("connection_status").notNull().default("OFFLINE"),
+  lastSeen: timestamp("last_seen"),
+  signalStrength: integer("signal_strength"),
+
+  // Capabilities
+  supportsRemoteDesktop: boolean("supports_remote_desktop").default(false),
+  supportsFileTransfer: boolean("supports_file_transfer").default(false),
+  supportsProcessMonitor: boolean("supports_process_monitor").default(false),
+
+  // Link to 0xSCADA entities
+  controllerId: text("controller_id").references(() => controllers.id),
+  assetId: text("asset_id").references(() => assets.id),
+  aasId: text("aas_id").references(() => assetAdministrationShells.id),
+
+  // Additional metadata
+  metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertUbiquityDeviceSchema = createInsertSchema(ubiquityDevices).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+});
+
+export type InsertUbiquityDevice = z.infer<typeof insertUbiquityDeviceSchema>;
+export type UbiquityDevice = typeof ubiquityDevices.$inferSelect;
+
+// Ubiquity File Transfers (audit trail)
+export const ubiquityFileTransfers = pgTable("ubiquity_file_transfers", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  deviceId: text("device_id").notNull().references(() => ubiquityDevices.id),
+
+  // Transfer details
+  direction: text("direction").notNull(), // UPLOAD, DOWNLOAD
+  localPath: text("local_path").notNull(),
+  remotePath: text("remote_path").notNull(),
+
+  // File metadata
+  fileName: text("file_name").notNull(),
+  fileSize: integer("file_size"),
+  fileHash: text("file_hash"), // SHA-256 of file content
+  contentType: text("content_type"),
+
+  // Progress tracking
+  status: text("status").notNull().default("PENDING"),
+  progress: integer("progress").default(0), // 0-100
+  bytesTransferred: integer("bytes_transferred").default(0),
+  errorMessage: text("error_message"),
+
+  // Timing
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+
+  // Audit
+  initiatedBy: text("initiated_by").notNull(),
+  eventId: text("event_id").references(() => events.id), // Link to 0xSCADA event
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertUbiquityFileTransferSchema = createInsertSchema(ubiquityFileTransfers).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUbiquityFileTransfer = z.infer<typeof insertUbiquityFileTransferSchema>;
+export type UbiquityFileTransfer = typeof ubiquityFileTransfers.$inferSelect;
+
+// Ubiquity Sessions (remote desktop/process monitor)
+export const ubiquitySessions = pgTable("ubiquity_sessions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  deviceId: text("device_id").notNull().references(() => ubiquityDevices.id),
+
+  // Session details
+  sessionType: text("session_type").notNull(), // REMOTE_DESKTOP, PROCESS_MONITOR
+  ubiquitySessionId: text("ubiquity_session_id"), // ID from SDK
+
+  // Status
+  status: text("status").notNull().default("PENDING"),
+
+  // Session configuration
+  resolution: text("resolution"), // e.g., "1920x1080"
+  colorDepth: integer("color_depth"),
+  frameRate: integer("frame_rate"),
+
+  // Access control
+  userId: text("user_id").notNull().references(() => users.id),
+  userRole: text("user_role"),
+  permissions: jsonb("permissions").default(sql`'["view"]'::jsonb`), // ["view", "control", "clipboard"]
+
+  // Timing
+  connectedAt: timestamp("connected_at"),
+  disconnectedAt: timestamp("disconnected_at"),
+  duration: integer("duration"), // seconds
+
+  // Audit
+  disconnectReason: text("disconnect_reason"),
+  eventIds: jsonb("event_ids").default(sql`'[]'::jsonb`), // Array of event IDs
+
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertUbiquitySessionSchema = createInsertSchema(ubiquitySessions).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertUbiquitySession = z.infer<typeof insertUbiquitySessionSchema>;
+export type UbiquitySession = typeof ubiquitySessions.$inferSelect;
+
+// Ubiquity Process Snapshots
+export const ubiquityProcessSnapshots = pgTable("ubiquity_process_snapshots", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  deviceId: text("device_id").notNull().references(() => ubiquityDevices.id),
+
+  // Snapshot data
+  processes: jsonb("processes").notNull(), // Array of process info
+
+  // System metrics
+  cpuUsage: integer("cpu_usage"), // 0-100
+  memoryUsage: integer("memory_usage"), // 0-100
+  memoryTotal: integer("memory_total"), // MB
+  memoryAvailable: integer("memory_available"), // MB
+  diskUsage: integer("disk_usage"), // 0-100
+  networkUpload: integer("network_upload"), // bytes/sec
+  networkDownload: integer("network_download"), // bytes/sec
+
+  capturedAt: timestamp("captured_at").notNull().defaultNow(),
+});
+
+export const insertUbiquityProcessSnapshotSchema = createInsertSchema(ubiquityProcessSnapshots).omit({
+  id: true,
+  capturedAt: true,
+});
+
+export type InsertUbiquityProcessSnapshot = z.infer<typeof insertUbiquityProcessSnapshotSchema>;
+export type UbiquityProcessSnapshot = typeof ubiquityProcessSnapshots.$inferSelect;
