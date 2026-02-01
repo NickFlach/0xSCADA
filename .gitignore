@@ -1,15 +1,21 @@
-node_modules
-dist
+# Dependencies
+node_modules/
+
+# Environment & Secrets
+.env
+.env.*
+*.local
+.moltbook-credentials.json
+
+# Build outputs
+dist/
+build/
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# OS
 .DS_Store
-server/public
-vite.config.ts.*
-*.tar.gz
-# Coverage reports
-coverage/
-
-# Claude Code local files
-.claude-user/
-.claude/settings.local.json
-
-# Agentic QE local database
-.agentic-qe/memory.db
+Thumbs.db
