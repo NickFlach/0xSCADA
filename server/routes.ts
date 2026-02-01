@@ -175,10 +175,36 @@ export async function registerRoutes(
   // Events
   app.get("/api/events", async (req, res) => {
     try {
-      const parsedLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : 100;
-      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 ? parsedLimit : 100;
-      const events = await storage.getEventAnchors(limit);
-      res.json(events);
+      // Parse and validate pagination parameters
+      const parsedPage = req.query.page ? parseInt(req.query.page as string, 10) : 1;
+      const parsedLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : 50;
+      
+      // Validate page (must be positive integer)
+      const page = Number.isFinite(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+      
+      // Validate limit (must be between 1 and 100, default 50)
+      const limit = Number.isFinite(parsedLimit) && parsedLimit > 0 
+        ? Math.min(parsedLimit, 100) 
+        : 50;
+      
+      const { data, total } = await storage.getEventAnchorsPaginated(page, limit);
+      
+      // Calculate pagination metadata
+      const totalPages = Math.ceil(total / limit);
+      const hasNextPage = page < totalPages;
+      const hasPrevPage = page > 1;
+      
+      res.json({
+        data,
+        total,
+        page,
+        limit,
+        totalPages,
+        hasNextPage,
+        hasPrevPage,
+        nextPage: hasNextPage ? page + 1 : null,
+        prevPage: hasPrevPage ? page - 1 : null,
+      });
     } catch (error) {
       console.error("Error fetching events:", error);
       res.status(500).json({ error: "Failed to fetch events" });
