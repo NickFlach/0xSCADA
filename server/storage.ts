@@ -48,6 +48,9 @@ import type {
 const { Pool } = pg;
 
 export interface IStorage {
+  // Health Check
+  healthCheck(): Promise<{ connected: boolean; latencyMs: number }>;
+
   // Sites
   createSite(site: InsertSite): Promise<Site>;
   getSites(): Promise<Site[]>;
@@ -174,6 +177,24 @@ export class DatabaseStorage implements IStorage {
       connectionString: process.env.DATABASE_URL,
     });
     this.db = drizzle(pool, { schema });
+  }
+
+  // Health Check
+  async healthCheck(): Promise<{ connected: boolean; latencyMs: number }> {
+    const startTime = Date.now();
+    try {
+      // Simple query to verify database connectivity
+      await this.db.execute("SELECT 1");
+      return {
+        connected: true,
+        latencyMs: Date.now() - startTime,
+      };
+    } catch {
+      return {
+        connected: false,
+        latencyMs: Date.now() - startTime,
+      };
+    }
   }
 
   // Sites
