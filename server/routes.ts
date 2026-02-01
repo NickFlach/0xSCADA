@@ -59,35 +59,47 @@ export async function registerRoutes(
   // ==========================================================================
   app.get("/api/health", async (req, res) => {
     try {
-      const startTime = Date.now();
-      
-      // Check database connectivity
-      const sites = await storage.getSites();
-      const dbLatency = Date.now() - startTime;
+      // Check database connectivity with lightweight query
+      const dbHealth = await storage.healthCheck();
       
       // Check blockchain service
-      const blockchainStatus = blockchainService.isEnabled() ? "connected" : "disconnected";
+      const blockchainConnected = blockchainService.isEnabled();
       
-      res.json({
-        status: "healthy",
+      // Determine overall health status
+      const isHealthy = dbHealth.connected;
+      
+      const response = {
+        status: isHealthy ? "healthy" : "unhealthy",
         timestamp: new Date().toISOString(),
         version: "1.0.0",
         uptime: process.uptime(),
-        checks: {
+        components: {
           database: {
-            status: "healthy",
-            latency: `${dbLatency}ms`,
+            status: dbHealth.connected ? "up" : "down",
+            latencyMs: dbHealth.latencyMs,
           },
           blockchain: {
-            status: blockchainStatus,
+            status: blockchainConnected ? "up" : "down",
           },
         },
-      });
+      };
+      
+      if (isHealthy) {
+        res.status(200).json(response);
+      } else {
+        res.status(503).json(response);
+      }
     } catch (error) {
       console.error("Health check failed:", error);
       res.status(503).json({
         status: "unhealthy",
         timestamp: new Date().toISOString(),
+        version: "1.0.0",
+        uptime: process.uptime(),
+        components: {
+          database: { status: "down" },
+          blockchain: { status: "unknown" },
+        },
         error: error instanceof Error ? error.message : "Unknown error",
       });
     }
