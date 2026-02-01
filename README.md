@@ -161,6 +161,8 @@ npm run dev
 # ▸ BLUEPRINTS    http://localhost:5000/blueprints
 # ▸ CODEGEN       http://localhost:5000/codegen
 # ▸ AGENTS        http://localhost:5000/agents
+# ▸ API DOCS      http://localhost:5000/api/docs        (Swagger UI)
+# ▸ API DOCS      http://localhost:5000/api/docs/redoc  (ReDoc)
 #
 ```
 
@@ -351,6 +353,28 @@ Full CLI documentation: [`cli/README.md`](./cli/README.md)
 │                                                                             │
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
+
+<br/>
+
+---
+
+## ▓▓ API DOCUMENTATION
+
+> **📖 Interactive API Documentation**
+> 
+> Full OpenAPI 3.0 specification with interactive UI:
+> - **Swagger UI**: [http://localhost:5000/api/docs](http://localhost:5000/api/docs)
+> - **ReDoc**: [http://localhost:5000/api/docs/redoc](http://localhost:5000/api/docs/redoc)
+> - **OpenAPI Spec**: [http://localhost:5000/api/docs/openapi.yaml](http://localhost:5000/api/docs/openapi.yaml)
+>
+> The API documentation covers all 100+ endpoints including:
+> - Sites, Assets, Events, Maintenance
+> - Blueprints Engine (ISA-88 Control Modules, Phases, Units)
+> - Code Generation (Siemens SCL, Rockwell L5X, Ladder Logic)
+> - Agent Framework (Ops, ChangeControl, Compliance)
+> - Asset Administration Shell (IEC 63278 Digital Twin)
+> - Batch Anchoring & Merkle Proofs
+> - Real-time Tag Subscriptions
 
 <br/>
 

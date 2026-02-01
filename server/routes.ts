@@ -29,6 +29,7 @@ import { batchRoutes } from "./routes/batch";
 import { aasRouter } from "./routes/aas";
 import ubiquityRoutes from "./routes/ubiquity";
 import { batchAnchoringService } from "./batch-anchoring";
+import { swaggerRouter } from "./swagger";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -38,6 +39,7 @@ export async function registerRoutes(
   // ==========================================================================
   // MODULAR ROUTES
   // ==========================================================================
+  app.use("/api/docs", swaggerRouter);  // OpenAPI/Swagger documentation
   app.use("/api/agents", agentRoutes);
   app.use("/api/v2/events", eventRoutes);
   app.use("/api/batch", batchRoutes);

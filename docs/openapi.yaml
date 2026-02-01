@@ -1,0 +1,4628 @@
+openapi: 3.0.3
+info:
+  title: 0xSCADA Industrial Control Fabric API
+  description: |
+    # 0xSCADA API Documentation
+
+    **Decentralized Industrial Control Fabric** - Where Atoms Meet Bits
+
+    This API provides endpoints for managing industrial assets, events, code generation,
+    and blockchain anchoring for tamper-evident audit trails.
+
+    ## Key Features
+    - **Site & Asset Management**: Register and manage industrial sites and assets
+    - **Event Anchoring**: Immutable event logging with Ethereum blockchain anchoring
+    - **Batch Anchoring**: Merkle tree batching for high-volume events (95-99% gas savings)
+    - **Blueprints Engine**: ISA-88 batch control module management
+    - **Code Generation**: Multi-vendor PLC code generation (Siemens SCL, Rockwell L5X)
+    - **Agent Framework**: AI-driven operational agents with human-in-the-loop governance
+    - **Digital Twin (AAS)**: Asset Administration Shell per IEC 63278
+    - **Ubiquity Integration**: Remote device management via Rockwell FactoryTalk
+
+    ## Authentication
+    Currently, the API does not require authentication for development.
+    Production deployments should implement role-based access control.
+
+    ## WebSocket Support
+    Real-time data streaming is available via WebSocket connections for:
+    - Tag value updates (`/api/tags/ws`)
+    - Event notifications (`/api/ws`)
+
+  version: 2.0.0
+  license:
+    name: Apache 2.0
+    url: https://www.apache.org/licenses/LICENSE-2.0
+  contact:
+    name: The ESCO Group
+    url: https://github.com/The-ESCO-Group/0xSCADA
+
+servers:
+  - url: http://localhost:5000
+    description: Local development server
+
+tags:
+  - name: Health
+    description: System health and status endpoints
+  - name: Sites
+    description: Industrial site management
+  - name: Assets
+    description: Asset registration and tracking
+  - name: Events
+    description: Event logging and querying (legacy)
+  - name: Events v2
+    description: Enhanced event API with full anchoring support
+  - name: Batch
+    description: Merkle batch anchoring system
+  - name: Maintenance
+    description: Maintenance record management
+  - name: Blockchain
+    description: Blockchain connectivity status
+  - name: Blueprints
+    description: ISA-88 control module blueprints
+  - name: Vendors
+    description: PLC vendor configurations
+  - name: Templates
+    description: Code generation templates
+  - name: Controllers
+    description: PLC/DCS controller definitions
+  - name: Code Generation
+    description: Multi-vendor code generation
+  - name: Ladder Logic
+    description: Rockwell ladder logic generation
+  - name: Agents
+    description: AI agent framework
+  - name: AAS
+    description: Asset Administration Shell (Digital Twin)
+  - name: Ubiquity
+    description: Rockwell Ubiquity cloud integration
+  - name: Tags
+    description: Real-time tag subscription service
+  - name: WebSocket
+    description: WebSocket server management
+
+paths:
+  # ============================================================================
+  # HEALTH
+  # ============================================================================
+  /api/health:
+    get:
+      tags: [Health]
+      summary: System health check
+      description: Returns health status of database, blockchain, and other components
+      operationId: getHealth
+      responses:
+        '200':
+          description: System is healthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+        '503':
+          description: System is unhealthy
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthResponse'
+
+  # ============================================================================
+  # SITES
+  # ============================================================================
+  /api/sites:
+    get:
+      tags: [Sites]
+      summary: List all sites
+      operationId: getSites
+      responses:
+        '200':
+          description: List of industrial sites
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Site'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Sites]
+      summary: Create a new site
+      operationId: createSite
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSiteRequest'
+      responses:
+        '201':
+          description: Site created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Site'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # ASSETS
+  # ============================================================================
+  /api/assets:
+    get:
+      tags: [Assets]
+      summary: List all assets
+      operationId: getAssets
+      responses:
+        '200':
+          description: List of assets
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Asset'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Assets]
+      summary: Create a new asset
+      operationId: createAsset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAssetRequest'
+      responses:
+        '201':
+          description: Asset created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Asset'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/assets/site/{siteId}:
+    get:
+      tags: [Assets]
+      summary: Get assets by site
+      operationId: getAssetsBySite
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        '200':
+          description: List of assets for the site
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Asset'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # EVENTS (Legacy)
+  # ============================================================================
+  /api/events:
+    get:
+      tags: [Events]
+      summary: List events with pagination
+      operationId: getEvents
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            default: 1
+            minimum: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: Paginated list of events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PaginatedEvents'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Events]
+      summary: Create and anchor a new event
+      operationId: createEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventRequest'
+      responses:
+        '201':
+          description: Event created and anchored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAnchor'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # EVENTS V2 (Enhanced)
+  # ============================================================================
+  /api/v2/events:
+    get:
+      tags: [Events v2]
+      summary: Query events with filtering
+      operationId: getEventsV2
+      parameters:
+        - name: siteId
+          in: query
+          schema:
+            type: string
+        - name: assetId
+          in: query
+          schema:
+            type: string
+        - name: eventType
+          in: query
+          schema:
+            $ref: '#/components/schemas/EventType'
+        - name: originType
+          in: query
+          schema:
+            $ref: '#/components/schemas/OriginType'
+        - name: anchorStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/AnchorStatus'
+        - name: startTime
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: endTime
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+        - name: offset
+          in: query
+          schema:
+            type: integer
+            default: 0
+      responses:
+        '200':
+          description: Filtered list of events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventsV2Response'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Events v2]
+      summary: Create a signed event
+      operationId: createEventV2
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateEventV2Request'
+      responses:
+        '201':
+          description: Event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventV2'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/{id}:
+    get:
+      tags: [Events v2]
+      summary: Get event by ID
+      operationId: getEventById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event details with batch info
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventV2Detail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/{id}/verify:
+    get:
+      tags: [Events v2]
+      summary: Verify event integrity
+      operationId: verifyEvent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Verification result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventVerification'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/telemetry:
+    post:
+      tags: [Events v2]
+      summary: Create telemetry event
+      operationId: createTelemetryEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTelemetryEventRequest'
+      responses:
+        '201':
+          description: Telemetry event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventV2'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/alarm:
+    post:
+      tags: [Events v2]
+      summary: Create alarm event
+      operationId: createAlarmEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAlarmEventRequest'
+      responses:
+        '201':
+          description: Alarm event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventV2'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/command:
+    post:
+      tags: [Events v2]
+      summary: Create command event
+      operationId: createCommandEvent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCommandEventRequest'
+      responses:
+        '201':
+          description: Command event created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventV2'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/stats:
+    get:
+      tags: [Events v2]
+      summary: Get event statistics
+      operationId: getEventStats
+      parameters:
+        - name: siteId
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Event statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventStats'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/types:
+    get:
+      tags: [Events v2]
+      summary: Get available event types
+      operationId: getEventTypes
+      responses:
+        '200':
+          description: Event type metadata
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventTypesMetadata'
+
+  /api/v2/events/batches:
+    get:
+      tags: [Events v2]
+      summary: List event batches
+      operationId: getEventBatches
+      parameters:
+        - name: siteId
+          in: query
+          schema:
+            type: string
+        - name: anchorStatus
+          in: query
+          schema:
+            $ref: '#/components/schemas/AnchorStatus'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        '200':
+          description: List of event batches
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/EventBatch'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/batches/{id}:
+    get:
+      tags: [Events v2]
+      summary: Get batch with events
+      operationId: getBatchById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Batch details with events
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v2/events/batches/{id}/anchor:
+    post:
+      tags: [Events v2]
+      summary: Manually anchor a batch
+      operationId: anchorBatch
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Anchoring result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnchorResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # BATCH ANCHORING
+  # ============================================================================
+  /api/batch/stats:
+    get:
+      tags: [Batch]
+      summary: Get batch anchoring statistics
+      operationId: getBatchStats
+      responses:
+        '200':
+          description: Batch service statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchStats'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/history:
+    get:
+      tags: [Batch]
+      summary: Get batch history
+      operationId: getBatchHistory
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        '200':
+          description: Recent batch history
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/BatchHistoryItem'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/pending:
+    get:
+      tags: [Batch]
+      summary: Get pending events
+      operationId: getPendingEvents
+      responses:
+        '200':
+          description: Pending events in queue
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PendingEvents'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/flush:
+    post:
+      tags: [Batch]
+      summary: Force flush pending events
+      operationId: flushBatch
+      responses:
+        '200':
+          description: Flush result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/FlushResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/{batchId}/proof/{eventId}:
+    get:
+      tags: [Batch]
+      summary: Get Merkle proof for event
+      operationId: getEventProof
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: eventId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Merkle proof
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MerkleProof'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/config:
+    put:
+      tags: [Batch]
+      summary: Update batch configuration
+      operationId: updateBatchConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchConfigUpdate'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchConfigResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/blob/config:
+    get:
+      tags: [Batch]
+      summary: Get EIP-4844 blob configuration
+      operationId: getBlobConfig
+      responses:
+        '200':
+          description: Blob configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobConfig'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [Batch]
+      summary: Update blob configuration
+      operationId: updateBlobConfig
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlobConfigUpdate'
+      responses:
+        '200':
+          description: Updated configuration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobConfigResponse'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/batch/blob/estimate:
+    post:
+      tags: [Batch]
+      summary: Estimate blob vs calldata costs
+      operationId: estimateBlobCost
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [eventCount]
+              properties:
+                eventCount:
+                  type: integer
+                  minimum: 1
+      responses:
+        '200':
+          description: Cost estimate
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlobCostEstimate'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '503':
+          description: Blockchain not connected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+
+  # ============================================================================
+  # MAINTENANCE
+  # ============================================================================
+  /api/maintenance:
+    get:
+      tags: [Maintenance]
+      summary: List maintenance records
+      operationId: getMaintenanceRecords
+      responses:
+        '200':
+          description: List of maintenance records
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/MaintenanceRecord'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Maintenance]
+      summary: Create maintenance record
+      operationId: createMaintenanceRecord
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateMaintenanceRecordRequest'
+      responses:
+        '201':
+          description: Maintenance record created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MaintenanceRecord'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # BLOCKCHAIN
+  # ============================================================================
+  /api/blockchain/status:
+    get:
+      tags: [Blockchain]
+      summary: Get blockchain status
+      operationId: getBlockchainStatus
+      responses:
+        '200':
+          description: Blockchain connectivity status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  enabled:
+                    type: boolean
+
+  # ============================================================================
+  # BLUEPRINTS
+  # ============================================================================
+  /api/blueprints/seed:
+    post:
+      tags: [Blueprints]
+      summary: Seed database with default vendors
+      operationId: seedBlueprints
+      parameters:
+        - name: force
+          in: query
+          schema:
+            type: boolean
+            default: false
+      responses:
+        '200':
+          description: Seeding result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SeedResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/summary:
+    get:
+      tags: [Blueprints]
+      summary: Get blueprints summary
+      operationId: getBlueprintsSummary
+      responses:
+        '200':
+          description: Summary statistics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintsSummary'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/import:
+    post:
+      tags: [Blueprints]
+      summary: Import blueprint package
+      operationId: importBlueprints
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BlueprintImportRequest'
+      responses:
+        '201':
+          description: Import successful
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BlueprintImportResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/cm-types:
+    get:
+      tags: [Blueprints]
+      summary: List control module types
+      operationId: getCMTypes
+      responses:
+        '200':
+          description: List of CM types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ControlModuleType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Blueprints]
+      summary: Create control module type
+      operationId: createCMType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateCMTypeRequest'
+      responses:
+        '201':
+          description: CM type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlModuleType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/cm-types/{name}:
+    get:
+      tags: [Blueprints]
+      summary: Get CM type by name
+      operationId: getCMTypeByName
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: CM type details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ControlModuleType'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/cm-instances:
+    get:
+      tags: [Blueprints]
+      summary: List control module instances
+      operationId: getCMInstances
+      responses:
+        '200':
+          description: List of CM instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ControlModuleInstance'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/unit-types:
+    get:
+      tags: [Blueprints]
+      summary: List unit types
+      operationId: getUnitTypes
+      responses:
+        '200':
+          description: List of unit types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnitType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Blueprints]
+      summary: Create unit type
+      operationId: createUnitType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateUnitTypeRequest'
+      responses:
+        '201':
+          description: Unit type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/UnitType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/unit-instances:
+    get:
+      tags: [Blueprints]
+      summary: List unit instances
+      operationId: getUnitInstances
+      responses:
+        '200':
+          description: List of unit instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/UnitInstance'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/phase-types:
+    get:
+      tags: [Blueprints]
+      summary: List phase types
+      operationId: getPhaseTypes
+      responses:
+        '200':
+          description: List of phase types
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PhaseType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Blueprints]
+      summary: Create phase type
+      operationId: createPhaseType
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreatePhaseTypeRequest'
+      responses:
+        '201':
+          description: Phase type created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PhaseType'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/phase-instances:
+    get:
+      tags: [Blueprints]
+      summary: List phase instances
+      operationId: getPhaseInstances
+      responses:
+        '200':
+          description: List of phase instances
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/PhaseInstance'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/blueprints/design-specs:
+    get:
+      tags: [Blueprints]
+      summary: List design specifications
+      operationId: getDesignSpecs
+      responses:
+        '200':
+          description: List of design specs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DesignSpecification'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # VENDORS
+  # ============================================================================
+  /api/vendors:
+    get:
+      tags: [Vendors]
+      summary: List vendors
+      operationId: getVendors
+      responses:
+        '200':
+          description: List of vendors
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Vendor'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Vendors]
+      summary: Create vendor
+      operationId: createVendor
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateVendorRequest'
+      responses:
+        '201':
+          description: Vendor created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/vendors/{id}:
+    get:
+      tags: [Vendors]
+      summary: Get vendor by ID
+      operationId: getVendorById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Vendor details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Vendor'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # TEMPLATES
+  # ============================================================================
+  /api/templates:
+    get:
+      tags: [Templates]
+      summary: List template packages
+      operationId: getTemplates
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TemplatePackage'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Templates]
+      summary: Create template package
+      operationId: createTemplate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateTemplateRequest'
+      responses:
+        '201':
+          description: Template created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TemplatePackage'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/templates/vendor/{vendorId}:
+    get:
+      tags: [Templates]
+      summary: Get templates by vendor
+      operationId: getTemplatesByVendor
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TemplatePackage'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # DATA TYPES
+  # ============================================================================
+  /api/data-types:
+    post:
+      tags: [Vendors]
+      summary: Create data type mapping
+      operationId: createDataTypeMapping
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateDataTypeMappingRequest'
+      responses:
+        '201':
+          description: Data type mapping created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DataTypeMapping'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/data-types/vendor/{vendorId}:
+    get:
+      tags: [Vendors]
+      summary: Get data type mappings by vendor
+      operationId: getDataTypesByVendor
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of data type mappings
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DataTypeMapping'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # CONTROLLERS
+  # ============================================================================
+  /api/controllers:
+    get:
+      tags: [Controllers]
+      summary: List controllers
+      operationId: getControllers
+      responses:
+        '200':
+          description: List of controllers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Controller'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Controllers]
+      summary: Create controller
+      operationId: createController
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateControllerRequest'
+      responses:
+        '201':
+          description: Controller created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Controller'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/controllers/vendor/{vendorId}:
+    get:
+      tags: [Controllers]
+      summary: Get controllers by vendor
+      operationId: getControllersByVendor
+      parameters:
+        - name: vendorId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of controllers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Controller'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/controllers/site/{siteId}:
+    get:
+      tags: [Controllers]
+      summary: Get controllers by site
+      operationId: getControllersBySite
+      parameters:
+        - name: siteId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of controllers
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Controller'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # CODE GENERATION
+  # ============================================================================
+  /api/generated-code:
+    get:
+      tags: [Code Generation]
+      summary: List generated code
+      operationId: getGeneratedCode
+      responses:
+        '200':
+          description: List of generated code
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GeneratedCode'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Code Generation]
+      summary: Store generated code
+      operationId: createGeneratedCode
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateGeneratedCodeRequest'
+      responses:
+        '201':
+          description: Code stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GeneratedCode'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generated-code/{sourceType}/{sourceId}:
+    get:
+      tags: [Code Generation]
+      summary: Get generated code by source
+      operationId: getGeneratedCodeBySource
+      parameters:
+        - name: sourceType
+          in: path
+          required: true
+          schema:
+            type: string
+            enum: [control_module, phase, unit]
+        - name: sourceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Generated code for source
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/GeneratedCode'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generated-code/{id}/anchor:
+    post:
+      tags: [Code Generation]
+      summary: Anchor generated code to blockchain
+      operationId: anchorGeneratedCode
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Anchoring result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CodeAnchorResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generate/control-module/{cmTypeId}:
+    post:
+      tags: [Code Generation]
+      summary: Generate code for control module
+      operationId: generateControlModuleCode
+      parameters:
+        - name: cmTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCodeRequest'
+      responses:
+        '200':
+          description: Generated code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCodeResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generate/phase/{phaseTypeId}:
+    post:
+      tags: [Code Generation]
+      summary: Generate code for phase
+      operationId: generatePhaseCode
+      parameters:
+        - name: phaseTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/GenerateCodeRequest'
+      responses:
+        '200':
+          description: Generated code
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/GenerateCodeResponse'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # LADDER LOGIC
+  # ============================================================================
+  /api/ladder-logic/instructions:
+    get:
+      tags: [Ladder Logic]
+      summary: Get instruction library
+      operationId: getLadderInstructions
+      parameters:
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [bit, timer, counter, compare, math, move, program_control, file, sequential, pid, io, special]
+      responses:
+        '200':
+          description: Instruction library
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/InstructionLibrary'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generate/ladder-logic/control-module/{cmTypeId}:
+    post:
+      tags: [Ladder Logic]
+      summary: Generate ladder logic for control module
+      operationId: generateLadderLogicCM
+      parameters:
+        - name: cmTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LadderLogicOptions'
+      responses:
+        '200':
+          description: Generated ladder logic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LadderLogicResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/generate/ladder-logic/phase/{phaseTypeId}:
+    post:
+      tags: [Ladder Logic]
+      summary: Generate ladder logic for phase
+      operationId: generateLadderLogicPhase
+      parameters:
+        - name: phaseTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LadderLogicOptions'
+      responses:
+        '200':
+          description: Generated ladder logic
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LadderLogicResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/ladder-logic/batch:
+    post:
+      tags: [Ladder Logic]
+      summary: Batch rung generation from template
+      operationId: batchLadderLogic
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/BatchLadderRequest'
+      responses:
+        '200':
+          description: Batch generation result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/BatchLadderResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/ladder-logic/ai-context/{cmTypeId}:
+    post:
+      tags: [Ladder Logic]
+      summary: Generate AI prompt context
+      operationId: generateAIContext
+      parameters:
+        - name: cmTypeId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: AI context for external AI integration
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AIContextResult'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # AGENTS
+  # ============================================================================
+  /api/agents:
+    get:
+      tags: [Agents]
+      summary: List all agents
+      operationId: getAgents
+      responses:
+        '200':
+          description: List of agents
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Agent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Agents]
+      summary: Create agent
+      operationId: createAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentRequest'
+      responses:
+        '201':
+          description: Agent created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/{id}:
+    get:
+      tags: [Agents]
+      summary: Get agent by ID
+      operationId: getAgentById
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    patch:
+      tags: [Agents]
+      summary: Update agent
+      operationId: updateAgent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAgentRequest'
+      responses:
+        '200':
+          description: Agent updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Agent'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Agents]
+      summary: Delete agent
+      operationId: deleteAgent
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/{agentId}/outputs:
+    get:
+      tags: [Agents]
+      summary: Get agent outputs
+      operationId: getAgentOutputs
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent outputs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentOutput'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Agents]
+      summary: Create agent output
+      operationId: createAgentOutput
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentOutputRequest'
+      responses:
+        '201':
+          description: Output created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentOutput'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/{agentId}/proposals:
+    get:
+      tags: [Agents]
+      summary: Get agent proposals
+      operationId: getAgentProposals
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent proposals
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentProposal'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [Agents]
+      summary: Create agent proposal
+      operationId: createAgentProposal
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAgentProposalRequest'
+      responses:
+        '201':
+          description: Proposal created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProposal'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/proposals/{id}/approve:
+    post:
+      tags: [Agents]
+      summary: Approve proposal
+      operationId: approveProposal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '200':
+          description: Proposal approved
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProposal'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/proposals/{id}/reject:
+    post:
+      tags: [Agents]
+      summary: Reject proposal
+      operationId: rejectProposal
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApprovalRequest'
+      responses:
+        '200':
+          description: Proposal rejected
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentProposal'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/{agentId}/state:
+    get:
+      tags: [Agents]
+      summary: Get agent state
+      operationId: getAgentState
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Agent state entries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AgentState'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/agents/{agentId}/state/{key}:
+    put:
+      tags: [Agents]
+      summary: Set agent state value
+      operationId: setAgentState
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SetAgentStateRequest'
+      responses:
+        '200':
+          description: State updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentState'
+        '201':
+          description: State created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AgentState'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [Agents]
+      summary: Delete agent state value
+      operationId: deleteAgentState
+      parameters:
+        - name: agentId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: key
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: State deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # AAS (Asset Administration Shell)
+  # ============================================================================
+  /api/aas:
+    get:
+      tags: [AAS]
+      summary: List Asset Administration Shells
+      operationId: getAASList
+      responses:
+        '200':
+          description: List of AAS
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AAS'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [AAS]
+      summary: Create AAS
+      operationId: createAAS
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateAASRequest'
+      responses:
+        '201':
+          description: AAS created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AAS'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/aas/{aasId}:
+    get:
+      tags: [AAS]
+      summary: Get AAS by ID
+      operationId: getAASById
+      parameters:
+        - name: aasId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: AAS with submodels
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AASDetail'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    put:
+      tags: [AAS]
+      summary: Update AAS
+      operationId: updateAAS
+      parameters:
+        - name: aasId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateAASRequest'
+      responses:
+        '200':
+          description: AAS updated
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AAS'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    delete:
+      tags: [AAS]
+      summary: Delete AAS
+      operationId: deleteAAS
+      parameters:
+        - name: aasId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '204':
+          description: AAS deleted
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/aas/{aasId}/submodels:
+    get:
+      tags: [AAS]
+      summary: List submodels for AAS
+      operationId: getAASSubmodels
+      parameters:
+        - name: aasId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of submodels
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AASSubmodel'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+    post:
+      tags: [AAS]
+      summary: Create submodel
+      operationId: createSubmodel
+      parameters:
+        - name: aasId
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateSubmodelRequest'
+      responses:
+        '201':
+          description: Submodel created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AASSubmodel'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/aas/sync:
+    post:
+      tags: [AAS]
+      summary: Sync all AAS
+      operationId: syncAllAAS
+      responses:
+        '200':
+          description: Sync result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AASSyncResult'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/aas/templates:
+    get:
+      tags: [AAS]
+      summary: List submodel templates
+      operationId: getSubmodelTemplates
+      responses:
+        '200':
+          description: List of templates
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/SubmodelTemplate'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  # ============================================================================
+  # TAGS (Real-time Subscription)
+  # ============================================================================
+  /api/tags:
+    get:
+      tags: [Tags]
+      summary: List registered tags with current values
+      operationId: getTags
+      responses:
+        '200':
+          description: List of tags
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/TagWithValue'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tags/{name}:
+    get:
+      tags: [Tags]
+      summary: Get tag value
+      operationId: getTagValue
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Tag value
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagValue'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/tags/{name}/write:
+    post:
+      tags: [Tags]
+      summary: Write value to tag
+      operationId: writeTagValue
+      parameters:
+        - name: name
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [value]
+              properties:
+                value:
+                  oneOf:
+                    - type: number
+                    - type: boolean
+      responses:
+        '200':
+          description: Write result
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagWriteResult'
+        '400':
+          $ref: '#/components/responses/ValidationError'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tags/register:
+    post:
+      tags: [Tags]
+      summary: Register tags to monitor
+      operationId: registerTags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [tags]
+              properties:
+                tags:
+                  type: array
+                  items:
+                    $ref: '#/components/schemas/TagConfig'
+      responses:
+        '200':
+          description: Tags registered
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  registered:
+                    type: integer
+        '400':
+          $ref: '#/components/responses/ValidationError'
+
+  /api/tags/service/status:
+    get:
+      tags: [Tags]
+      summary: Get tag service status
+      operationId: getTagServiceStatus
+      responses:
+        '200':
+          description: Service status
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TagServiceStatus'
+
+  /api/tags/connect:
+    post:
+      tags: [Tags]
+      summary: Connect to Modbus device
+      operationId: connectTags
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [host]
+              properties:
+                host:
+                  type: string
+                port:
+                  type: integer
+                  default: 5020
+      responses:
+        '200':
+          description: Connection result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  status:
+                    $ref: '#/components/schemas/TagServiceStatus'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/tags/disconnect:
+    post:
+      tags: [Tags]
+      summary: Disconnect from Modbus device
+      operationId: disconnectTags
+      responses:
+        '200':
+          description: Disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+
+  # ============================================================================
+  # WEBSOCKET MANAGEMENT
+  # ============================================================================
+  /api/ws/health:
+    get:
+      tags: [WebSocket]
+      summary: WebSocket server health
+      operationId: getWSHealth
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                  uptime:
+                    type: number
+                  connections:
+                    type: integer
+        '503':
+          description: Unhealthy
+
+  /api/ws/metrics:
+    get:
+      tags: [WebSocket]
+      summary: Get WebSocket metrics
+      operationId: getWSMetrics
+      responses:
+        '200':
+          description: WebSocket metrics
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebSocketMetrics'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/ws/clients:
+    get:
+      tags: [WebSocket]
+      summary: List connected clients
+      operationId: getWSClients
+      responses:
+        '200':
+          description: Connected clients
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  count:
+                    type: integer
+                  clients:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/WebSocketClient'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/ws/clients/{clientId}:
+    delete:
+      tags: [WebSocket]
+      summary: Disconnect client
+      operationId: disconnectWSClient
+      parameters:
+        - name: clientId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: reason
+          in: query
+          schema:
+            type: string
+      responses:
+        '200':
+          description: Client disconnected
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+# ============================================================================
+# COMPONENTS
+# ============================================================================
+components:
+  responses:
+    ValidationError:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+
+  schemas:
+    # Common
+    Error:
+      type: object
+      properties:
+        error:
+          type: string
+        details:
+          type: array
+          items:
+            type: object
+
+    # Health
+    HealthResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [healthy, unhealthy]
+        timestamp:
+          type: string
+          format: date-time
+        version:
+          type: string
+        uptime:
+          type: number
+        components:
+          type: object
+          properties:
+            database:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [up, down]
+                latencyMs:
+                  type: number
+            blockchain:
+              type: object
+              properties:
+                status:
+                  type: string
+                  enum: [up, down, unknown]
+
+    # Enums
+    EventType:
+      type: string
+      enum: [TELEMETRY, ALARM, COMMAND, ACKNOWLEDGEMENT, MAINTENANCE, BLUEPRINT_CHANGE, CODE_GENERATION, DEPLOYMENT_INTENT]
+
+    OriginType:
+      type: string
+      enum: [GATEWAY, USER, AGENT, SYSTEM]
+
+    AnchorStatus:
+      type: string
+      enum: [PENDING, BATCHED, ANCHORED, FAILED]
+
+    # Sites
+    Site:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        location:
+          type: string
+        owner:
+          type: string
+        status:
+          type: string
+        ethereumAddress:
+          type: string
+        authorizedGateways:
+          type: array
+          items:
+            type: string
+        authorizedSigners:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateSiteRequest:
+      type: object
+      required: [name, location, owner]
+      properties:
+        name:
+          type: string
+        location:
+          type: string
+        owner:
+          type: string
+        ethereumAddress:
+          type: string
+        authorizedGateways:
+          type: array
+          items:
+            type: string
+        authorizedSigners:
+          type: array
+          items:
+            type: string
+
+    # Assets
+    Asset:
+      type: object
+      properties:
+        id:
+          type: string
+        siteId:
+          type: string
+        assetType:
+          type: string
+        nameOrTag:
+          type: string
+        critical:
+          type: boolean
+        metadata:
+          type: object
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAssetRequest:
+      type: object
+      required: [siteId, assetType, nameOrTag]
+      properties:
+        siteId:
+          type: string
+        assetType:
+          type: string
+        nameOrTag:
+          type: string
+        critical:
+          type: boolean
+          default: false
+        metadata:
+          type: object
+
+    # Events (Legacy)
+    EventAnchor:
+      type: object
+      properties:
+        id:
+          type: string
+        assetId:
+          type: string
+        eventType:
+          type: string
+        payloadHash:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        recordedBy:
+          type: string
+        txHash:
+          type: string
+        details:
+          type: string
+        fullPayload:
+          type: object
+
+    PaginatedEvents:
+      type: object
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventAnchor'
+        total:
+          type: integer
+        page:
+          type: integer
+        limit:
+          type: integer
+        totalPages:
+          type: integer
+        hasNextPage:
+          type: boolean
+        hasPrevPage:
+          type: boolean
+        nextPage:
+          type: integer
+          nullable: true
+        prevPage:
+          type: integer
+          nullable: true
+
+    CreateEventRequest:
+      type: object
+      required: [assetId, eventType, payload]
+      properties:
+        assetId:
+          type: string
+        eventType:
+          type: string
+        payload:
+          type: object
+        details:
+          type: string
+        recordedBy:
+          type: string
+
+    # Events v2
+    EventV2:
+      type: object
+      properties:
+        id:
+          type: string
+        eventType:
+          $ref: '#/components/schemas/EventType'
+        siteId:
+          type: string
+        assetId:
+          type: string
+        sourceTimestamp:
+          type: string
+          format: date-time
+        receiptTimestamp:
+          type: string
+          format: date-time
+        originType:
+          $ref: '#/components/schemas/OriginType'
+        originId:
+          type: string
+        payload:
+          type: object
+        details:
+          type: string
+        signature:
+          type: string
+        hash:
+          type: string
+        anchorStatus:
+          $ref: '#/components/schemas/AnchorStatus'
+        batchId:
+          type: string
+        merkleIndex:
+          type: integer
+        merkleProof:
+          type: array
+          items:
+            type: string
+        anchorTxHash:
+          type: string
+        anchoredAt:
+          type: string
+          format: date-time
+
+    EventsV2Response:
+      type: object
+      properties:
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventV2'
+        pagination:
+          type: object
+          properties:
+            limit:
+              type: integer
+            offset:
+              type: integer
+            count:
+              type: integer
+
+    EventV2Detail:
+      type: object
+      properties:
+        event:
+          $ref: '#/components/schemas/EventV2'
+        batch:
+          $ref: '#/components/schemas/EventBatch'
+        verification:
+          type: object
+          properties:
+            hash:
+              type: string
+            signature:
+              type: string
+            anchorStatus:
+              $ref: '#/components/schemas/AnchorStatus'
+            merkleProof:
+              type: array
+              items:
+                type: string
+            anchorTxHash:
+              type: string
+
+    EventVerification:
+      type: object
+      properties:
+        eventId:
+          type: string
+        valid:
+          type: boolean
+        computedHash:
+          type: string
+        storedHash:
+          type: string
+        merkleRoot:
+          type: string
+        anchorTxHash:
+          type: string
+        anchoredAt:
+          type: string
+          format: date-time
+        checks:
+          type: object
+          properties:
+            hashValid:
+              type: boolean
+            signaturePresent:
+              type: boolean
+            merkleProofValid:
+              type: boolean
+            anchored:
+              type: boolean
+
+    CreateEventV2Request:
+      type: object
+      required: [eventType, siteId, originType, originId, payload]
+      properties:
+        eventType:
+          $ref: '#/components/schemas/EventType'
+        siteId:
+          type: string
+        assetId:
+          type: string
+        originType:
+          $ref: '#/components/schemas/OriginType'
+        originId:
+          type: string
+        payload:
+          type: object
+        sourceTimestamp:
+          type: string
+          format: date-time
+        details:
+          type: string
+
+    CreateTelemetryEventRequest:
+      type: object
+      required: [siteId, assetId, originId, tag, value]
+      properties:
+        siteId:
+          type: string
+        assetId:
+          type: string
+        originId:
+          type: string
+        originType:
+          $ref: '#/components/schemas/OriginType'
+          default: GATEWAY
+        tag:
+          type: string
+        value:
+          oneOf:
+            - type: number
+            - type: string
+        unit:
+          type: string
+        quality:
+          type: string
+          default: GOOD
+
+    CreateAlarmEventRequest:
+      type: object
+      required: [siteId, assetId, originId, alarmId, severity, state, message]
+      properties:
+        siteId:
+          type: string
+        assetId:
+          type: string
+        originId:
+          type: string
+        originType:
+          $ref: '#/components/schemas/OriginType'
+        alarmId:
+          type: string
+        alarmType:
+          type: string
+        severity:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        state:
+          type: string
+          enum: [ACTIVE, CLEARED, ACKNOWLEDGED]
+        message:
+          type: string
+        value:
+          type: number
+        limit:
+          type: number
+
+    CreateCommandEventRequest:
+      type: object
+      required: [siteId, assetId, originId, commandType, target]
+      properties:
+        siteId:
+          type: string
+        assetId:
+          type: string
+        originId:
+          type: string
+        originType:
+          $ref: '#/components/schemas/OriginType'
+          default: USER
+        commandType:
+          type: string
+        target:
+          type: string
+        value:
+          type: string
+        previousValue:
+          type: string
+        reason:
+          type: string
+
+    EventStats:
+      type: object
+      properties:
+        total:
+          type: integer
+        byType:
+          type: object
+          additionalProperties:
+            type: integer
+        byOrigin:
+          type: object
+          additionalProperties:
+            type: integer
+        byAnchorStatus:
+          type: object
+          additionalProperties:
+            type: integer
+        recentActivity:
+          type: object
+          properties:
+            last24h:
+              type: integer
+            lastWeek:
+              type: integer
+
+    EventTypesMetadata:
+      type: object
+      properties:
+        types:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              description:
+                type: string
+        origins:
+          type: array
+          items:
+            type: object
+            properties:
+              type:
+                type: string
+              description:
+                type: string
+        anchorStatuses:
+          type: array
+          items:
+            type: object
+            properties:
+              status:
+                type: string
+              description:
+                type: string
+
+    # Event Batches
+    EventBatch:
+      type: object
+      properties:
+        id:
+          type: string
+        siteId:
+          type: string
+        eventCount:
+          type: integer
+        merkleRoot:
+          type: string
+        firstEventAt:
+          type: string
+          format: date-time
+        lastEventAt:
+          type: string
+          format: date-time
+        anchorStatus:
+          $ref: '#/components/schemas/AnchorStatus'
+        txHash:
+          type: string
+        blockNumber:
+          type: integer
+        anchoredAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    BatchDetail:
+      type: object
+      properties:
+        batch:
+          $ref: '#/components/schemas/EventBatch'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/EventV2'
+        verification:
+          type: object
+          properties:
+            merkleRoot:
+              type: string
+            eventCount:
+              type: integer
+            anchorStatus:
+              $ref: '#/components/schemas/AnchorStatus'
+            txHash:
+              type: string
+            blockNumber:
+              type: integer
+
+    AnchorResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        txHash:
+          type: string
+        blockNumber:
+          type: integer
+        anchoredAt:
+          type: string
+          format: date-time
+
+    # Batch Anchoring
+    BatchStats:
+      type: object
+      properties:
+        stats:
+          type: object
+        config:
+          type: object
+        blobConfig:
+          type: object
+        blockchain:
+          type: object
+          properties:
+            enabled:
+              type: boolean
+            gasPrice:
+              type: string
+
+    BatchHistoryItem:
+      type: object
+      properties:
+        batchId:
+          type: string
+        eventCount:
+          type: integer
+        merkleRoot:
+          type: string
+        txHash:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+
+    PendingEvents:
+      type: object
+      properties:
+        count:
+          type: integer
+        events:
+          type: array
+          items:
+            type: object
+
+    FlushResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        batch:
+          type: object
+        message:
+          type: string
+
+    MerkleProof:
+      type: object
+      properties:
+        eventId:
+          type: string
+        eventHash:
+          type: string
+        merkleRoot:
+          type: string
+        proof:
+          type: array
+          items:
+            type: string
+        index:
+          type: integer
+
+    BatchConfigUpdate:
+      type: object
+      properties:
+        maxBatchSize:
+          type: integer
+        maxBatchAgeMs:
+          type: integer
+        enabled:
+          type: boolean
+
+    BatchConfigResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        config:
+          type: object
+
+    BlobConfig:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        compressionEnabled:
+          type: boolean
+
+    BlobConfigUpdate:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        compressionEnabled:
+          type: boolean
+
+    BlobConfigResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        config:
+          $ref: '#/components/schemas/BlobConfig'
+
+    BlobCostEstimate:
+      type: object
+      properties:
+        eventCount:
+          type: integer
+        gasPrice:
+          type: string
+        blobCost:
+          type: string
+        calldataCost:
+          type: string
+        savings:
+          type: number
+
+    # Maintenance
+    MaintenanceRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        assetId:
+          type: string
+        workOrderId:
+          type: string
+        performedBy:
+          type: string
+        maintenanceType:
+          type: string
+        performedAt:
+          type: string
+          format: date-time
+        nextDueAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        attachmentHash:
+          type: string
+
+    CreateMaintenanceRecordRequest:
+      type: object
+      required: [assetId, workOrderId, performedBy, maintenanceType, performedAt]
+      properties:
+        assetId:
+          type: string
+        workOrderId:
+          type: string
+        performedBy:
+          type: string
+        maintenanceType:
+          type: string
+        performedAt:
+          type: string
+          format: date-time
+        nextDueAt:
+          type: string
+          format: date-time
+        notes:
+          type: string
+        attachmentHash:
+          type: string
+
+    # Blueprints
+    BlueprintsSummary:
+      type: object
+      properties:
+        controlModuleTypes:
+          type: integer
+        controlModuleInstances:
+          type: integer
+        unitTypes:
+          type: integer
+        unitInstances:
+          type: integer
+        phaseTypes:
+          type: integer
+        phaseInstances:
+          type: integer
+        vendors:
+          type: integer
+
+    BlueprintImportRequest:
+      type: object
+      required: [cmTypePackage, designSpec]
+      properties:
+        cmTypePackage:
+          type: string
+        designSpec:
+          type: string
+
+    BlueprintImportResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        imported:
+          type: object
+          properties:
+            cmTypes:
+              type: integer
+            cmInstances:
+              type: integer
+            unitTypes:
+              type: integer
+            unitInstances:
+              type: integer
+            phaseTypes:
+              type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+
+    SeedResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        message:
+          type: string
+        skipped:
+          type: boolean
+
+    ControlModuleType:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        inputs:
+          type: array
+          items:
+            type: object
+        outputs:
+          type: array
+          items:
+            type: object
+        inOuts:
+          type: array
+          items:
+            type: object
+        sourcePackage:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateCMTypeRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        inputs:
+          type: array
+          items:
+            type: object
+        outputs:
+          type: array
+          items:
+            type: object
+        inOuts:
+          type: array
+          items:
+            type: object
+
+    ControlModuleInstance:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        instanceNumber:
+          type: integer
+        controlModuleTypeId:
+          type: string
+        controllerId:
+          type: string
+        unitInstanceId:
+          type: string
+        pidDrawing:
+          type: string
+        comment:
+          type: string
+        configuration:
+          type: object
+        currentState:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    UnitType:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        variables:
+          type: array
+          items:
+            type: object
+        equipmentModules:
+          type: array
+          items:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateUnitTypeRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        variables:
+          type: array
+          items:
+            type: object
+        equipmentModules:
+          type: array
+          items:
+            type: object
+
+    UnitInstance:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        instanceNumber:
+          type: integer
+        unitTypeId:
+          type: string
+        controllerId:
+          type: string
+        pidDrawing:
+          type: string
+        processCell:
+          type: string
+        area:
+          type: string
+        comment:
+          type: string
+        siteId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    PhaseType:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        linkedModules:
+          type: array
+          items:
+            type: object
+        inputs:
+          type: array
+          items:
+            type: object
+        outputs:
+          type: array
+          items:
+            type: object
+        inOuts:
+          type: array
+          items:
+            type: object
+        internalValues:
+          type: array
+          items:
+            type: object
+        hmiParameters:
+          type: array
+          items:
+            type: object
+        recipeParameters:
+          type: array
+          items:
+            type: object
+        reportParameters:
+          type: array
+          items:
+            type: object
+        sequences:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreatePhaseTypeRequest:
+      type: object
+      required: [name]
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+        linkedModules:
+          type: array
+          items:
+            type: object
+        inputs:
+          type: array
+          items:
+            type: object
+        outputs:
+          type: array
+          items:
+            type: object
+        sequences:
+          type: object
+
+    PhaseInstance:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        instanceNumber:
+          type: integer
+        phaseTypeId:
+          type: string
+        unitInstanceId:
+          type: string
+        controllerId:
+          type: string
+        currentState:
+          type: string
+        currentStep:
+          type: integer
+        siteId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    DesignSpecification:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        contentHash:
+          type: string
+        txHash:
+          type: string
+        content:
+          type: object
+        siteId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    # Vendors
+    Vendor:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        platforms:
+          type: array
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            type: string
+        configSchema:
+          type: object
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateVendorRequest:
+      type: object
+      required: [name, displayName]
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        platforms:
+          type: array
+          items:
+            type: string
+        languages:
+          type: array
+          items:
+            type: string
+        configSchema:
+          type: object
+
+    # Templates
+    TemplatePackage:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        templateType:
+          type: string
+        language:
+          type: string
+        templateContent:
+          type: string
+        placeholders:
+          type: array
+          items:
+            type: object
+        requiredInputs:
+          type: array
+          items:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateTemplateRequest:
+      type: object
+      required: [name, vendorId, templateType, language, templateContent]
+      properties:
+        name:
+          type: string
+        vendorId:
+          type: string
+        version:
+          type: string
+        description:
+          type: string
+        templateType:
+          type: string
+        language:
+          type: string
+        templateContent:
+          type: string
+        placeholders:
+          type: array
+          items:
+            type: object
+        requiredInputs:
+          type: array
+          items:
+            type: object
+
+    # Data Type Mappings
+    DataTypeMapping:
+      type: object
+      properties:
+        id:
+          type: string
+        vendorId:
+          type: string
+        canonicalType:
+          type: string
+        vendorType:
+          type: string
+        size:
+          type: integer
+        precision:
+          type: integer
+        metadata:
+          type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateDataTypeMappingRequest:
+      type: object
+      required: [vendorId, canonicalType, vendorType]
+      properties:
+        vendorId:
+          type: string
+        canonicalType:
+          type: string
+        vendorType:
+          type: string
+        size:
+          type: integer
+        precision:
+          type: integer
+        metadata:
+          type: object
+
+    # Controllers
+    Controller:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        vendorId:
+          type: string
+        siteId:
+          type: string
+        model:
+          type: string
+        firmwareVersion:
+          type: string
+        address:
+          type: string
+        configuration:
+          type: object
+        status:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateControllerRequest:
+      type: object
+      required: [name, vendorId, model]
+      properties:
+        name:
+          type: string
+        vendorId:
+          type: string
+        siteId:
+          type: string
+        model:
+          type: string
+        firmwareVersion:
+          type: string
+        address:
+          type: string
+        configuration:
+          type: object
+
+    # Code Generation
+    GeneratedCode:
+      type: object
+      properties:
+        id:
+          type: string
+        sourceType:
+          type: string
+        sourceId:
+          type: string
+        vendorId:
+          type: string
+        templatePackageId:
+          type: string
+        language:
+          type: string
+        code:
+          type: string
+        codeHash:
+          type: string
+        txHash:
+          type: string
+        metadata:
+          type: object
+        status:
+          type: string
+        generatedAt:
+          type: string
+          format: date-time
+        approvedAt:
+          type: string
+          format: date-time
+        approvedBy:
+          type: string
+
+    CreateGeneratedCodeRequest:
+      type: object
+      required: [sourceType, sourceId, vendorId, language, code, codeHash]
+      properties:
+        sourceType:
+          type: string
+        sourceId:
+          type: string
+        vendorId:
+          type: string
+        templatePackageId:
+          type: string
+        language:
+          type: string
+        code:
+          type: string
+        codeHash:
+          type: string
+        metadata:
+          type: object
+        status:
+          type: string
+          default: draft
+
+    GenerateCodeRequest:
+      type: object
+      required: [vendorId]
+      properties:
+        vendorId:
+          type: string
+        format:
+          type: string
+          enum: [scl, xml, l5x, json]
+        instanceName:
+          type: string
+
+    GenerateCodeResponse:
+      type: object
+      properties:
+        success:
+          type: boolean
+        id:
+          type: string
+        code:
+          type: string
+        codeHash:
+          type: string
+        language:
+          type: string
+        vendor:
+          type: string
+
+    CodeAnchorResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        txHash:
+          type: string
+        codeHash:
+          type: string
+        message:
+          type: string
+
+    # Ladder Logic
+    InstructionLibrary:
+      type: object
+      additionalProperties:
+        type: object
+        properties:
+          mnemonic:
+            type: string
+          description:
+            type: string
+          category:
+            type: string
+          operands:
+            type: array
+            items:
+              type: object
+
+    LadderLogicOptions:
+      type: object
+      properties:
+        includeComments:
+          type: boolean
+          default: true
+        generateFaultHandling:
+          type: boolean
+          default: true
+        generateInterlocks:
+          type: boolean
+          default: true
+
+    LadderLogicResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        id:
+          type: string
+        code:
+          type: string
+        visualDiagram:
+          type: string
+        codeHash:
+          type: string
+        language:
+          type: string
+        routines:
+          type: array
+          items:
+            type: object
+        tags:
+          type: array
+          items:
+            type: object
+        metadata:
+          type: object
+          properties:
+            rungCount:
+              type: integer
+            instructionCount:
+              type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+
+    BatchLadderRequest:
+      type: object
+      required: [template]
+      properties:
+        template:
+          type: string
+        csvContent:
+          type: string
+        startRungNumber:
+          type: integer
+
+    BatchLadderResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        neutralText:
+          type: string
+        rungCount:
+          type: integer
+        generatedTags:
+          type: array
+          items:
+            type: string
+        errors:
+          type: array
+          items:
+            type: string
+        warnings:
+          type: array
+          items:
+            type: string
+
+    AIContextResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        cmTypeName:
+          type: string
+        aiPrompt:
+          type: string
+        context:
+          type: object
+
+    # Agents
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        agentType:
+          type: string
+          enum: [OPS, CHANGE_CONTROL, COMPLIANCE, SAFETY_OBSERVER, CODEGEN, CUSTOM]
+        publicKey:
+          type: string
+        keyAlgorithm:
+          type: string
+        ethereumAddress:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        scope:
+          type: object
+        status:
+          type: string
+          enum: [ACTIVE, INACTIVE, SUSPENDED, ERROR]
+        version:
+          type: string
+        lastActiveAt:
+          type: string
+          format: date-time
+        errorCount:
+          type: integer
+        lastError:
+          type: string
+        createdBy:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    CreateAgentRequest:
+      type: object
+      required: [name, displayName, agentType, publicKey, createdBy]
+      properties:
+        name:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        agentType:
+          type: string
+        publicKey:
+          type: string
+        keyAlgorithm:
+          type: string
+          default: ed25519
+        ethereumAddress:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        scope:
+          type: object
+        status:
+          type: string
+          default: INACTIVE
+        version:
+          type: string
+          default: "1.0.0"
+        createdBy:
+          type: string
+
+    UpdateAgentRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        description:
+          type: string
+        capabilities:
+          type: array
+          items:
+            type: string
+        scope:
+          type: object
+        status:
+          type: string
+
+    AgentOutput:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        outputType:
+          type: string
+        title:
+          type: string
+        content:
+          type: object
+        siteId:
+          type: string
+        assetIds:
+          type: array
+          items:
+            type: string
+        eventIds:
+          type: array
+          items:
+            type: string
+        hash:
+          type: string
+        signature:
+          type: string
+        confidence:
+          type: integer
+        reasoning:
+          type: string
+        requiresApproval:
+          type: boolean
+        approvalStatus:
+          type: string
+        approvedBy:
+          type: string
+        approvedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAgentOutputRequest:
+      type: object
+      required: [outputType, title, content, hash, signature]
+      properties:
+        outputType:
+          type: string
+        title:
+          type: string
+        content:
+          type: object
+        siteId:
+          type: string
+        assetIds:
+          type: array
+          items:
+            type: string
+        eventIds:
+          type: array
+          items:
+            type: string
+        hash:
+          type: string
+        signature:
+          type: string
+        confidence:
+          type: integer
+        reasoning:
+          type: string
+        requiresApproval:
+          type: boolean
+
+    AgentProposal:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        proposalType:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        action:
+          type: object
+        reasoning:
+          type: string
+        confidence:
+          type: integer
+        supportingEventIds:
+          type: array
+          items:
+            type: string
+        riskLevel:
+          type: string
+          enum: [LOW, MEDIUM, HIGH, CRITICAL]
+        riskFactors:
+          type: array
+          items:
+            type: object
+        hash:
+          type: string
+        signature:
+          type: string
+        status:
+          type: string
+          enum: [DRAFT, PENDING_APPROVAL, APPROVED, REJECTED, EXPIRED, EXECUTED, FAILED]
+        requiredApprovals:
+          type: integer
+        approvals:
+          type: array
+          items:
+            type: object
+        expiresAt:
+          type: string
+          format: date-time
+        executedAt:
+          type: string
+          format: date-time
+        executionResult:
+          type: object
+        executionError:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateAgentProposalRequest:
+      type: object
+      required: [proposalType, title, description, action, reasoning, confidence, riskLevel, hash, signature]
+      properties:
+        proposalType:
+          type: string
+        title:
+          type: string
+        description:
+          type: string
+        action:
+          type: object
+        reasoning:
+          type: string
+        confidence:
+          type: integer
+        supportingEventIds:
+          type: array
+          items:
+            type: string
+        riskLevel:
+          type: string
+        riskFactors:
+          type: array
+          items:
+            type: object
+        hash:
+          type: string
+        signature:
+          type: string
+        requiredApprovals:
+          type: integer
+          default: 1
+        expiresAt:
+          type: string
+          format: date-time
+
+    ApprovalRequest:
+      type: object
+      required: [userId, userName]
+      properties:
+        userId:
+          type: string
+        userName:
+          type: string
+        comment:
+          type: string
+        signature:
+          type: string
+
+    AgentState:
+      type: object
+      properties:
+        id:
+          type: string
+        agentId:
+          type: string
+        key:
+          type: string
+        value:
+          type: object
+        expiresAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    SetAgentStateRequest:
+      type: object
+      required: [value]
+      properties:
+        value:
+          type: object
+        expiresAt:
+          type: string
+          format: date-time
+
+    # AAS
+    AAS:
+      type: object
+      properties:
+        id:
+          type: string
+        idShort:
+          type: string
+        globalId:
+          type: string
+        globalAssetId:
+          type: string
+        assetKind:
+          type: string
+          enum: [Instance, Type]
+        assetType:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        siteId:
+          type: string
+        assetId:
+          type: string
+        controlModuleInstanceId:
+          type: string
+        unitInstanceId:
+          type: string
+        version:
+          type: string
+        revision:
+          type: string
+        contentHash:
+          type: string
+        anchorTxHash:
+          type: string
+        anchoredAt:
+          type: string
+          format: date-time
+        federationEndpoint:
+          type: string
+        federatedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+
+    AASDetail:
+      type: object
+      allOf:
+        - $ref: '#/components/schemas/AAS'
+        - type: object
+          properties:
+            submodels:
+              type: array
+              items:
+                $ref: '#/components/schemas/AASSubmodel'
+
+    CreateAASRequest:
+      type: object
+      required: [idShort, globalId, globalAssetId]
+      properties:
+        idShort:
+          type: string
+        globalId:
+          type: string
+        globalAssetId:
+          type: string
+        assetKind:
+          type: string
+          default: Instance
+        assetType:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        siteId:
+          type: string
+        assetId:
+          type: string
+        controlModuleInstanceId:
+          type: string
+        unitInstanceId:
+          type: string
+        version:
+          type: string
+          default: "1.0.0"
+
+    UpdateAASRequest:
+      type: object
+      properties:
+        displayName:
+          type: string
+        description:
+          type: string
+        assetType:
+          type: string
+        version:
+          type: string
+        revision:
+          type: string
+
+    AASSubmodel:
+      type: object
+      properties:
+        id:
+          type: string
+        aasId:
+          type: string
+        idShort:
+          type: string
+        globalId:
+          type: string
+        semanticIdType:
+          type: string
+        semanticIdValue:
+          type: string
+        submodelType:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+        revision:
+          type: string
+        kind:
+          type: string
+        qualifiers:
+          type: array
+          items:
+            type: object
+        createdAt:
+          type: string
+          format: date-time
+
+    CreateSubmodelRequest:
+      type: object
+      required: [idShort, globalId, submodelType]
+      properties:
+        idShort:
+          type: string
+        globalId:
+          type: string
+        semanticIdType:
+          type: string
+        semanticIdValue:
+          type: string
+        submodelType:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        version:
+          type: string
+          default: "1.0.0"
+        kind:
+          type: string
+          default: Instance
+        qualifiers:
+          type: array
+          items:
+            type: object
+
+    AASSyncResult:
+      type: object
+      properties:
+        message:
+          type: string
+        synced:
+          type: object
+
+    SubmodelTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        submodelType:
+          type: string
+        displayName:
+          type: string
+        description:
+          type: string
+        semanticIdType:
+          type: string
+        semanticIdValue:
+          type: string
+        elementDefinitions:
+          type: array
+          items:
+            type: object
+        applicableAssetTypes:
+          type: array
+          items:
+            type: string
+        version:
+          type: string
+        isActive:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+
+    # Tags
+    TagWithValue:
+      type: object
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        unit:
+          type: string
+        scanRate:
+          type: integer
+        deadband:
+          type: number
+        alarmConfig:
+          type: object
+          properties:
+            highHigh:
+              type: number
+            high:
+              type: number
+            low:
+              type: number
+            lowLow:
+              type: number
+        currentValue:
+          type: object
+          nullable: true
+          properties:
+            value:
+              oneOf:
+                - type: number
+                - type: boolean
+            quality:
+              type: string
+            timestamp:
+              type: string
+              format: date-time
+
+    TagValue:
+      type: object
+      properties:
+        tag:
+          type: string
+        value:
+          oneOf:
+            - type: number
+            - type: boolean
+        quality:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        unit:
+          type: string
+
+    TagWriteResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        tag:
+          type: string
+        value:
+          oneOf:
+            - type: number
+            - type: boolean
+
+    TagConfig:
+      type: object
+      required: [name, address]
+      properties:
+        name:
+          type: string
+        address:
+          type: string
+        unit:
+          type: string
+        scanRate:
+          type: integer
+        deadband:
+          type: number
+        alarmConfig:
+          type: object
+          properties:
+            highHigh:
+              type: number
+            high:
+              type: number
+            low:
+              type: number
+            lowLow:
+              type: number
+
+    TagServiceStatus:
+      type: object
+      properties:
+        connected:
+          type: boolean
+        registeredTags:
+          type: integer
+        wsClients:
+          type: integer
+        subscriptions:
+          type: integer
+        driver:
+          type: object
+          nullable: true
+
+    # WebSocket
+    WebSocketMetrics:
+      type: object
+      properties:
+        success:
+          type: boolean
+        metrics:
+          type: object
+          properties:
+            connections:
+              type: object
+              properties:
+                active:
+                  type: integer
+                total:
+                  type: integer
+                authenticated:
+                  type: integer
+            subscriptions:
+              type: object
+              properties:
+                total:
+                  type: integer
+            messages:
+              type: object
+              properties:
+                received:
+                  type: integer
+                sent:
+                  type: integer
+                eventsDelivered:
+                  type: integer
+            errors:
+              type: integer
+            uptime:
+              type: number
+            startTime:
+              type: string
+              format: date-time
+
+    WebSocketClient:
+      type: object
+      properties:
+        id:
+          type: string
+        connectedAt:
+          type: string
+          format: date-time
+        authenticated:
+          type: boolean
+        subscriptions:
+          type: array
+          items:
+            type: string
