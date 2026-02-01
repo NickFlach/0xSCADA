@@ -16,8 +16,8 @@ jobs:
 
       - name: Check DCO
         run: |
-          # Check all commits in the PR for DCO sign-off
-          commits=$(git log --format='%H %s' origin/${{ github.base_ref }}..HEAD)
+          # Check all commits in the PR for DCO sign-off (excluding merge commits)
+          commits=$(git log --format='%H %s' --no-merges origin/${{ github.base_ref }}..HEAD)
           missing_signoff=false
 
           while IFS= read -r line; do
