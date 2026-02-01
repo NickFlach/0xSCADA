@@ -1,0 +1,29 @@
+{
+  "version": 1,
+  "skills": {
+    "security-audit": {
+      "version": "1.0.0",
+      "installedAt": 1769921210686
+    },
+    "test-master": {
+      "version": "0.1.0",
+      "installedAt": 1769921223817
+    },
+    "ethereum-wingman": {
+      "version": "0.1.0",
+      "installedAt": 1769921244369
+    },
+    "ui-test": {
+      "version": "1.2.1",
+      "installedAt": 1769921253100
+    },
+    "moltbook-interact": {
+      "version": "1.0.1",
+      "installedAt": 1769921334137
+    },
+    "moltbook-registry": {
+      "version": "1.0.3",
+      "installedAt": 1769921345081
+    }
+  }
+}
