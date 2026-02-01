@@ -14,7 +14,10 @@
     "db:push": "drizzle-kit push",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "test:fuzz": "npx vitest run --reporter=verbose server/__tests__/fuzz/",
+    "test:fuzz:solidity": "npx hardhat test contracts/test/fuzz/*.sol",
+    "test:fuzz:all": "npm run test:fuzz && npm run test:fuzz:solidity"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.27",
@@ -112,7 +115,8 @@
     "tsx": "^4.21.0",
     "typescript": "5.6.3",
     "vite": "^7.3.1",
-    "vitest": "^2.1.0"
+    "vitest": "^2.1.0",
+    "fast-check": "^4.1.1"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"
