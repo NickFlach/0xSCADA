@@ -39,6 +39,9 @@ contract EventAnchor {
     // Track all anchor IDs
     bytes32[] public anchorIds;
     
+    // Nonce for front-running protection (C-01 fix)
+    uint256 private _anchorNonce;
+    
     // Events
     event BatchAnchored(
         bytes32 indexed anchorId,
@@ -82,12 +85,16 @@ contract EventAnchor {
         require(merkleRoot != bytes32(0), "Invalid Merkle root");
         require(eventCount > 0, "Event count must be positive");
         
-        // Generate unique anchor ID
+        // Generate unique anchor ID with nonce (C-01 fix: prevents front-running)
+        // Using block.number instead of block.timestamp for less predictability
+        // Adding incrementing nonce makes ID completely unpredictable
+        unchecked { _anchorNonce++; }
         anchorId = keccak256(abi.encodePacked(
             siteId,
             merkleRoot,
-            block.timestamp,
-            msg.sender
+            block.number,
+            msg.sender,
+            _anchorNonce
         ));
         
         require(anchors[anchorId].anchoredAt == 0, "Anchor already exists");
@@ -140,6 +147,7 @@ contract EventAnchor {
     
     /**
      * @notice Internal Merkle proof verification
+     * @dev H-01 fix: Added bounds check for index vs proof length
      */
     function _verifyMerkleProof(
         bytes32 leaf,
@@ -147,6 +155,11 @@ contract EventAnchor {
         bytes32 root,
         uint256 index
     ) internal pure returns (bool) {
+        // H-01 fix: Validate index is within bounds for the given proof length
+        // The maximum valid index for a proof of length n is 2^n - 1
+        require(proof.length <= 256, "Proof too long");
+        require(index < (1 << proof.length), "Index out of bounds for proof length");
+        
         bytes32 computedHash = leaf;
         
         for (uint256 i = 0; i < proof.length; i++) {

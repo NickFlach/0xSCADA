@@ -13,8 +13,12 @@
     "lint:fix": "echo 'No auto-fix available for TypeScript errors'",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "echo 'E2E tests not configured yet'",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.27",
