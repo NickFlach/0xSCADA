@@ -1,4 +1,4 @@
-import { and, eq, desc } from "drizzle-orm";
+import { and, eq, desc, count } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
@@ -62,6 +62,7 @@ export interface IStorage {
   // Event Anchors
   createEventAnchor(event: InsertEventAnchor): Promise<EventAnchor>;
   getEventAnchors(limit?: number): Promise<EventAnchor[]>;
+  getEventAnchorsPaginated(page: number, limit: number): Promise<{ data: EventAnchor[]; total: number }>;
   getEventAnchorsByAssetId(assetId: string): Promise<EventAnchor[]>;
   updateEventTxHash(id: string, txHash: string): Promise<void>;
 
@@ -221,6 +222,27 @@ export class DatabaseStorage implements IStorage {
       .from(schema.eventAnchors)
       .orderBy(desc(schema.eventAnchors.timestamp))
       .limit(limit);
+  }
+
+  async getEventAnchorsPaginated(page: number, limit: number): Promise<{ data: EventAnchor[]; total: number }> {
+    const offset = (page - 1) * limit;
+    
+    const [data, totalResult] = await Promise.all([
+      this.db
+        .select()
+        .from(schema.eventAnchors)
+        .orderBy(desc(schema.eventAnchors.timestamp))
+        .limit(limit)
+        .offset(offset),
+      this.db
+        .select({ count: count() })
+        .from(schema.eventAnchors)
+    ]);
+
+    return {
+      data,
+      total: totalResult[0]?.count ?? 0,
+    };
   }
 
   async getEventAnchorsByAssetId(assetId: string): Promise<EventAnchor[]> {
