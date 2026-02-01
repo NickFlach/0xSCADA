@@ -9,6 +9,8 @@
     "build": "tsx script/build.ts",
     "start": "NODE_ENV=production node dist/index.cjs",
     "check": "tsc",
+    "lint": "tsc --noEmit",
+    "lint:fix": "echo 'No auto-fix available for TypeScript errors'",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
     "test:watch": "vitest",

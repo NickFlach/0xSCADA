@@ -28,9 +28,15 @@ jobs:
           fetch-depth: 0
 
       - name: Check DCO
-        uses: dcoapp/dco-check@v3
-        with:
-          check: signature
+        run: |
+          commits=$(git log --format='%H' origin/${{ github.base_ref }}..HEAD)
+          for commit in $commits; do
+            if ! git log -1 --format='%B' "$commit" | grep -q "Signed-off-by:"; then
+              echo "❌ Missing DCO sign-off in commit: $commit"
+              exit 1
+            fi
+          done
+          echo "✅ All commits have DCO sign-off!"
 
   # ==========================================================================
   # LINT & TYPE CHECK
