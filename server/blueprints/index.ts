@@ -11,6 +11,9 @@ export * from "./siemens-adapter";
 export * from "./rockwell-adapter";
 export * from "./seed-database";
 
+// Standard Control Module Types - ISA-88 Compliant
+export * from "./actuator-cm-types";
+
 // Ladder Logic AI Agent - LadderLogix-style code generation
 export * from "./ladder-logic-types";
 export * from "./neutral-text-generator";
