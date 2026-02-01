@@ -29,6 +29,7 @@ import { batchRoutes } from "./routes/batch";
 import { aasRouter } from "./routes/aas";
 import ubiquityRoutes from "./routes/ubiquity";
 import { batchAnchoringService } from "./batch-anchoring";
+import { eventStreamServer } from "./websocket";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -52,6 +53,20 @@ export async function registerRoutes(
   app.get("/api/agent-proposals", async (req, res, next) => {
     req.url = "/proposals";
     agentRoutes(req, res, next);
+  });
+
+  // ==========================================================================
+  // WEBSOCKET EVENT STREAM
+  // ==========================================================================
+  eventStreamServer.initialize(httpServer, "/ws/events");
+
+  // WebSocket metrics endpoint
+  app.get("/api/ws/metrics", (req, res) => {
+    res.json(eventStreamServer.getMetrics());
+  });
+
+  app.get("/api/ws/clients", (req, res) => {
+    res.json(eventStreamServer.getConnectedClients());
   });
 
   // ==========================================================================
