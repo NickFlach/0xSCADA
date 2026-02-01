@@ -3,27 +3,28 @@ import { Activity, ShieldCheck, AlertTriangle, Database, Layers } from "lucide-r
 import { Link } from "wouter";
 import { useQuery } from "@tanstack/react-query";
 import { fetchSites, fetchAssets, fetchEvents, fetchBatchStats } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
 
 export default function Dashboard() {
-  const { data: sites = [] } = useQuery({
+  const { data: sites = [], isLoading: sitesLoading } = useQuery({
     queryKey: ["sites"],
     queryFn: fetchSites,
     refetchInterval: 5000,
   });
 
-  const { data: assets = [] } = useQuery({
+  const { data: assets = [], isLoading: assetsLoading } = useQuery({
     queryKey: ["assets"],
     queryFn: fetchAssets,
     refetchInterval: 5000,
   });
 
-  const { data: events = [] } = useQuery({
+  const { data: events = [], isLoading: eventsLoading } = useQuery({
     queryKey: ["events"],
     queryFn: () => fetchEvents(10),
     refetchInterval: 2000,
   });
 
-  const { data: batchStats } = useQuery({
+  const { data: batchStats, isLoading: batchLoading } = useQuery({
     queryKey: ["batchStats"],
     queryFn: fetchBatchStats,
     refetchInterval: 5000,
@@ -31,6 +32,8 @@ export default function Dashboard() {
 
   const onlineSites = sites.filter(s => s.status === "ONLINE").length;
   const criticalAssets = assets.filter(a => a.critical).length;
+
+  const isLoading = sitesLoading || assetsLoading || eventsLoading;
 
   return (
     <div className="min-h-screen bg-background text-foreground font-mono">
@@ -47,34 +50,45 @@ export default function Dashboard() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
-          <StatCard 
-            label="Active Sites" 
-            value={onlineSites.toString()} 
-            total={sites.length.toString()} 
-            icon={Database} 
-            status="good"
-          />
-          <StatCard 
-            label="Critical Assets" 
-            value={criticalAssets.toString()} 
-            subtext="Monitored" 
-            icon={ShieldCheck} 
-            status="neutral"
-          />
-          <StatCard 
-            label="Recent Events" 
-            value={events.length.toString()} 
-            subtext="Last 10 events" 
-            icon={Activity} 
-            status="good"
-          />
-          <StatCard 
-            label="Active Alerts" 
-            value={assets.filter(a => a.status === "WARNING").length.toString()} 
-            subtext="Requires Attention" 
-            icon={AlertTriangle} 
-            status={assets.filter(a => a.status === "WARNING").length > 0 ? "warning" : "good"}
-          />
+          {isLoading ? (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+            </>
+          ) : (
+            <>
+              <StatCard 
+                label="Active Sites" 
+                value={onlineSites.toString()} 
+                total={sites.length.toString()} 
+                icon={Database} 
+                status="good"
+              />
+              <StatCard 
+                label="Critical Assets" 
+                value={criticalAssets.toString()} 
+                subtext="Monitored" 
+                icon={ShieldCheck} 
+                status="neutral"
+              />
+              <StatCard 
+                label="Recent Events" 
+                value={events.length.toString()} 
+                subtext="Last 10 events" 
+                icon={Activity} 
+                status="good"
+              />
+              <StatCard 
+                label="Active Alerts" 
+                value={assets.filter(a => a.status === "WARNING").length.toString()} 
+                subtext="Requires Attention" 
+                icon={AlertTriangle} 
+                status={assets.filter(a => a.status === "WARNING").length > 0 ? "warning" : "good"}
+              />
+            </>
+          )}
         </div>
 
         <div className="mb-8 border border-white/10 bg-white/5 p-4">
@@ -86,26 +100,37 @@ export default function Dashboard() {
                 <p className="text-xs text-muted-foreground">Merkle tree batching for gas-efficient L1 anchoring</p>
               </div>
             </div>
-            <div className="flex gap-6 text-xs">
-              <div className="text-center">
-                <div className="text-lg font-bold text-primary">{batchStats?.stats.pendingEvents || 0}</div>
-                <div className="text-muted-foreground uppercase">Pending</div>
+            {batchLoading ? (
+              <div className="flex gap-6">
+                {[...Array(4)].map((_, i) => (
+                  <div key={i} className="text-center">
+                    <Skeleton className="h-6 w-8 mx-auto mb-1" />
+                    <Skeleton className="h-3 w-12" />
+                  </div>
+                ))}
               </div>
-              <div className="text-center">
-                <div className="text-lg font-bold">{batchStats?.stats.totalBatchesAnchored || 0}</div>
-                <div className="text-muted-foreground uppercase">Batches</div>
-              </div>
-              <div className="text-center">
-                <div className="text-lg font-bold">{batchStats?.stats.totalEventsAnchored || 0}</div>
-                <div className="text-muted-foreground uppercase">Anchored</div>
-              </div>
-              <div className="text-center">
-                <div className={`text-lg font-bold ${batchStats?.config.enabled ? 'text-primary' : 'text-muted-foreground'}`}>
-                  {batchStats?.config.enabled ? 'ON' : 'OFF'}
+            ) : (
+              <div className="flex gap-6 text-xs">
+                <div className="text-center">
+                  <div className="text-lg font-bold text-primary">{batchStats?.stats.pendingEvents || 0}</div>
+                  <div className="text-muted-foreground uppercase">Pending</div>
                 </div>
-                <div className="text-muted-foreground uppercase">Status</div>
+                <div className="text-center">
+                  <div className="text-lg font-bold">{batchStats?.stats.totalBatchesAnchored || 0}</div>
+                  <div className="text-muted-foreground uppercase">Batches</div>
+                </div>
+                <div className="text-center">
+                  <div className="text-lg font-bold">{batchStats?.stats.totalEventsAnchored || 0}</div>
+                  <div className="text-muted-foreground uppercase">Anchored</div>
+                </div>
+                <div className="text-center">
+                  <div className={`text-lg font-bold ${batchStats?.config.enabled ? 'text-primary' : 'text-muted-foreground'}`}>
+                    {batchStats?.config.enabled ? 'ON' : 'OFF'}
+                  </div>
+                  <div className="text-muted-foreground uppercase">Status</div>
+                </div>
               </div>
-            </div>
+            )}
           </div>
         </div>
 
@@ -116,7 +141,9 @@ export default function Dashboard() {
               Event Stream
             </h2>
             <div className="space-y-4">
-              {events.length === 0 ? (
+              {eventsLoading ? (
+                [...Array(5)].map((_, i) => <EventSkeleton key={i} />)
+              ) : events.length === 0 ? (
                 <div className="text-center text-muted-foreground py-8">
                   Waiting for events from field simulator...
                 </div>
@@ -197,20 +224,31 @@ export default function Dashboard() {
             
             <div className="mt-12 p-4 border border-dashed border-white/20 bg-black/40">
               <h3 className="text-xs font-bold uppercase text-muted-foreground mb-2">Network Stats</h3>
-              <div className="space-y-2 text-xs">
-                 <div className="flex justify-between">
-                   <span>Total Sites</span>
-                   <span className="font-bold">{sites.length}</span>
-                 </div>
-                 <div className="flex justify-between">
-                   <span>Total Assets</span>
-                   <span className="font-bold">{assets.length}</span>
-                 </div>
-                 <div className="flex justify-between">
-                   <span>Total Events</span>
-                   <span className="font-bold">{events.length}+</span>
-                 </div>
-              </div>
+              {isLoading ? (
+                <div className="space-y-2">
+                  {[...Array(3)].map((_, i) => (
+                    <div key={i} className="flex justify-between">
+                      <Skeleton className="h-3 w-20" />
+                      <Skeleton className="h-3 w-8" />
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="space-y-2 text-xs">
+                   <div className="flex justify-between">
+                     <span>Total Sites</span>
+                     <span className="font-bold">{sites.length}</span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span>Total Assets</span>
+                     <span className="font-bold">{assets.length}</span>
+                   </div>
+                   <div className="flex justify-between">
+                     <span>Total Events</span>
+                     <span className="font-bold">{events.length}+</span>
+                   </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
@@ -243,6 +281,39 @@ function StatCard({ label, value, total, subtext, icon: Icon, status }: any) {
         </div>
       )}
       <div className={`absolute bottom-0 left-0 h-[2px] w-full ${status === 'warning' ? 'bg-destructive' : 'bg-primary'} scale-x-0 group-hover:scale-x-100 transition-transform origin-left duration-300`} />
+    </div>
+  );
+}
+
+function StatCardSkeleton() {
+  return (
+    <div className="p-6 border border-white/20 bg-white/5 relative overflow-hidden">
+      <div className="flex justify-between items-start mb-4">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-5 w-5 rounded" />
+      </div>
+      <Skeleton className="h-10 w-20 mb-1" />
+      <div className="border-t border-white/10 pt-2 mt-2">
+        <Skeleton className="h-3 w-16" />
+      </div>
+    </div>
+  );
+}
+
+function EventSkeleton() {
+  return (
+    <div className="flex flex-col md:flex-row gap-4 border-b border-white/5 pb-4 p-2">
+      <div className="min-w-[140px]">
+        <Skeleton className="h-3 w-16 mb-1" />
+        <Skeleton className="h-3 w-24" />
+      </div>
+      <div className="flex-1">
+        <Skeleton className="h-4 w-32 mb-2" />
+        <Skeleton className="h-3 w-48" />
+      </div>
+      <div className="text-right">
+        <Skeleton className="h-5 w-20" />
+      </div>
     </div>
   );
 }
