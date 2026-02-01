@@ -157,26 +157,35 @@ describe("EventAnchor", function () {
         const { eventAnchor, siteId, gateway } = await loadFixture(deployContractsFixture);
         const batch = createSampleBatch(siteId);
 
-        await expect(
-          eventAnchor.connect(gateway).anchorBatch(
-            batch.siteId,
-            batch.merkleRoot,
-            batch.metadataHash,
-            batch.metadataUri,
-            batch.eventCount,
-            batch.firstEventTimestamp,
-            batch.lastEventTimestamp
-          )
-        )
-          .to.emit(eventAnchor, "BatchAnchored")
-          .withArgs(
-            expect.anything(), // anchorId
-            batch.siteId,
-            batch.merkleRoot,
-            batch.eventCount,
-            expect.anything(), // timestamp
-            gateway.address
-          );
+        // Verify event is emitted with correct known values
+        // Note: anchorId and timestamp are dynamic, so we verify them separately
+        const tx = await eventAnchor.connect(gateway).anchorBatch(
+          batch.siteId,
+          batch.merkleRoot,
+          batch.metadataHash,
+          batch.metadataUri,
+          batch.eventCount,
+          batch.firstEventTimestamp,
+          batch.lastEventTimestamp
+        );
+        
+        // Verify the event was emitted
+        await expect(tx).to.emit(eventAnchor, "BatchAnchored");
+        
+        // Get the event and verify specific args
+        const receipt = await tx.wait();
+        const event = receipt?.logs[0];
+        const args = (event as any).args;
+        
+        // Verify the known values
+        expect(args[1]).to.equal(batch.siteId); // siteId
+        expect(args[2]).to.equal(batch.merkleRoot); // merkleRoot
+        expect(args[3]).to.equal(batch.eventCount); // eventCount
+        expect(args[5]).to.equal(gateway.address); // anchoredBy
+        
+        // Verify dynamic values exist and are valid
+        expect(args[0]).to.not.equal(ethers.ZeroHash); // anchorId should not be zero
+        expect(args[4]).to.be.gt(0); // timestamp should be positive
       });
     });
 
