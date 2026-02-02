@@ -212,6 +212,75 @@ cd geth-fork && make geth
 
 ---
 
+## ▓▓ CLI
+
+The `0xscada` CLI provides a unified command-line interface for development and operations.
+
+### INSTALLATION
+
+```bash
+# Install from repository
+cd cli
+npm install
+npm link  # Makes '0xscada' available globally
+```
+
+### QUICK START
+
+```bash
+# Check system health
+0xscada status
+
+# List sites and assets
+0xscada sites list
+0xscada assets list
+
+# View recent events
+0xscada events list --limit 10
+
+# Trigger batch anchoring
+0xscada events anchor
+
+# Start development environment
+0xscada dev start
+```
+
+### CORE COMMANDS
+
+| Command | Description |
+|---------|-------------|
+| `0xscada status` | Show system health (DB, blockchain, services) |
+| `0xscada sites list` | List registered sites |
+| `0xscada sites get <id>` | Get site details |
+| `0xscada assets list` | List assets |
+| `0xscada events list` | List recent events |
+| `0xscada events anchor` | Manually trigger batch anchoring |
+| `0xscada blockchain info` | Chain status, latest block, gas prices |
+| `0xscada dev start` | Start local dev environment |
+| `0xscada dev seed` | Seed database with test data |
+| `0xscada config show` | Display current configuration |
+| `0xscada config set <k> <v>` | Update config |
+
+### JSON OUTPUT
+
+All commands support `--json` for scripting:
+
+```bash
+# Get sites as JSON
+0xscada sites list --json | jq '.[0].name'
+
+# Check health in scripts
+if 0xscada status --json | jq -e '.health.status == "healthy"' > /dev/null; then
+  echo "System healthy"
+fi
+```
+
+Full CLI documentation: [`cli/README.md`](./cli/README.md)
+
+<br/>
+
+---
+
 ## ▓▓ ARCHITECTURE
 
 ```
