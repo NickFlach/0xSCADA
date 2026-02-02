@@ -13,11 +13,12 @@
     "lint:fix": "echo 'No auto-fix available for TypeScript errors'",
     "db:push": "drizzle-kit push",
     "test": "vitest run",
+    "test:unit": "vitest run",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
+    "test:e2e": "echo 'E2E tests not configured yet'",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
-    "test:fuzz": "npx vitest run --reporter=verbose server/__tests__/fuzz/",
-    "test:fuzz:solidity": "npx hardhat test contracts/test/fuzz/*.sol",
-    "test:fuzz:all": "npm run test:fuzz && npm run test:fuzz:solidity"
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@anthropic-ai/claude-code": "^2.1.27",
@@ -110,13 +111,13 @@
     "autoprefixer": "^10.4.24",
     "drizzle-kit": "^0.31.8",
     "esbuild": "^0.25.12",
+    "fast-check": "^3.24.0",
     "postcss": "^8.5.6",
     "tailwindcss": "^4.1.14",
     "tsx": "^4.21.0",
     "typescript": "5.6.3",
     "vite": "^7.3.1",
-    "vitest": "^2.1.0",
-    "fast-check": "^4.1.1"
+    "vitest": "^2.1.0"
   },
   "optionalDependencies": {
     "bufferutil": "^4.1.0"

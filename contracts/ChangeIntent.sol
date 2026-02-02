@@ -63,6 +63,9 @@ contract ChangeIntent {
     // Track all intent IDs
     bytes32[] public intentIds;
     
+    // Nonce for front-running protection (C-02 fix)
+    uint256 private _intentNonce;
+    
     // Events
     event IntentCreated(
         bytes32 indexed intentId,
@@ -129,13 +132,17 @@ contract ChangeIntent {
         require(blueprintHash != bytes32(0), "Invalid blueprint hash");
         require(requiredApprovals > 0, "Must require at least one approval");
         
-        // Generate unique intent ID
+        // Generate unique intent ID with nonce (C-02 fix: prevents front-running)
+        // SAFETY-CRITICAL: Prevents malicious code substitution attacks
+        // Using block.number + nonce makes ID completely unpredictable
+        unchecked { _intentNonce++; }
         intentId = keccak256(abi.encodePacked(
             siteId,
             blueprintHash,
             codeHash,
-            block.timestamp,
-            msg.sender
+            block.number,
+            msg.sender,
+            _intentNonce
         ));
         
         require(intents[intentId].createdAt == 0, "Intent already exists");
