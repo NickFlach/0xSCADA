@@ -1,0 +1,124 @@
+name: ADR Validation
+
+on:
+  push:
+    paths:
+      - 'docs/decisions/**'
+  pull_request:
+    paths:
+      - 'docs/decisions/**'
+
+jobs:
+  validate-adr:
+    runs-on: ubuntu-latest
+    name: Validate ADR Format
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate ADR Format
+        run: |
+          #!/bin/bash
+          set -e
+
+          echo "Validating ADR files..."
+          errors=0
+
+          for file in docs/decisions/ADR-*.md; do
+            if [ ! -f "$file" ]; then
+              continue
+            fi
+
+            echo "Checking $file..."
+
+            # Check filename format
+            filename=$(basename "$file")
+            if ! [[ $filename =~ ^ADR-[0-9]{4}-[a-z0-9-]+\.md$ ]]; then
+              echo "  ❌ Invalid filename format. Expected: ADR-NNNN-title-slug.md"
+              errors=$((errors + 1))
+            fi
+
+            # Check required sections
+            for section in "# ADR-" "## Status" "## Context" "## Decision" "## Consequences"; do
+              if ! grep -q "$section" "$file"; then
+                echo "  ❌ Missing required section: $section"
+                errors=$((errors + 1))
+              fi
+            done
+
+            # Check status is valid
+            status=$(grep -A1 "## Status" "$file" | tail -1 | tr -d '[:space:]')
+            valid_statuses="Proposed|Accepted|Deprecated|Superseded"
+            if ! echo "$status" | grep -qE "^($valid_statuses)"; then
+              echo "  ⚠️ Status '$status' should be one of: Proposed, Accepted, Deprecated, Superseded"
+            fi
+
+            echo "  ✅ Passed basic validation"
+          done
+
+          if [ $errors -gt 0 ]; then
+            echo "❌ Found $errors errors"
+            exit 1
+          fi
+
+          echo "✅ All ADR files validated successfully"
+
+      - name: Update ADR Index
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: |
+          #!/bin/bash
+          set -e
+
+          echo "Generating ADR index..."
+
+          index_content="| Number | Title | Status |\n|--------|-------|--------|\n"
+
+          for file in docs/decisions/ADR-*.md; do
+            if [ ! -f "$file" ]; then
+              continue
+            fi
+
+            filename=$(basename "$file")
+            
+            # Extract title from first heading
+            title=$(grep "^# ADR-" "$file" | sed 's/^# ADR-[0-9]*: //')
+            
+            # Extract status
+            status=$(grep -A1 "^## Status" "$file" | tail -1 | head -1 | tr -d '[:space:]' | cut -d'|' -f1)
+            
+            # Get number
+            number=$(echo "$filename" | grep -oE "ADR-[0-9]{4}")
+            
+            index_content+="| [$number]($filename) | $title | $status |\n"
+          done
+
+          echo "Generated index:"
+          echo -e "$index_content"
+
+      - name: Check Index is Up-to-Date
+        run: |
+          #!/bin/bash
+          set -e
+
+          echo "Verifying ADR index is up-to-date..."
+
+          # Count ADR files
+          adr_count=$(ls docs/decisions/ADR-*.md 2>/dev/null | wc -l)
+          echo "Found $adr_count ADR files"
+
+          # Count entries in README index
+          readme_count=$(grep -c "^\| \[ADR-" docs/decisions/README.md || true)
+          echo "Found $readme_count entries in README index"
+
+          if [ "$adr_count" != "$readme_count" ]; then
+            echo "⚠️ Warning: ADR file count ($adr_count) doesn't match index entries ($readme_count)"
+            echo "Please update docs/decisions/README.md index"
+          else
+            echo "✅ Index appears up-to-date"
+          fi

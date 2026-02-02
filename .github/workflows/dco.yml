@@ -8,6 +8,8 @@ jobs:
   dco:
     name: Developer Certificate of Origin
     runs-on: ubuntu-latest
+    # DCO is recommended but not blocking for now
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4

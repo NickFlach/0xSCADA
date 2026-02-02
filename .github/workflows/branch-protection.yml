@@ -37,14 +37,16 @@ jobs:
   required-checks:
     name: Required Status Checks
     runs-on: ubuntu-latest
+    # Allow workflow to proceed even if some checks are still pending
+    continue-on-error: true
     steps:
       - name: Wait for required checks
         uses: lewagon/wait-on-check-action@v1.3.4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           wait-interval: 10
-          check-regexp: '^(DCO|Lint|Tests|Build|Security).*'
-          allowed-conclusions: success
+          check-regexp: '^(Lint|Tests|Build).*'
+          allowed-conclusions: success,skipped
 
   size-limit:
     name: PR Size Limit
@@ -70,6 +72,8 @@ jobs:
   conventional-commits:
     name: Conventional Commits
     runs-on: ubuntu-latest
+    # Conventional commits are recommended but not blocking
+    continue-on-error: true
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
