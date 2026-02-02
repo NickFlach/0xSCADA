@@ -96,6 +96,31 @@ describe("ApiClient", () => {
       expect(result.success).toBe(false);
       expect(result.error).toBe("Request timed out");
     });
+
+    it("should handle unknown errors (non-Error objects)", async () => {
+      mockFetch.mockRejectedValueOnce("string error");
+
+      const client = new ApiClient();
+      const result = await client.getHealth();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Unknown error occurred");
+    });
+
+    it("should fallback to HTTP status when no error message in response", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: false,
+        status: 404,
+        json: async () => ({}),
+      });
+
+      const client = new ApiClient();
+      const result = await client.getHealth();
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("HTTP 404");
+      expect(result.statusCode).toBe(404);
+    });
   });
 
   describe("getBlockchainStatus", () => {
@@ -158,6 +183,16 @@ describe("ApiClient", () => {
       expect(result.error).toContain("not found");
     });
 
+    it("should propagate error when getSites fails in getSiteById", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Network failure"));
+
+      const client = new ApiClient();
+      const result = await client.getSiteById("1");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Network failure");
+    });
+
     it("should create a site", async () => {
       const newSite = { id: "3", name: "New Site", location: "New Location", owner: "0x789", createdAt: "2024-01-03" };
       mockFetch.mockResolvedValueOnce({
@@ -214,6 +249,29 @@ describe("ApiClient", () => {
 
       expect(result.success).toBe(true);
       expect(result.data?.nameOrTag).toBe("PLC-001");
+    });
+
+    it("should return error for non-existent asset ID", async () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: async () => mockAssets,
+      });
+
+      const client = new ApiClient();
+      const result = await client.getAssetById("nonexistent");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toContain("not found");
+    });
+
+    it("should propagate error when getAssets fails in getAssetById", async () => {
+      mockFetch.mockRejectedValueOnce(new Error("Connection refused"));
+
+      const client = new ApiClient();
+      const result = await client.getAssetById("a1");
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Connection refused");
     });
 
     it("should fetch assets by site", async () => {

@@ -195,4 +195,168 @@ describe("Status Command", () => {
     // Should still complete without crashing
     expect(outputSection).toHaveBeenCalled();
   });
+
+  it("should handle timeout errors", async () => {
+    const timeoutError = new Error("Request timed out");
+    timeoutError.name = "AbortError";
+    mockApiClient.getHealth.mockRejectedValue(timeoutError);
+    mockApiClient.getBlockchainStatus.mockRejectedValue(timeoutError);
+    mockApiClient.getBlueprintsSummary.mockRejectedValue(timeoutError);
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    expect(outputError).toHaveBeenCalledWith(
+      expect.stringContaining("Failed to connect"),
+      expect.anything()
+    );
+  });
+
+  it("should display database component status with latency", async () => {
+    mockApiClient.getHealth.mockResolvedValue({
+      success: true,
+      data: {
+        status: "healthy",
+        timestamp: "2024-01-01T00:00:00Z",
+        version: "1.0.0",
+        uptime: 7200,
+        components: {
+          database: { status: "connected", latencyMs: 12 },
+          blockchain: { status: "connected" },
+        },
+      },
+    });
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    expect(outputKeyValue).toHaveBeenCalled();
+    // Verify multiple sections are rendered
+    expect(outputSection).toHaveBeenCalledTimes(4); // System Health, Components, Blockchain, Blueprints
+  });
+
+  it("should display database component status without latency", async () => {
+    mockApiClient.getHealth.mockResolvedValue({
+      success: true,
+      data: {
+        status: "healthy",
+        timestamp: "2024-01-01T00:00:00Z",
+        version: "1.0.0",
+        uptime: 3600,
+        components: {
+          database: { status: "connected" }, // No latencyMs
+          blockchain: { status: "connected" },
+        },
+      },
+    });
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    expect(outputKeyValue).toHaveBeenCalled();
+    expect(outputSection).toHaveBeenCalled();
+  });
+
+  it("should handle blockchain status fetch failure", async () => {
+    mockApiClient.getBlockchainStatus.mockResolvedValue({
+      success: false,
+      error: "Blockchain service unavailable",
+    });
+
+    await program.parseAsync(["node", "test", "status"]);
+
+    // Should still display other status sections
+    expect(outputSection).toHaveBeenCalled();
+    expect(outputKeyValue).toHaveBeenCalled();
+  });
+
+  it("should output complete JSON with all service statuses", async () => {
+    const healthData = {
+      status: "healthy",
+      timestamp: "2024-01-01T00:00:00Z",
+      version: "2.0.0",
+      uptime: 86400,
+      components: {
+        database: { status: "connected", latencyMs: 3 },
+        blockchain: { status: "connected" },
+      },
+    };
+
+    const blockchainData = { enabled: true };
+    const blueprintsData = {
+      controlModuleTypes: 10,
+      controlModuleInstances: 50,
+      unitTypes: 5,
+      unitInstances: 25,
+      phaseTypes: 12,
+      phaseInstances: 60,
+      vendors: 4,
+    };
+
+    mockApiClient.getHealth.mockResolvedValue({ success: true, data: healthData });
+    mockApiClient.getBlockchainStatus.mockResolvedValue({ success: true, data: blockchainData });
+    mockApiClient.getBlueprintsSummary.mockResolvedValue({ success: true, data: blueprintsData });
+
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    expect(output).toHaveBeenCalledWith({
+      health: healthData,
+      blockchain: blockchainData,
+      blueprints: blueprintsData,
+    });
+  });
+
+  it("should handle partial API failures in JSON mode", async () => {
+    mockApiClient.getHealth.mockResolvedValue({
+      success: true,
+      data: { status: "degraded" },
+    });
+    mockApiClient.getBlockchainStatus.mockResolvedValue({
+      success: false,
+      error: "Service down",
+    });
+    mockApiClient.getBlueprintsSummary.mockResolvedValue({
+      success: true,
+      data: { vendors: 1 },
+    });
+
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    expect(output).toHaveBeenCalledWith({
+      health: { status: "degraded" },
+      blockchain: undefined,
+      blueprints: { vendors: 1 },
+    });
+  });
+
+  it("should fetch all API endpoints concurrently", async () => {
+    const callOrder: string[] = [];
+    
+    mockApiClient.getHealth.mockImplementation(async () => {
+      callOrder.push("health-start");
+      await new Promise((r) => setTimeout(r, 10));
+      callOrder.push("health-end");
+      return { success: true, data: { status: "healthy" } };
+    });
+    
+    mockApiClient.getBlockchainStatus.mockImplementation(async () => {
+      callOrder.push("blockchain-start");
+      await new Promise((r) => setTimeout(r, 10));
+      callOrder.push("blockchain-end");
+      return { success: true, data: { enabled: true } };
+    });
+    
+    mockApiClient.getBlueprintsSummary.mockImplementation(async () => {
+      callOrder.push("blueprints-start");
+      await new Promise((r) => setTimeout(r, 10));
+      callOrder.push("blueprints-end");
+      return { success: true, data: {} };
+    });
+
+    await program.parseAsync(["node", "test", "status", "--json"]);
+
+    // All starts should come before all ends (concurrent execution)
+    const allStarts = callOrder.filter(c => c.endsWith("-start"));
+    const firstEnd = callOrder.findIndex(c => c.endsWith("-end"));
+    
+    expect(allStarts.length).toBe(3);
+    expect(firstEnd).toBeGreaterThanOrEqual(3); // All starts before first end
+  });
 });
