@@ -1,0 +1,42 @@
+[
+  {
+    "hash": "370ba19fc3dd5a67418776bda6cdd77c2579d32e777d5ed0122856752fad4ff1",
+    "metadata": {
+      "artifact": {
+        "id": "370ba19fc3dd5a67418776bda6cdd77c2579d32e777d5ed0122856752fad4ff1",
+        "timestamp": "2026-02-03T03:41:03.595Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-witness",
+            "witness": {
+              "witnessId": "WIT-ml61x68f-ao1myy",
+              "circuitId": "test-circuit-v1",
+              "publicInputs": [
+                "0x123",
+                "0x456"
+              ],
+              "privateInputsHash": "370ba19fc3dd5a67418776bda6cdd77c2579d32e777d5ed0122856752fad4ff1",
+              "capturedAt": "2026-02-03T03:41:03.567Z",
+              "blockNumber": 1000,
+              "blockHash": "0xabc123"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "ZK Witness for circuit test-circuit-v1",
+        "content": {
+          "version": "v1",
+          "oid": "370ba19fc3dd5a67418776bda6cdd77c2579d32e777d5ed0122856752fad4ff1",
+          "size": 18
+        }
+      },
+      "storedAt": "2026-02-03T03:41:03.789Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:41:03.789Z"
+    }
+  }
+]

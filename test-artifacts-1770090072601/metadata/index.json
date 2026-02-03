@@ -1,0 +1,44 @@
+[
+  {
+    "hash": "e5efecb70ef08991dc76f3d8ee7b0eb0d165ff0cb09fd3e2f433c06cbc2f98a3",
+    "metadata": {
+      "artifact": {
+        "id": "e5efecb70ef08991dc76f3d8ee7b0eb0d165ff0cb09fd3e2f433c06cbc2f98a3",
+        "timestamp": "2026-02-03T03:41:13.075Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "trace",
+          "metadata": {
+            "zkType": "contract-trace",
+            "trace": {
+              "traceId": "TRACE-ml61xdkj-898skp",
+              "txHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "blockNumber": 15000000,
+              "contractAddress": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+              "value": "0",
+              "inputHash": "a54942c8e365f3784f38b8d437f9d708290db60738b00cdcfb934c32d1be97f3",
+              "gasUsed": 21000,
+              "status": "revert",
+              "revertReason": "ERC20: transfer amount exceeds balance",
+              "stepCount": 0,
+              "fullTraceHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "Contract trace for tx 0xaaaaaaaaaaaaaaaa...",
+        "content": {
+          "version": "v1",
+          "oid": "e5efecb70ef08991dc76f3d8ee7b0eb0d165ff0cb09fd3e2f433c06cbc2f98a3",
+          "size": 587
+        }
+      },
+      "storedAt": "2026-02-03T03:41:13.094Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:41:13.094Z"
+    }
+  }
+]

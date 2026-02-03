@@ -213,9 +213,21 @@ describe("CrossForkPipeline", () => {
 
   afterEach(async () => {
     await pipeline.shutdown();
-    // Clean up temp directory
-    await rm(tempDir, { recursive: true, force: true });
-  });
+    // Clean up temp directory - retry with delay for Windows file locking
+    try {
+      await rm(tempDir, { recursive: true, force: true });
+    } catch (error: any) {
+      // On Windows, sometimes files are still locked; retry after a short delay
+      if (error.code === "ENOTEMPTY" || error.code === "EBUSY") {
+        await new Promise(resolve => setTimeout(resolve, 100));
+        try {
+          await rm(tempDir, { recursive: true, force: true });
+        } catch {
+          // Ignore cleanup errors - temp dir will be cleaned up by OS
+        }
+      }
+    }
+  }, 15000); // Increase timeout for cleanup
 
   // ===========================================================================
   // LINUX FORK TESTS

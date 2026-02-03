@@ -1,0 +1,30 @@
+{
+  "id": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+  "timestamp": "2026-02-03T03:41:17.741Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-witness",
+      "witness": {
+        "witnessId": "WIT-ml61xh65-m69et2",
+        "circuitId": "test-circuit-v1",
+        "publicInputs": [
+          "0x123",
+          "0x456"
+        ],
+        "privateInputsHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+        "capturedAt": "2026-02-03T03:41:17.741Z"
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "ZK Witness for circuit test-circuit-v1",
+  "content": {
+    "version": "v1",
+    "oid": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+    "size": 11
+  }
+}

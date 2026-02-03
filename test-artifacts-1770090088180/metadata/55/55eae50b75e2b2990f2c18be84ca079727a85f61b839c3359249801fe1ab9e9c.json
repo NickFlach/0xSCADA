@@ -1,0 +1,27 @@
+{
+  "id": "55eae50b75e2b2990f2c18be84ca079727a85f61b839c3359249801fe1ab9e9c",
+  "timestamp": "2026-02-03T03:41:29.066Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-witness",
+      "witness": {
+        "witnessId": "WIT-ml61xpwq-otvx4t",
+        "circuitId": "c3",
+        "publicInputs": [],
+        "privateInputsHash": "55eae50b75e2b2990f2c18be84ca079727a85f61b839c3359249801fe1ab9e9c",
+        "capturedAt": "2026-02-03T03:41:29.066Z"
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "ZK Witness for circuit c3",
+  "content": {
+    "version": "v1",
+    "oid": "55eae50b75e2b2990f2c18be84ca079727a85f61b839c3359249801fe1ab9e9c",
+    "size": 2
+  }
+}

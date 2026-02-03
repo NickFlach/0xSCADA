@@ -1,0 +1,58 @@
+[
+  {
+    "hash": "f7df5f265afbff122e592c8209081321bb3f015561e96933d40f3f0e49b529ce",
+    "metadata": {
+      "artifact": {
+        "id": "f7df5f265afbff122e592c8209081321bb3f015561e96933d40f3f0e49b529ce",
+        "timestamp": "2026-02-03T03:41:14.129Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "trace",
+          "metadata": {
+            "zkType": "contract-trace",
+            "trace": {
+              "traceId": "TRACE-ml61xedt-apkc0t",
+              "txHash": "0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "blockNumber": 15000000,
+              "contractAddress": "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "from": "0xcccccccccccccccccccccccccccccccccccccccc",
+              "value": "0",
+              "inputHash": "a54942c8e365f3784f38b8d437f9d708290db60738b00cdcfb934c32d1be97f3",
+              "gasUsed": 100000,
+              "status": "success",
+              "stepCount": 0,
+              "fullTraceHash": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+              "internalCalls": [
+                {
+                  "type": "call",
+                  "to": "0xdddddddddddddddddddddddddddddddddddddddd",
+                  "value": "1000",
+                  "gasUsed": 30000,
+                  "success": true
+                },
+                {
+                  "type": "delegatecall",
+                  "to": "0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+                  "gasUsed": 20000,
+                  "success": true
+                }
+              ]
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "Contract trace for tx 0xaaaaaaaaaaaaaaaa...",
+        "content": {
+          "version": "v1",
+          "oid": "f7df5f265afbff122e592c8209081321bb3f015561e96933d40f3f0e49b529ce",
+          "size": 768
+        }
+      },
+      "storedAt": "2026-02-03T03:41:14.196Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:41:14.196Z"
+    }
+  }
+]

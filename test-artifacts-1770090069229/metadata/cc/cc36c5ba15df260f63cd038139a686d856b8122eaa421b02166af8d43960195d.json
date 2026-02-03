@@ -1,0 +1,43 @@
+{
+  "id": "cc36c5ba15df260f63cd038139a686d856b8122eaa421b02166af8d43960195d",
+  "timestamp": "2026-02-03T03:41:10.710Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "merkle",
+    "metadata": {
+      "zkType": "merkle-state-diff",
+      "diff": {
+        "diffId": "DIFF-ml61xbqt-ynajo9",
+        "previousRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "newRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fromBlock": 1000,
+        "toBlock": 1100,
+        "changeCount": 2,
+        "changesHash": "cc36c5ba15df260f63cd038139a686d856b8122eaa421b02166af8d43960195d",
+        "changeSummary": [
+          {
+            "key": "0x1",
+            "previousValue": null,
+            "newValue": "0xff",
+            "changeType": "create"
+          },
+          {
+            "key": "0x2",
+            "previousValue": "0xaa",
+            "newValue": "0xbb",
+            "changeType": "update"
+          }
+        ]
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "State diff blocks 1000-1100",
+  "content": {
+    "version": "v1",
+    "oid": "cc36c5ba15df260f63cd038139a686d856b8122eaa421b02166af8d43960195d",
+    "size": 153
+  }
+}

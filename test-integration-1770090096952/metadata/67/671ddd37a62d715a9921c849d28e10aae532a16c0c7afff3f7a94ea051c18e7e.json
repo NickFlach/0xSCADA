@@ -1,0 +1,33 @@
+{
+  "id": "671ddd37a62d715a9921c849d28e10aae532a16c0c7afff3f7a94ea051c18e7e",
+  "timestamp": "2026-02-03T03:41:37.502Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-witness",
+      "witness": {
+        "witnessId": "WIT-ml61xwf1-r21i5s",
+        "circuitId": "price-verify-circuit",
+        "publicInputs": [
+          "04cb9e6907a4776f53171fb168016e829f448244c0354ce5d1c9f63b59a1d087",
+          "2500"
+        ],
+        "privateInputsHash": "671ddd37a62d715a9921c849d28e10aae532a16c0c7afff3f7a94ea051c18e7e",
+        "capturedAt": "2026-02-03T03:41:37.501Z",
+        "metadata": {
+          "oracleRef": "04cb9e6907a4776f53171fb168016e829f448244c0354ce5d1c9f63b59a1d087"
+        }
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "ZK Witness for circuit price-verify-circuit",
+  "content": {
+    "version": "v1",
+    "oid": "671ddd37a62d715a9921c849d28e10aae532a16c0c7afff3f7a94ea051c18e7e",
+    "size": 18
+  }
+}

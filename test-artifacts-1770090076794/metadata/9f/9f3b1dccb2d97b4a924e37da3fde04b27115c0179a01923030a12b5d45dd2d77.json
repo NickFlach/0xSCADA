@@ -1,0 +1,38 @@
+{
+  "id": "9f3b1dccb2d97b4a924e37da3fde04b27115c0179a01923030a12b5d45dd2d77",
+  "timestamp": "2026-02-03T03:41:17.768Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-proof",
+      "proof": {
+        "proofId": "PROOF-ml61xh6v-32pp39",
+        "circuitId": "test-circuit-v1",
+        "proofSystem": "groth16",
+        "witnessId": "WIT-test",
+        "witnessHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+        "publicInputs": [
+          "0x123",
+          "0x456"
+        ],
+        "proofHash": "fd7e93ef18a5b05e2528d5b5c83aac7c3cfb3b18f880db5e6c7fc89d9752184b",
+        "verificationKeyHash": "dcc194e8f0b7f6683e560667a48dc43a36b28c33b71f85300776cb7773390e4c",
+        "generatedAt": "2026-02-03T03:41:17.767Z",
+        "proofSize": 7,
+        "locallyVerified": false
+      }
+    }
+  },
+  "dependencies": [
+    "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc"
+  ],
+  "summary": "ZK Proof (groth16) for circuit test-circuit-v1",
+  "content": {
+    "version": "v1",
+    "oid": "9f3b1dccb2d97b4a924e37da3fde04b27115c0179a01923030a12b5d45dd2d77",
+    "size": 539
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "id": "77e06e4701193b3e3e47e2ce113c6684d31f1270e47aa8a3ba16345b370d9eae",
+  "timestamp": "2026-02-03T03:41:19.452Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "snapshot",
+    "metadata": {
+      "zkType": "oracle-snapshot",
+      "snapshot": {
+        "snapshotId": "ORACLE-ml61xihn-wtgmdp",
+        "source": {
+          "provider": "test",
+          "feedId": "feed-1"
+        },
+        "value": 100,
+        "oracleTimestamp": "2026-02-03T03:41:19.451Z",
+        "capturedAt": "2026-02-03T03:41:19.451Z"
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "Oracle snapshot from test/feed-1",
+  "content": {
+    "version": "v1",
+    "oid": "77e06e4701193b3e3e47e2ce113c6684d31f1270e47aa8a3ba16345b370d9eae",
+    "size": 215
+  }
+}

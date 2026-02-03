@@ -1,0 +1,631 @@
+{
+  "id": "43d8d6c7225b5223eb781214941edc0ed96cb3b0f95e5c9ba195898617103f94",
+  "timestamp": "2026-02-03T03:41:11.380Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "merkle",
+    "metadata": {
+      "zkType": "merkle-state-diff",
+      "diff": {
+        "diffId": "DIFF-ml61xc9g-xxotst",
+        "previousRoot": "0x0000000000000000000000000000000000000000000000000000000000000000",
+        "newRoot": "0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+        "fromBlock": 1000,
+        "toBlock": 1100,
+        "changeCount": 150,
+        "changesHash": "43d8d6c7225b5223eb781214941edc0ed96cb3b0f95e5c9ba195898617103f94",
+        "changeSummary": [
+          {
+            "key": "0x0",
+            "previousValue": null,
+            "newValue": "0x0",
+            "changeType": "create"
+          },
+          {
+            "key": "0x1",
+            "previousValue": null,
+            "newValue": "0x1",
+            "changeType": "create"
+          },
+          {
+            "key": "0x2",
+            "previousValue": null,
+            "newValue": "0x2",
+            "changeType": "create"
+          },
+          {
+            "key": "0x3",
+            "previousValue": null,
+            "newValue": "0x3",
+            "changeType": "create"
+          },
+          {
+            "key": "0x4",
+            "previousValue": null,
+            "newValue": "0x4",
+            "changeType": "create"
+          },
+          {
+            "key": "0x5",
+            "previousValue": null,
+            "newValue": "0x5",
+            "changeType": "create"
+          },
+          {
+            "key": "0x6",
+            "previousValue": null,
+            "newValue": "0x6",
+            "changeType": "create"
+          },
+          {
+            "key": "0x7",
+            "previousValue": null,
+            "newValue": "0x7",
+            "changeType": "create"
+          },
+          {
+            "key": "0x8",
+            "previousValue": null,
+            "newValue": "0x8",
+            "changeType": "create"
+          },
+          {
+            "key": "0x9",
+            "previousValue": null,
+            "newValue": "0x9",
+            "changeType": "create"
+          },
+          {
+            "key": "0x10",
+            "previousValue": null,
+            "newValue": "0x10",
+            "changeType": "create"
+          },
+          {
+            "key": "0x11",
+            "previousValue": null,
+            "newValue": "0x11",
+            "changeType": "create"
+          },
+          {
+            "key": "0x12",
+            "previousValue": null,
+            "newValue": "0x12",
+            "changeType": "create"
+          },
+          {
+            "key": "0x13",
+            "previousValue": null,
+            "newValue": "0x13",
+            "changeType": "create"
+          },
+          {
+            "key": "0x14",
+            "previousValue": null,
+            "newValue": "0x14",
+            "changeType": "create"
+          },
+          {
+            "key": "0x15",
+            "previousValue": null,
+            "newValue": "0x15",
+            "changeType": "create"
+          },
+          {
+            "key": "0x16",
+            "previousValue": null,
+            "newValue": "0x16",
+            "changeType": "create"
+          },
+          {
+            "key": "0x17",
+            "previousValue": null,
+            "newValue": "0x17",
+            "changeType": "create"
+          },
+          {
+            "key": "0x18",
+            "previousValue": null,
+            "newValue": "0x18",
+            "changeType": "create"
+          },
+          {
+            "key": "0x19",
+            "previousValue": null,
+            "newValue": "0x19",
+            "changeType": "create"
+          },
+          {
+            "key": "0x20",
+            "previousValue": null,
+            "newValue": "0x20",
+            "changeType": "create"
+          },
+          {
+            "key": "0x21",
+            "previousValue": null,
+            "newValue": "0x21",
+            "changeType": "create"
+          },
+          {
+            "key": "0x22",
+            "previousValue": null,
+            "newValue": "0x22",
+            "changeType": "create"
+          },
+          {
+            "key": "0x23",
+            "previousValue": null,
+            "newValue": "0x23",
+            "changeType": "create"
+          },
+          {
+            "key": "0x24",
+            "previousValue": null,
+            "newValue": "0x24",
+            "changeType": "create"
+          },
+          {
+            "key": "0x25",
+            "previousValue": null,
+            "newValue": "0x25",
+            "changeType": "create"
+          },
+          {
+            "key": "0x26",
+            "previousValue": null,
+            "newValue": "0x26",
+            "changeType": "create"
+          },
+          {
+            "key": "0x27",
+            "previousValue": null,
+            "newValue": "0x27",
+            "changeType": "create"
+          },
+          {
+            "key": "0x28",
+            "previousValue": null,
+            "newValue": "0x28",
+            "changeType": "create"
+          },
+          {
+            "key": "0x29",
+            "previousValue": null,
+            "newValue": "0x29",
+            "changeType": "create"
+          },
+          {
+            "key": "0x30",
+            "previousValue": null,
+            "newValue": "0x30",
+            "changeType": "create"
+          },
+          {
+            "key": "0x31",
+            "previousValue": null,
+            "newValue": "0x31",
+            "changeType": "create"
+          },
+          {
+            "key": "0x32",
+            "previousValue": null,
+            "newValue": "0x32",
+            "changeType": "create"
+          },
+          {
+            "key": "0x33",
+            "previousValue": null,
+            "newValue": "0x33",
+            "changeType": "create"
+          },
+          {
+            "key": "0x34",
+            "previousValue": null,
+            "newValue": "0x34",
+            "changeType": "create"
+          },
+          {
+            "key": "0x35",
+            "previousValue": null,
+            "newValue": "0x35",
+            "changeType": "create"
+          },
+          {
+            "key": "0x36",
+            "previousValue": null,
+            "newValue": "0x36",
+            "changeType": "create"
+          },
+          {
+            "key": "0x37",
+            "previousValue": null,
+            "newValue": "0x37",
+            "changeType": "create"
+          },
+          {
+            "key": "0x38",
+            "previousValue": null,
+            "newValue": "0x38",
+            "changeType": "create"
+          },
+          {
+            "key": "0x39",
+            "previousValue": null,
+            "newValue": "0x39",
+            "changeType": "create"
+          },
+          {
+            "key": "0x40",
+            "previousValue": null,
+            "newValue": "0x40",
+            "changeType": "create"
+          },
+          {
+            "key": "0x41",
+            "previousValue": null,
+            "newValue": "0x41",
+            "changeType": "create"
+          },
+          {
+            "key": "0x42",
+            "previousValue": null,
+            "newValue": "0x42",
+            "changeType": "create"
+          },
+          {
+            "key": "0x43",
+            "previousValue": null,
+            "newValue": "0x43",
+            "changeType": "create"
+          },
+          {
+            "key": "0x44",
+            "previousValue": null,
+            "newValue": "0x44",
+            "changeType": "create"
+          },
+          {
+            "key": "0x45",
+            "previousValue": null,
+            "newValue": "0x45",
+            "changeType": "create"
+          },
+          {
+            "key": "0x46",
+            "previousValue": null,
+            "newValue": "0x46",
+            "changeType": "create"
+          },
+          {
+            "key": "0x47",
+            "previousValue": null,
+            "newValue": "0x47",
+            "changeType": "create"
+          },
+          {
+            "key": "0x48",
+            "previousValue": null,
+            "newValue": "0x48",
+            "changeType": "create"
+          },
+          {
+            "key": "0x49",
+            "previousValue": null,
+            "newValue": "0x49",
+            "changeType": "create"
+          },
+          {
+            "key": "0x50",
+            "previousValue": null,
+            "newValue": "0x50",
+            "changeType": "create"
+          },
+          {
+            "key": "0x51",
+            "previousValue": null,
+            "newValue": "0x51",
+            "changeType": "create"
+          },
+          {
+            "key": "0x52",
+            "previousValue": null,
+            "newValue": "0x52",
+            "changeType": "create"
+          },
+          {
+            "key": "0x53",
+            "previousValue": null,
+            "newValue": "0x53",
+            "changeType": "create"
+          },
+          {
+            "key": "0x54",
+            "previousValue": null,
+            "newValue": "0x54",
+            "changeType": "create"
+          },
+          {
+            "key": "0x55",
+            "previousValue": null,
+            "newValue": "0x55",
+            "changeType": "create"
+          },
+          {
+            "key": "0x56",
+            "previousValue": null,
+            "newValue": "0x56",
+            "changeType": "create"
+          },
+          {
+            "key": "0x57",
+            "previousValue": null,
+            "newValue": "0x57",
+            "changeType": "create"
+          },
+          {
+            "key": "0x58",
+            "previousValue": null,
+            "newValue": "0x58",
+            "changeType": "create"
+          },
+          {
+            "key": "0x59",
+            "previousValue": null,
+            "newValue": "0x59",
+            "changeType": "create"
+          },
+          {
+            "key": "0x60",
+            "previousValue": null,
+            "newValue": "0x60",
+            "changeType": "create"
+          },
+          {
+            "key": "0x61",
+            "previousValue": null,
+            "newValue": "0x61",
+            "changeType": "create"
+          },
+          {
+            "key": "0x62",
+            "previousValue": null,
+            "newValue": "0x62",
+            "changeType": "create"
+          },
+          {
+            "key": "0x63",
+            "previousValue": null,
+            "newValue": "0x63",
+            "changeType": "create"
+          },
+          {
+            "key": "0x64",
+            "previousValue": null,
+            "newValue": "0x64",
+            "changeType": "create"
+          },
+          {
+            "key": "0x65",
+            "previousValue": null,
+            "newValue": "0x65",
+            "changeType": "create"
+          },
+          {
+            "key": "0x66",
+            "previousValue": null,
+            "newValue": "0x66",
+            "changeType": "create"
+          },
+          {
+            "key": "0x67",
+            "previousValue": null,
+            "newValue": "0x67",
+            "changeType": "create"
+          },
+          {
+            "key": "0x68",
+            "previousValue": null,
+            "newValue": "0x68",
+            "changeType": "create"
+          },
+          {
+            "key": "0x69",
+            "previousValue": null,
+            "newValue": "0x69",
+            "changeType": "create"
+          },
+          {
+            "key": "0x70",
+            "previousValue": null,
+            "newValue": "0x70",
+            "changeType": "create"
+          },
+          {
+            "key": "0x71",
+            "previousValue": null,
+            "newValue": "0x71",
+            "changeType": "create"
+          },
+          {
+            "key": "0x72",
+            "previousValue": null,
+            "newValue": "0x72",
+            "changeType": "create"
+          },
+          {
+            "key": "0x73",
+            "previousValue": null,
+            "newValue": "0x73",
+            "changeType": "create"
+          },
+          {
+            "key": "0x74",
+            "previousValue": null,
+            "newValue": "0x74",
+            "changeType": "create"
+          },
+          {
+            "key": "0x75",
+            "previousValue": null,
+            "newValue": "0x75",
+            "changeType": "create"
+          },
+          {
+            "key": "0x76",
+            "previousValue": null,
+            "newValue": "0x76",
+            "changeType": "create"
+          },
+          {
+            "key": "0x77",
+            "previousValue": null,
+            "newValue": "0x77",
+            "changeType": "create"
+          },
+          {
+            "key": "0x78",
+            "previousValue": null,
+            "newValue": "0x78",
+            "changeType": "create"
+          },
+          {
+            "key": "0x79",
+            "previousValue": null,
+            "newValue": "0x79",
+            "changeType": "create"
+          },
+          {
+            "key": "0x80",
+            "previousValue": null,
+            "newValue": "0x80",
+            "changeType": "create"
+          },
+          {
+            "key": "0x81",
+            "previousValue": null,
+            "newValue": "0x81",
+            "changeType": "create"
+          },
+          {
+            "key": "0x82",
+            "previousValue": null,
+            "newValue": "0x82",
+            "changeType": "create"
+          },
+          {
+            "key": "0x83",
+            "previousValue": null,
+            "newValue": "0x83",
+            "changeType": "create"
+          },
+          {
+            "key": "0x84",
+            "previousValue": null,
+            "newValue": "0x84",
+            "changeType": "create"
+          },
+          {
+            "key": "0x85",
+            "previousValue": null,
+            "newValue": "0x85",
+            "changeType": "create"
+          },
+          {
+            "key": "0x86",
+            "previousValue": null,
+            "newValue": "0x86",
+            "changeType": "create"
+          },
+          {
+            "key": "0x87",
+            "previousValue": null,
+            "newValue": "0x87",
+            "changeType": "create"
+          },
+          {
+            "key": "0x88",
+            "previousValue": null,
+            "newValue": "0x88",
+            "changeType": "create"
+          },
+          {
+            "key": "0x89",
+            "previousValue": null,
+            "newValue": "0x89",
+            "changeType": "create"
+          },
+          {
+            "key": "0x90",
+            "previousValue": null,
+            "newValue": "0x90",
+            "changeType": "create"
+          },
+          {
+            "key": "0x91",
+            "previousValue": null,
+            "newValue": "0x91",
+            "changeType": "create"
+          },
+          {
+            "key": "0x92",
+            "previousValue": null,
+            "newValue": "0x92",
+            "changeType": "create"
+          },
+          {
+            "key": "0x93",
+            "previousValue": null,
+            "newValue": "0x93",
+            "changeType": "create"
+          },
+          {
+            "key": "0x94",
+            "previousValue": null,
+            "newValue": "0x94",
+            "changeType": "create"
+          },
+          {
+            "key": "0x95",
+            "previousValue": null,
+            "newValue": "0x95",
+            "changeType": "create"
+          },
+          {
+            "key": "0x96",
+            "previousValue": null,
+            "newValue": "0x96",
+            "changeType": "create"
+          },
+          {
+            "key": "0x97",
+            "previousValue": null,
+            "newValue": "0x97",
+            "changeType": "create"
+          },
+          {
+            "key": "0x98",
+            "previousValue": null,
+            "newValue": "0x98",
+            "changeType": "create"
+          },
+          {
+            "key": "0x99",
+            "previousValue": null,
+            "newValue": "0x99",
+            "changeType": "create"
+          }
+        ]
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "State diff blocks 1000-1100",
+  "content": {
+    "version": "v1",
+    "oid": "43d8d6c7225b5223eb781214941edc0ed96cb3b0f95e5c9ba195898617103f94",
+    "size": 11481
+  }
+}
