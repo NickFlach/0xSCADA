@@ -1,0 +1,132 @@
+[
+  {
+    "hash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+    "metadata": {
+      "artifact": {
+        "id": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+        "timestamp": "2026-02-03T03:50:15.441Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-witness",
+            "witness": {
+              "witnessId": "WIT-ml629028-2gqhqj",
+              "circuitId": "test-circuit-v1",
+              "publicInputs": [
+                "0x123",
+                "0x456"
+              ],
+              "privateInputsHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+              "capturedAt": "2026-02-03T03:50:15.440Z"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "ZK Witness for circuit test-circuit-v1",
+        "content": {
+          "version": "v1",
+          "oid": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+          "size": 11
+        }
+      },
+      "storedAt": "2026-02-03T03:50:15.458Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:15.458Z"
+    }
+  },
+  {
+    "hash": "f0c582c9ab57ef152031927b1f3971801d51307c3604bd71009fb49e53ce5bfd",
+    "metadata": {
+      "artifact": {
+        "id": "f0c582c9ab57ef152031927b1f3971801d51307c3604bd71009fb49e53ce5bfd",
+        "timestamp": "2026-02-03T03:50:15.501Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-proof",
+            "proof": {
+              "proofId": "PROOF-ml629039-jnin6z",
+              "circuitId": "test-circuit-v1",
+              "proofSystem": "groth16",
+              "witnessId": "WIT-test",
+              "witnessHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+              "publicInputs": [
+                "0x123",
+                "0x456"
+              ],
+              "proofHash": "fd7e93ef18a5b05e2528d5b5c83aac7c3cfb3b18f880db5e6c7fc89d9752184b",
+              "verificationKeyHash": "dcc194e8f0b7f6683e560667a48dc43a36b28c33b71f85300776cb7773390e4c",
+              "generatedAt": "2026-02-03T03:50:15.501Z",
+              "proofSize": 7,
+              "locallyVerified": false
+            }
+          }
+        },
+        "dependencies": [
+          "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc"
+        ],
+        "summary": "ZK Proof (groth16) for circuit test-circuit-v1",
+        "content": {
+          "version": "v1",
+          "oid": "f0c582c9ab57ef152031927b1f3971801d51307c3604bd71009fb49e53ce5bfd",
+          "size": 539
+        }
+      },
+      "storedAt": "2026-02-03T03:50:15.522Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:15.522Z"
+    }
+  },
+  {
+    "hash": "220e367e7cf1c1a56eb713dfe8aa3288cb7e503e582b3e2563800adde5cad7e6",
+    "metadata": {
+      "artifact": {
+        "id": "220e367e7cf1c1a56eb713dfe8aa3288cb7e503e582b3e2563800adde5cad7e6",
+        "timestamp": "2026-02-03T03:50:15.540Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-proof",
+            "proof": {
+              "proofId": "PROOF-ml62904z-xmxf2l",
+              "circuitId": "test-circuit-v1",
+              "proofSystem": "plonk",
+              "witnessId": "WIT-test",
+              "witnessHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+              "publicInputs": [
+                "0x123",
+                "0x456"
+              ],
+              "proofHash": "2a39a74722f38389f606761fec9d45a248a4f3f138486c2c97bff7d440f910c1",
+              "verificationKeyHash": "570f85beaaaf5447eae8c3bb2b6e114e8d3e0d486accc2c90edb8e57b226ab58",
+              "generatedAt": "2026-02-03T03:50:15.539Z",
+              "proofSize": 7,
+              "locallyVerified": false
+            }
+          }
+        },
+        "dependencies": [
+          "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc"
+        ],
+        "summary": "ZK Proof (plonk) for circuit test-circuit-v1",
+        "content": {
+          "version": "v1",
+          "oid": "220e367e7cf1c1a56eb713dfe8aa3288cb7e503e582b3e2563800adde5cad7e6",
+          "size": 537
+        }
+      },
+      "storedAt": "2026-02-03T03:50:15.563Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:15.563Z"
+    }
+  }
+]

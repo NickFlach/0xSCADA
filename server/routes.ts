@@ -29,6 +29,7 @@ import { batchRoutes } from "./routes/batch";
 import { aasRouter } from "./routes/aas";
 import ubiquityRoutes from "./routes/ubiquity";
 import { certificationRoutes } from "./routes/certifications";
+import artifactRoutes from "./routes/ArtifactRoutes";
 import { batchAnchoringService } from "./batch-anchoring";
 
 export async function registerRoutes(
@@ -45,6 +46,7 @@ export async function registerRoutes(
   app.use("/api/aas", aasRouter);
   app.use("/api/ubiquity", ubiquityRoutes);
   app.use("/api/certifications", certificationRoutes);
+  app.use("/api/artifacts", artifactRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {

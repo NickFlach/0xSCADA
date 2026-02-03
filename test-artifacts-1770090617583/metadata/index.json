@@ -1,0 +1,110 @@
+[
+  {
+    "hash": "60c5590f72eef292f9545afc28bf63ca91d2016a0a288f90f9a32f89d3fffcaf",
+    "metadata": {
+      "artifact": {
+        "id": "60c5590f72eef292f9545afc28bf63ca91d2016a0a288f90f9a32f89d3fffcaf",
+        "timestamp": "2026-02-03T03:50:18.276Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-witness",
+            "witness": {
+              "witnessId": "WIT-ml62928z-3x6uyq",
+              "circuitId": "circuit-a",
+              "publicInputs": [],
+              "privateInputsHash": "60c5590f72eef292f9545afc28bf63ca91d2016a0a288f90f9a32f89d3fffcaf",
+              "capturedAt": "2026-02-03T03:50:18.275Z"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "ZK Witness for circuit circuit-a",
+        "content": {
+          "version": "v1",
+          "oid": "60c5590f72eef292f9545afc28bf63ca91d2016a0a288f90f9a32f89d3fffcaf",
+          "size": 2
+        }
+      },
+      "storedAt": "2026-02-03T03:50:18.289Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:18.289Z"
+    }
+  },
+  {
+    "hash": "06f8faea3b5f697691b6d063a07ba4ffaf1ece9a1d473c588565231cdc8e59cc",
+    "metadata": {
+      "artifact": {
+        "id": "06f8faea3b5f697691b6d063a07ba4ffaf1ece9a1d473c588565231cdc8e59cc",
+        "timestamp": "2026-02-03T03:50:18.296Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "proof",
+          "metadata": {
+            "zkType": "zk-witness",
+            "witness": {
+              "witnessId": "WIT-ml62929j-mthcca",
+              "circuitId": "circuit-b",
+              "publicInputs": [],
+              "privateInputsHash": "06f8faea3b5f697691b6d063a07ba4ffaf1ece9a1d473c588565231cdc8e59cc",
+              "capturedAt": "2026-02-03T03:50:18.295Z"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "ZK Witness for circuit circuit-b",
+        "content": {
+          "version": "v1",
+          "oid": "06f8faea3b5f697691b6d063a07ba4ffaf1ece9a1d473c588565231cdc8e59cc",
+          "size": 2
+        }
+      },
+      "storedAt": "2026-02-03T03:50:18.354Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:18.354Z"
+    }
+  },
+  {
+    "hash": "2db57879deeb35762f2edce086be3038dbd42b3b547c9ec9a7aa16c452e9b5a3",
+    "metadata": {
+      "artifact": {
+        "id": "2db57879deeb35762f2edce086be3038dbd42b3b547c9ec9a7aa16c452e9b5a3",
+        "timestamp": "2026-02-03T03:50:18.366Z",
+        "origin": {
+          "system": "ethereum"
+        },
+        "scope": {
+          "type": "snapshot",
+          "metadata": {
+            "zkType": "oracle-snapshot",
+            "snapshot": {
+              "snapshotId": "ORACLE-ml6292bi-ynk8nq",
+              "source": {
+                "provider": "test",
+                "feedId": "feed-1"
+              },
+              "value": 100,
+              "oracleTimestamp": "2026-02-03T03:50:18.366Z",
+              "capturedAt": "2026-02-03T03:50:18.366Z"
+            }
+          }
+        },
+        "dependencies": [],
+        "summary": "Oracle snapshot from test/feed-1",
+        "content": {
+          "version": "v1",
+          "oid": "2db57879deeb35762f2edce086be3038dbd42b3b547c9ec9a7aa16c452e9b5a3",
+          "size": 215
+        }
+      },
+      "storedAt": "2026-02-03T03:50:18.377Z",
+      "accessCount": 0,
+      "lastAccessedAt": "2026-02-03T03:50:18.377Z"
+    }
+  }
+]
