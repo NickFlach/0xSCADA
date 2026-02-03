@@ -161,6 +161,26 @@ export class DecisionBuilder {
 // =============================================================================
 
 /**
+ * Recursively sort object keys for deterministic JSON serialization
+ */
+function sortObjectKeys(obj: unknown): unknown {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+  
+  if (Array.isArray(obj)) {
+    return obj.map(sortObjectKeys);
+  }
+  
+  const sorted: Record<string, unknown> = {};
+  const keys = Object.keys(obj as Record<string, unknown>).sort();
+  for (const key of keys) {
+    sorted[key] = sortObjectKeys((obj as Record<string, unknown>)[key]);
+  }
+  return sorted;
+}
+
+/**
  * Compute the content hash for a decision
  * This makes the decision content-addressable
  */
@@ -185,8 +205,9 @@ export function computeDecisionHash(input: CreateAgentDecisionInput): ContentHas
     verification: input.verification,
   };
 
-  // Sort keys for deterministic serialization
-  const json = JSON.stringify(canonical, Object.keys(canonical).sort());
+  // Sort keys recursively for deterministic serialization
+  const sorted = sortObjectKeys(canonical);
+  const json = JSON.stringify(sorted);
   return sha256(json) as ContentHash;
 }
 

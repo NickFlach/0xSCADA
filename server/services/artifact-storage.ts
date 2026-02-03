@@ -51,6 +51,9 @@ export interface ArtifactStorageConfig {
   
   /** Enable content deduplication */
   enableDeduplication: boolean;
+  
+  /** Validate that dependencies exist before storing (default: true) */
+  validateDependencies?: boolean;
 }
 
 export interface StoredArtifactMetadata {
@@ -84,6 +87,7 @@ export class ArtifactStorageService extends EventEmitter {
       enableIndex: config.enableIndex ?? true,
       maxContentSize: config.maxContentSize ?? 0,
       enableDeduplication: config.enableDeduplication ?? true,
+      validateDependencies: config.validateDependencies ?? true,
     };
 
     this.artifactIndex = new Map();
@@ -246,10 +250,12 @@ export class ArtifactStorageService extends EventEmitter {
       return this.artifactIndex.get(contentHash)!.artifact;
     }
 
-    // Validate dependencies exist
-    for (const depHash of validatedInput.dependencies ?? []) {
-      if (!this.artifactIndex.has(depHash)) {
-        throw new Error(`Dependency artifact not found: ${depHash}`);
+    // Validate dependencies exist (if enabled)
+    if (this.config.validateDependencies !== false) {
+      for (const depHash of validatedInput.dependencies ?? []) {
+        if (!this.artifactIndex.has(depHash)) {
+          throw new Error(`Dependency artifact not found: ${depHash}`);
+        }
       }
     }
 

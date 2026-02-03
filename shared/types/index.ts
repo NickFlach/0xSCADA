@@ -10,3 +10,6 @@ export * from "./agent-decision-storage";
 
 // Digital Twin Checkpoint Types
 export * from "./twin-checkpoint";
+
+// Time-Travel Reconstruction Types
+export * from "./time-travel";

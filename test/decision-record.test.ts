@@ -34,8 +34,14 @@ import type { AgentConfig } from "../server/agents/base";
 // =============================================================================
 
 function makeContentHash(seed: string): ContentHash {
-  const base = seed.padEnd(32, "0").slice(0, 32);
-  return (base + base) as ContentHash;
+  // Generate a valid 64-character hex string (SHA-256 format)
+  // Convert each character to a hex digit (0-f) based on its char code
+  let hash = '';
+  for (let i = 0; i < 64; i++) {
+    const charCode = seed.charCodeAt(i % seed.length);
+    hash += (charCode % 16).toString(16);
+  }
+  return hash as ContentHash;
 }
 
 const mockAgentConfig: AgentConfig = {

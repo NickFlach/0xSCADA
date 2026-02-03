@@ -1350,3 +1350,217 @@ export const insertUbiquityProcessSnapshotSchema = createInsertSchema(ubiquityPr
 
 export type InsertUbiquityProcessSnapshot = z.infer<typeof insertUbiquityProcessSnapshotSchema>;
 export type UbiquityProcessSnapshot = typeof ubiquityProcessSnapshots.$inferSelect;
+
+// =============================================================================
+// OPERATIONAL NFT CERTIFICATIONS (Phase δ: VERITY Architecture)
+// =============================================================================
+
+/**
+ * Certification Types aligned with OperationalNFT contract
+ * 
+ * From REALITY_ARTIFACT_ARCHITECTURE.md and OPERATIONAL_NFT_USE_CASES.md:
+ * - MACHINE_STATE: Certified snapshot of physical equipment state
+ * - SAFETY_CONDITION: Validated safety system state (SIL-2/3/4)
+ * - AGENT_CAPABILITY: Certified AI/agent operational capability
+ * - COMPLIANCE_SNAPSHOT: Regulatory compliance evidence bundle
+ * - CALIBRATION_RECORD: Instrument calibration verification
+ */
+export const CERTIFICATION_TYPES = [
+  "MACHINE_STATE",
+  "SAFETY_CONDITION", 
+  "AGENT_CAPABILITY",
+  "COMPLIANCE_SNAPSHOT",
+  "CALIBRATION_RECORD",
+] as const;
+
+export const CERTIFICATION_REQUEST_STATUSES = [
+  "DRAFT",
+  "PENDING_APPROVAL",
+  "APPROVED",
+  "REJECTED",
+  "MINTED",
+  "EXPIRED",
+  "SUPERSEDED",
+] as const;
+
+export const APPROVAL_STATUSES = [
+  "PENDING",
+  "APPROVED",
+  "REJECTED",
+] as const;
+
+// Certification Requests (pre-minting workflow)
+export const certificationRequests = pgTable("certification_requests", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Certification type
+  certType: text("cert_type").notNull(),
+  
+  // Title and description
+  title: text("title").notNull(),
+  description: text("description"),
+  
+  // Link to LFS artifact (evidence bundle)
+  artifactHash: text("artifact_hash").notNull(),
+  artifactUri: text("artifact_uri"), // IPFS/LFS URI
+  
+  // Validity period
+  validFrom: timestamp("valid_from"),
+  validUntil: timestamp("valid_until"), // null = no expiry
+  
+  // Site and asset association
+  siteId: text("site_id").notNull().references(() => sites.id),
+  assetId: text("asset_id").references(() => assets.id),
+  
+  // Metadata (type-specific data)
+  metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+  
+  // Workflow status
+  status: text("status").notNull().default("DRAFT"),
+  
+  // Approval requirements
+  requiredApprovals: integer("required_approvals").notNull().default(1),
+  currentApprovals: integer("current_approvals").notNull().default(0),
+  
+  // Requester
+  requestedBy: text("requested_by").notNull(),
+  requestedAt: timestamp("requested_at").notNull().defaultNow(),
+  
+  // Supersession tracking
+  supersedes: text("supersedes").references((): any => certificationRequests.id),
+  supersededBy: text("superseded_by"),
+  
+  // On-chain references (after minting)
+  tokenId: text("token_id"), // NFT token ID on chain
+  txHash: text("tx_hash"), // Minting transaction hash
+  mintedAt: timestamp("minted_at"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertCertificationRequestSchema = createInsertSchema(certificationRequests).omit({
+  id: true,
+  createdAt: true,
+  updatedAt: true,
+  currentApprovals: true,
+  supersededBy: true,
+  tokenId: true,
+  txHash: true,
+  mintedAt: true,
+});
+
+export type InsertCertificationRequest = z.infer<typeof insertCertificationRequestSchema>;
+export type CertificationRequest = typeof certificationRequests.$inferSelect;
+
+// Certification Approvals (multi-sig workflow)
+export const certificationApprovals = pgTable("certification_approvals", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  certificationRequestId: text("certification_request_id").notNull().references(() => certificationRequests.id),
+  
+  // Approver info
+  approverId: text("approver_id").notNull(),
+  approverRole: text("approver_role"), // ENGINEER, SAFETY_OFFICER, MANAGER, etc.
+  
+  // Decision
+  status: text("status").notNull().default("PENDING"),
+  comment: text("comment"),
+  
+  // Timing
+  decidedAt: timestamp("decided_at"),
+  
+  // Signature (optional on-chain verification)
+  signature: text("signature"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCertificationApprovalSchema = createInsertSchema(certificationApprovals).omit({
+  id: true,
+  createdAt: true,
+  decidedAt: true,
+});
+
+export type InsertCertificationApproval = z.infer<typeof insertCertificationApprovalSchema>;
+export type CertificationApproval = typeof certificationApprovals.$inferSelect;
+
+// Minted Certifications (on-chain NFTs)
+export const mintedCertifications = pgTable("minted_certifications", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  // Link to request
+  certificationRequestId: text("certification_request_id").notNull().references(() => certificationRequests.id),
+  
+  // On-chain data
+  tokenId: text("token_id").notNull().unique(),
+  contractAddress: text("contract_address").notNull(),
+  chain: text("chain").notNull().default("ethereum"),
+  
+  // Transaction details
+  txHash: text("tx_hash").notNull(),
+  blockNumber: integer("block_number"),
+  
+  // Certificate data (mirrored from contract)
+  certType: text("cert_type").notNull(),
+  artifactHash: text("artifact_hash").notNull(),
+  validFrom: timestamp("valid_from").notNull(),
+  validUntil: timestamp("valid_until"),
+  certifier: text("certifier").notNull(),
+  owner: text("owner").notNull(),
+  
+  // Status tracking
+  isActive: boolean("is_active").notNull().default(true),
+  supersededBy: text("superseded_by"),
+  revokedAt: timestamp("revoked_at"),
+  revocationTxHash: text("revocation_tx_hash"),
+  
+  // Site association
+  siteId: text("site_id").notNull().references(() => sites.id),
+  
+  // Metadata URI (IPFS)
+  metadataUri: text("metadata_uri"),
+  
+  mintedAt: timestamp("minted_at").notNull().defaultNow(),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertMintedCertificationSchema = createInsertSchema(mintedCertifications).omit({
+  id: true,
+  createdAt: true,
+  isActive: true,
+  supersededBy: true,
+  revokedAt: true,
+  revocationTxHash: true,
+});
+
+export type InsertMintedCertification = z.infer<typeof insertMintedCertificationSchema>;
+export type MintedCertification = typeof mintedCertifications.$inferSelect;
+
+// Certification Validity Checks (audit log of verification)
+export const certificationValidityChecks = pgTable("certification_validity_checks", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  
+  mintedCertificationId: text("minted_certification_id").notNull().references(() => mintedCertifications.id),
+  
+  // Check result
+  isValid: boolean("is_valid").notNull(),
+  reason: text("reason").notNull(),
+  
+  // Verification details
+  checkedBy: text("checked_by").notNull(), // USER, SYSTEM, CONTRACT
+  checkedAt: timestamp("checked_at").notNull().defaultNow(),
+  
+  // On-chain verification (if performed)
+  verificationTxHash: text("verification_tx_hash"),
+  
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertCertificationValidityCheckSchema = createInsertSchema(certificationValidityChecks).omit({
+  id: true,
+  createdAt: true,
+});
+
+export type InsertCertificationValidityCheck = z.infer<typeof insertCertificationValidityCheckSchema>;
+export type CertificationValidityCheck = typeof certificationValidityChecks.$inferSelect;
