@@ -1,0 +1,32 @@
+{
+  "id": "c188cb5d2fa4f8f052828e5dabd75e085c4d9cd7490bfd58bc22d21b42d373d5",
+  "timestamp": "2026-02-03T03:50:27.621Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "snapshot",
+    "metadata": {
+      "zkType": "oracle-snapshot",
+      "snapshot": {
+        "snapshotId": "ORACLE-ml6299gl-ipu1b1",
+        "source": {
+          "provider": "chainlink",
+          "feedId": "ETH/USD",
+          "chainId": 1
+        },
+        "value": 2500,
+        "oracleTimestamp": "2026-02-03T03:50:27.621Z",
+        "capturedAt": "2026-02-03T03:50:27.621Z",
+        "blockNumber": 15000000
+      }
+    }
+  },
+  "dependencies": [],
+  "summary": "Oracle snapshot from chainlink/ETH/USD",
+  "content": {
+    "version": "v1",
+    "oid": "c188cb5d2fa4f8f052828e5dabd75e085c4d9cd7490bfd58bc22d21b42d373d5",
+    "size": 257
+  }
+}

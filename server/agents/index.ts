@@ -8,6 +8,7 @@ export * from "./base";
 export * from "./ops-agent";
 export * from "./change-control-agent";
 export * from "./compliance-agent";
+export * from "./decision-record";
 
 import { OpsAgent } from "./ops-agent";
 import { ChangeControlAgent } from "./change-control-agent";

@@ -1,0 +1,548 @@
+name: Reality Verification Pipeline
+
+# VERITY Architecture - γ.3: Artifact-First CI/CD
+# "PRs aren't merged unless reality agrees."
+#
+# This workflow ensures code changes don't break:
+# 1. ZK proofs (cryptographic truth)
+# 2. Plant traces (physical reality)
+# 3. Agent decisions (reasoning consistency)
+# 4. Twin safety (operational boundaries)
+
+on:
+  pull_request:
+    branches: [main, develop]
+  push:
+    branches: [main, develop]
+  workflow_dispatch:
+    inputs:
+      skip_proofs:
+        description: 'Skip ZK proof verification'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_traces:
+        description: 'Skip trace replay'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_decisions:
+        description: 'Skip decision replay'
+        required: false
+        default: 'false'
+        type: boolean
+      skip_safety:
+        description: 'Skip safety checks'
+        required: false
+        default: 'false'
+        type: boolean
+
+env:
+  NODE_VERSION: '20'
+  ARTIFACTS_DIR: '.artifacts'
+  WITNESSES_DIR: '.artifacts/witnesses'
+  TRACES_DIR: '.artifacts/traces'
+  TWINS_DIR: '.artifacts/twins'
+  DECISIONS_DIR: '.artifacts/decisions'
+
+concurrency:
+  group: reality-verification-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # ==========================================================================
+  # ARTIFACT DISCOVERY
+  # ==========================================================================
+  discover-artifacts:
+    name: 📦 Discover Reality Artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      has_witnesses: ${{ steps.check.outputs.has_witnesses }}
+      has_traces: ${{ steps.check.outputs.has_traces }}
+      has_twins: ${{ steps.check.outputs.has_twins }}
+      has_decisions: ${{ steps.check.outputs.has_decisions }}
+      witness_count: ${{ steps.check.outputs.witness_count }}
+      trace_count: ${{ steps.check.outputs.trace_count }}
+      twin_count: ${{ steps.check.outputs.twin_count }}
+      decision_count: ${{ steps.check.outputs.decision_count }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Check for artifacts
+        id: check
+        run: |
+          # Check for ZK witnesses
+          if [ -d "${{ env.WITNESSES_DIR }}" ] && [ -n "$(ls -A ${{ env.WITNESSES_DIR }} 2>/dev/null)" ]; then
+            echo "has_witnesses=true" >> $GITHUB_OUTPUT
+            echo "witness_count=$(find ${{ env.WITNESSES_DIR }} -type f -name '*.json' | wc -l)" >> $GITHUB_OUTPUT
+          else
+            echo "has_witnesses=false" >> $GITHUB_OUTPUT
+            echo "witness_count=0" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for traces
+          if [ -d "${{ env.TRACES_DIR }}" ] && [ -n "$(ls -A ${{ env.TRACES_DIR }} 2>/dev/null)" ]; then
+            echo "has_traces=true" >> $GITHUB_OUTPUT
+            echo "trace_count=$(find ${{ env.TRACES_DIR }} -type f \( -name '*.json' -o -name '*.trace' \) | wc -l)" >> $GITHUB_OUTPUT
+          else
+            echo "has_traces=false" >> $GITHUB_OUTPUT
+            echo "trace_count=0" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for twin checkpoints
+          if [ -d "${{ env.TWINS_DIR }}" ] && [ -n "$(ls -A ${{ env.TWINS_DIR }} 2>/dev/null)" ]; then
+            echo "has_twins=true" >> $GITHUB_OUTPUT
+            echo "twin_count=$(find ${{ env.TWINS_DIR }} -type f -name '*.json' | wc -l)" >> $GITHUB_OUTPUT
+          else
+            echo "has_twins=false" >> $GITHUB_OUTPUT
+            echo "twin_count=0" >> $GITHUB_OUTPUT
+          fi
+
+          # Check for agent decisions
+          if [ -d "${{ env.DECISIONS_DIR }}" ] && [ -n "$(ls -A ${{ env.DECISIONS_DIR }} 2>/dev/null)" ]; then
+            echo "has_decisions=true" >> $GITHUB_OUTPUT
+            echo "decision_count=$(find ${{ env.DECISIONS_DIR }} -type f -name '*.json' | wc -l)" >> $GITHUB_OUTPUT
+          else
+            echo "has_decisions=false" >> $GITHUB_OUTPUT
+            echo "decision_count=0" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Artifact Summary
+        run: |
+          echo "## 📦 Reality Artifact Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Artifact Type | Found | Count |" >> $GITHUB_STEP_SUMMARY
+          echo "|---------------|-------|-------|" >> $GITHUB_STEP_SUMMARY
+          echo "| ZK Witnesses | ${{ steps.check.outputs.has_witnesses }} | ${{ steps.check.outputs.witness_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Plant Traces | ${{ steps.check.outputs.has_traces }} | ${{ steps.check.outputs.trace_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Twin Checkpoints | ${{ steps.check.outputs.has_twins }} | ${{ steps.check.outputs.twin_count }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Agent Decisions | ${{ steps.check.outputs.has_decisions }} | ${{ steps.check.outputs.decision_count }} |" >> $GITHUB_STEP_SUMMARY
+
+  # ==========================================================================
+  # BUILD VERIFICATION
+  # ==========================================================================
+  build:
+    name: 🔨 Build & Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run check
+
+      - name: Build application
+        run: npm run build
+
+      - name: Compile smart contracts
+        run: npx hardhat compile
+        continue-on-error: true
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-output
+          path: dist/
+          retention-days: 3
+
+  # ==========================================================================
+  # ZK PROOF VERIFICATION
+  # ==========================================================================
+  verify-proofs:
+    name: 🔐 Verify ZK Proofs
+    runs-on: ubuntu-latest
+    needs: [discover-artifacts, build]
+    if: |
+      needs.discover-artifacts.outputs.has_witnesses == 'true' &&
+      (github.event.inputs.skip_proofs != 'true')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Verify ZK proofs against witnesses
+        id: verify
+        run: |
+          npx tsx scripts/ci/verify-proofs.ts \
+            --witnesses-dir "${{ env.WITNESSES_DIR }}" \
+            --output-file proof-verification-results.json
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: Upload verification results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: proof-verification-results
+          path: proof-verification-results.json
+          retention-days: 7
+
+      - name: Add proof verification summary
+        if: always()
+        run: |
+          if [ -f proof-verification-results.json ]; then
+            echo "## 🔐 ZK Proof Verification Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat proof-verification-results.json | npx tsx -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('proof-verification-results.json', 'utf8'));
+              console.log('| Proof ID | Circuit | Status | Time (ms) |');
+              console.log('|----------|---------|--------|-----------|');
+              (results.results || []).forEach(r => {
+                const status = r.valid ? '✅ Valid' : '❌ Invalid';
+                console.log('| ' + (r.proofId || 'N/A') + ' | ' + (r.circuitId || 'N/A') + ' | ' + status + ' | ' + (r.verificationTimeMs || '-') + ' |');
+              });
+              console.log('');
+              console.log('**Total:** ' + results.summary.total + ' | **Passed:** ' + results.summary.passed + ' | **Failed:** ' + results.summary.failed);
+            " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Could not parse results" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ==========================================================================
+  # TRACE REPLAY
+  # ==========================================================================
+  replay-traces:
+    name: 📼 Replay Plant Traces
+    runs-on: ubuntu-latest
+    needs: [discover-artifacts, build]
+    if: |
+      needs.discover-artifacts.outputs.has_traces == 'true' &&
+      (github.event.inputs.skip_traces != 'true')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Get changed files
+        id: changed-files
+        uses: tj-actions/changed-files@v44
+        with:
+          files: |
+            shared/**
+            server/**
+            contracts/**
+          files_ignore: |
+            **/*.test.ts
+            **/*.spec.ts
+
+      - name: Replay traces against kernel changes
+        id: replay
+        run: |
+          npx tsx scripts/ci/replay-traces.ts \
+            --traces-dir "${{ env.TRACES_DIR }}" \
+            --changed-files "${{ steps.changed-files.outputs.all_changed_files }}" \
+            --base-ref "${{ github.event.pull_request.base.sha || github.event.before || 'HEAD~1' }}" \
+            --head-ref "${{ github.sha }}" \
+            --output-file trace-replay-results.json
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: Upload replay results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trace-replay-results
+          path: trace-replay-results.json
+          retention-days: 7
+
+      - name: Add trace replay summary
+        if: always()
+        run: |
+          if [ -f trace-replay-results.json ]; then
+            echo "## 📼 Trace Replay Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat trace-replay-results.json | npx tsx -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('trace-replay-results.json', 'utf8'));
+              console.log('**Traces Replayed:** ' + results.summary.total);
+              console.log('');
+              console.log('**Matching:** ' + results.summary.matching + ' | **Divergent:** ' + results.summary.divergent + ' | **Errors:** ' + results.summary.errors);
+              if (results.divergences && results.divergences.length > 0) {
+                console.log('');
+                console.log('### ⚠️ Divergent Behaviors');
+                console.log('');
+                results.divergences.forEach(d => {
+                  console.log('- **' + d.traceId + '**: ' + d.reason);
+                });
+              }
+            " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Could not parse results" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ==========================================================================
+  # AGENT DECISION REPLAY
+  # ==========================================================================
+  replay-decisions:
+    name: 🤖 Replay Agent Decisions
+    runs-on: ubuntu-latest
+    needs: [discover-artifacts, build]
+    if: |
+      needs.discover-artifacts.outputs.has_decisions == 'true' &&
+      (github.event.inputs.skip_decisions != 'true')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Replay agent decisions on frozen reality
+        id: replay
+        run: |
+          npx tsx scripts/ci/replay-decisions.ts \
+            --decisions-dir "${{ env.DECISIONS_DIR }}" \
+            --twins-dir "${{ env.TWINS_DIR }}" \
+            --output-file decision-replay-results.json \
+            --max-decisions 100
+        env:
+          CI: true
+          NODE_ENV: test
+          # Note: For actual AI replay, would need API keys
+          # OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          # ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Upload replay results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: decision-replay-results
+          path: decision-replay-results.json
+          retention-days: 7
+
+      - name: Add decision replay summary
+        if: always()
+        run: |
+          if [ -f decision-replay-results.json ]; then
+            echo "## 🤖 Agent Decision Replay Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat decision-replay-results.json | npx tsx -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('decision-replay-results.json', 'utf8'));
+              console.log('**Decisions Replayed:** ' + results.summary.total);
+              console.log('');
+              console.log('| Metric | Value |');
+              console.log('|--------|-------|');
+              console.log('| Exact Matches | ' + results.summary.exactMatches + ' |');
+              console.log('| Similar Outputs | ' + results.summary.similarOutputs + ' |');
+              console.log('| Different Outputs | ' + results.summary.differentOutputs + ' |');
+              console.log('| Confidence Delta (avg) | ' + (results.summary.avgConfidenceDelta || 0).toFixed(3) + ' |');
+            " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Could not parse results" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ==========================================================================
+  # TWIN DIFF SAFETY CHECK
+  # ==========================================================================
+  twin-safety:
+    name: 🛡️ Twin Diff Safety Check
+    runs-on: ubuntu-latest
+    needs: [discover-artifacts, build]
+    if: |
+      needs.discover-artifacts.outputs.has_twins == 'true' &&
+      (github.event.inputs.skip_safety != 'true')
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          lfs: true
+          fetch-depth: 0
+
+      - name: Checkout base branch for comparison
+        if: github.event_name == 'pull_request'
+        run: |
+          git fetch origin ${{ github.event.pull_request.base.ref }}
+          mkdir -p .base-twins
+          git show origin/${{ github.event.pull_request.base.ref }}:${{ env.TWINS_DIR }}/main/latest.json > .base-twins/latest.json 2>/dev/null || echo '{}' > .base-twins/latest.json
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run twin diff safety checks
+        id: safety
+        run: |
+          npx tsx scripts/ci/twin-diff-safety.ts \
+            --twins-dir "${{ env.TWINS_DIR }}" \
+            --base-twin ".base-twins/latest.json" \
+            --head-twin "${{ env.TWINS_DIR }}/main/latest.json" \
+            --output-file twin-safety-results.json \
+            --fail-on-critical
+        env:
+          CI: true
+          NODE_ENV: test
+
+      - name: Upload safety results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: twin-safety-results
+          path: twin-safety-results.json
+          retention-days: 7
+
+      - name: Add safety check summary
+        if: always()
+        run: |
+          if [ -f twin-safety-results.json ]; then
+            echo "## 🛡️ Twin Diff Safety Check Results" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            cat twin-safety-results.json | npx tsx -e "
+              const fs = require('fs');
+              const results = JSON.parse(fs.readFileSync('twin-safety-results.json', 'utf8'));
+              const safetyEmoji = {
+                'none': '✅',
+                'low': '🟡',
+                'medium': '🟠',
+                'high': '🔴',
+                'critical': '⛔'
+              };
+              console.log('**Overall Safety Level:** ' + (safetyEmoji[results.safetyLevel] || '❓') + ' ' + (results.safetyLevel || 'unknown').toUpperCase());
+              console.log('');
+              if (results.summary) {
+                console.log('| Category | Changes | Critical | High | Medium | Low |');
+                console.log('|----------|---------|----------|------|--------|-----|');
+                Object.entries(results.summary.byCategory || {}).forEach(([cat, data]) => {
+                  console.log('| ' + cat + ' | ' + (data.total || 0) + ' | ' + (data.critical || 0) + ' | ' + (data.high || 0) + ' | ' + (data.medium || 0) + ' | ' + (data.low || 0) + ' |');
+                });
+              }
+              if (results.violations && results.violations.length > 0) {
+                console.log('');
+                console.log('### ⚠️ Safety Violations');
+                console.log('');
+                results.violations.slice(0, 10).forEach(v => {
+                  console.log('- **[' + v.severity + ']** ' + v.message);
+                });
+                if (results.violations.length > 10) {
+                  console.log('');
+                  console.log('_...and ' + (results.violations.length - 10) + ' more violations_');
+                }
+              }
+            " >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo "Could not parse results" >> $GITHUB_STEP_SUMMARY
+          fi
+
+  # ==========================================================================
+  # REALITY VERIFICATION GATE
+  # ==========================================================================
+  reality-gate:
+    name: ✅ Reality Verification Gate
+    runs-on: ubuntu-latest
+    needs: [discover-artifacts, build, verify-proofs, replay-traces, replay-decisions, twin-safety]
+    if: always()
+    steps:
+      - name: Check all verification results
+        run: |
+          echo "## 🌌 Reality Verification Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          
+          # Build check
+          if [ "${{ needs.build.result }}" == "success" ]; then
+            echo "✅ **Build**: Passed" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Build**: Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # ZK Proofs
+          if [ "${{ needs.verify-proofs.result }}" == "success" ]; then
+            echo "✅ **ZK Proof Verification**: Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.verify-proofs.result }}" == "skipped" ]; then
+            echo "⏭️ **ZK Proof Verification**: Skipped (no witnesses)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **ZK Proof Verification**: Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Trace Replay
+          if [ "${{ needs.replay-traces.result }}" == "success" ]; then
+            echo "✅ **Trace Replay**: Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.replay-traces.result }}" == "skipped" ]; then
+            echo "⏭️ **Trace Replay**: Skipped (no traces)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Trace Replay**: Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Decision Replay
+          if [ "${{ needs.replay-decisions.result }}" == "success" ]; then
+            echo "✅ **Decision Replay**: Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.replay-decisions.result }}" == "skipped" ]; then
+            echo "⏭️ **Decision Replay**: Skipped (no decisions)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Decision Replay**: Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          # Twin Safety
+          if [ "${{ needs.twin-safety.result }}" == "success" ]; then
+            echo "✅ **Twin Safety Check**: Passed" >> $GITHUB_STEP_SUMMARY
+          elif [ "${{ needs.twin-safety.result }}" == "skipped" ]; then
+            echo "⏭️ **Twin Safety Check**: Skipped (no twins)" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "❌ **Twin Safety Check**: Failed" >> $GITHUB_STEP_SUMMARY
+            exit 1
+          fi
+          
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "---" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "*\"If reality and instruction conflict, record reality first—then question instruction.\"*" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "✅ **All reality verification checks passed. PR is ready for review.**" >> $GITHUB_STEP_SUMMARY
+
+      - name: Block PR on failure
+        if: |
+          needs.build.result == 'failure' ||
+          needs.verify-proofs.result == 'failure' ||
+          needs.replay-traces.result == 'failure' ||
+          needs.replay-decisions.result == 'failure' ||
+          needs.twin-safety.result == 'failure'
+        run: |
+          echo "❌ Reality verification failed. PR cannot be merged."
+          exit 1
