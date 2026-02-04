@@ -176,15 +176,36 @@ static unsigned int scada_nf_hook(void *priv,
 	u8 proto;
 	unsigned char *payload;
 	unsigned int payload_len;
+	unsigned int ip_hdrlen, tcp_hdrlen;
 
 	if (!filter_enabled)
+		return NF_ACCEPT;
+
+	/* Ensure we can access the IP header */
+	if (!pskb_may_pull(skb, sizeof(struct iphdr)))
 		return NF_ACCEPT;
 
 	iph = ip_hdr(skb);
 	if (iph->protocol != IPPROTO_TCP)
 		return NF_ACCEPT;
 
-	tcph = tcp_hdr(skb);
+	/* Validate and pull IP header length */
+	ip_hdrlen = iph->ihl * 4;
+	if (ip_hdrlen < sizeof(struct iphdr))
+		return NF_ACCEPT;
+
+	/* Ensure we can access the TCP header */
+	if (!pskb_may_pull(skb, ip_hdrlen + sizeof(struct tcphdr)))
+		return NF_ACCEPT;
+
+	/* Re-fetch IP header pointer after pskb_may_pull (may reallocate) */
+	iph = ip_hdr(skb);
+	tcph = (struct tcphdr *)((unsigned char *)iph + ip_hdrlen);
+
+	/* Validate TCP header length */
+	tcp_hdrlen = tcph->doff * 4;
+	if (tcp_hdrlen < sizeof(struct tcphdr))
+		return NF_ACCEPT;
 
 	/* Check if this is a known SCADA protocol */
 	proto = identify_protocol(tcph->dest);
@@ -202,14 +223,30 @@ static unsigned int scada_nf_hook(void *priv,
 	event.dst_port = tcph->dest;
 
 	if (capture_payload) {
-		payload = (unsigned char *)tcph + (tcph->doff * 4);
-		payload_len = ntohs(iph->tot_len) - (iph->ihl * 4) - (tcph->doff * 4);
-		
-		if (payload_len > sizeof(event.payload))
-			payload_len = sizeof(event.payload);
-		
-		memcpy(event.payload, payload, payload_len);
-		event.payload_len = payload_len;
+		/* Calculate payload offset and length */
+		unsigned int headers_len = ip_hdrlen + tcp_hdrlen;
+		unsigned int total_len = ntohs(iph->tot_len);
+
+		if (total_len <= headers_len) {
+			/* No payload */
+			event.payload_len = 0;
+		} else {
+			payload_len = total_len - headers_len;
+
+			if (payload_len > sizeof(event.payload))
+				payload_len = sizeof(event.payload);
+
+			/* Ensure we can access the payload */
+			if (!pskb_may_pull(skb, headers_len + payload_len))
+				return NF_ACCEPT;
+
+			/* Re-fetch pointers after pskb_may_pull */
+			iph = ip_hdr(skb);
+			payload = (unsigned char *)iph + headers_len;
+
+			memcpy(event.payload, payload, payload_len);
+			event.payload_len = payload_len;
+		}
 	}
 
 	/* Create artifact (non-blocking, best effort) */
