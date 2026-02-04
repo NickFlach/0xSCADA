@@ -1,0 +1,38 @@
+{
+  "id": "220e367e7cf1c1a56eb713dfe8aa3288cb7e503e582b3e2563800adde5cad7e6",
+  "timestamp": "2026-02-03T03:50:15.540Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-proof",
+      "proof": {
+        "proofId": "PROOF-ml62904z-xmxf2l",
+        "circuitId": "test-circuit-v1",
+        "proofSystem": "plonk",
+        "witnessId": "WIT-test",
+        "witnessHash": "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc",
+        "publicInputs": [
+          "0x123",
+          "0x456"
+        ],
+        "proofHash": "2a39a74722f38389f606761fec9d45a248a4f3f138486c2c97bff7d440f910c1",
+        "verificationKeyHash": "570f85beaaaf5447eae8c3bb2b6e114e8d3e0d486accc2c90edb8e57b226ab58",
+        "generatedAt": "2026-02-03T03:50:15.539Z",
+        "proofSize": 7,
+        "locallyVerified": false
+      }
+    }
+  },
+  "dependencies": [
+    "d736e5854ab7491d5ccd80db8c68697ac0beca5889e7600cdcd37b739b870ddc"
+  ],
+  "summary": "ZK Proof (plonk) for circuit test-circuit-v1",
+  "content": {
+    "version": "v1",
+    "oid": "220e367e7cf1c1a56eb713dfe8aa3288cb7e503e582b3e2563800adde5cad7e6",
+    "size": 537
+  }
+}

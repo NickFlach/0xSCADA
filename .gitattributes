@@ -1,3 +1,20 @@
+# Reality Artifacts - Large Binary Objects
+*.trace filter=lfs diff=lfs merge=lfs -text
+*.proof filter=lfs diff=lfs merge=lfs -text
+*.witness filter=lfs diff=lfs merge=lfs -text
+*.artifact filter=lfs diff=lfs merge=lfs -text
+*.snapshot filter=lfs diff=lfs merge=lfs -text
+*.twin filter=lfs diff=lfs merge=lfs -text
 
-# Use bd merge for beads JSONL files
-.beads/issues.jsonl merge=beads
+# Kernel artifacts
+linux-fork/**/*.ftrace filter=lfs diff=lfs merge=lfs -text
+linux-fork/**/*.ebpf filter=lfs diff=lfs merge=lfs -text
+linux-fork/**/*.firmware filter=lfs diff=lfs merge=lfs -text
+
+# Ethereum artifacts
+geth-fork/**/*.zk filter=lfs diff=lfs merge=lfs -text
+geth-fork/**/*.statediff filter=lfs diff=lfs merge=lfs -text
+
+# Agent artifacts
+.agentic-qe/**/*.embedding filter=lfs diff=lfs merge=lfs -text
+.agentic-qe/**/*.worldmodel filter=lfs diff=lfs merge=lfs -text

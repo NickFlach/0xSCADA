@@ -1,0 +1,38 @@
+{
+  "id": "b2d7282f7583b5b5b501a5897f51faa709323d03898199ed9aef910c5bea1593",
+  "timestamp": "2026-02-03T03:41:23.121Z",
+  "origin": {
+    "system": "ethereum"
+  },
+  "scope": {
+    "type": "proof",
+    "metadata": {
+      "zkType": "zk-proof",
+      "proof": {
+        "proofId": "PROOF-ml61xlbk-3gjw5u",
+        "circuitId": "different-circuit",
+        "proofSystem": "groth16",
+        "witnessId": "test",
+        "witnessHash": "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b",
+        "publicInputs": [
+          "0xaaa",
+          "0xbbb"
+        ],
+        "proofHash": "3dff8c6f0e4e6a39d94af134f13842bbd331cae2b02beeb3b350b030223e930a",
+        "verificationKeyHash": "8630c6c9af0730c3e9635a44c97bfb4ac4ff57c449951a60848ac666f5f2de0c",
+        "generatedAt": "2026-02-03T03:41:23.120Z",
+        "proofSize": 10,
+        "locallyVerified": false
+      }
+    }
+  },
+  "dependencies": [
+    "2bb80d537b1da3e38bd30361aa855686bde0eacd7162fef6a25fe97bf527a25b"
+  ],
+  "summary": "ZK Proof (groth16) for circuit different-circuit",
+  "content": {
+    "version": "v1",
+    "oid": "b2d7282f7583b5b5b501a5897f51faa709323d03898199ed9aef910c5bea1593",
+    "size": 538
+  }
+}

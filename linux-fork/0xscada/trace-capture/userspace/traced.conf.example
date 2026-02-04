@@ -1,0 +1,42 @@
+# 0xSCADA Trace Capture Daemon Configuration
+# /etc/scada-trace/traced.conf
+
+# Artifact storage directory
+artifact_dir = /var/lib/scada-trace/artifacts
+
+# Poll interval (milliseconds)
+poll_interval = 1000
+
+# Automatically link captures to git HEAD
+auto_link_commits = true
+
+# Compress artifacts before storage
+compress = true
+
+# Maximum snapshot size (bytes)
+max_snapshot_size = 67108864  # 64MB
+
+# Device identifier for this node
+device_id = scada-gateway-01
+
+# Site identifier
+site_id = plant-alpha
+
+# Log level (debug, info, warning, error)
+log_level = info
+
+# Enable remote artifact sync (future)
+# remote_sync = false
+# remote_url = https://artifacts.0xscada.io/v1
+
+# eBPF programs to load
+# ebpf_programs = /etc/scada-trace/bpf/latency.bpf.o
+
+# Modbus capture settings
+# modbus_enabled = true
+# modbus_interface = eth0
+# modbus_units = 1,2,3
+
+# Retention policy
+# retention_days = 90
+# retention_max_size_gb = 100
