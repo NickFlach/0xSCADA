@@ -5,3 +5,4 @@ export { registerEventsCommand } from "./events.js";
 export { registerBlockchainCommand } from "./blockchain.js";
 export { registerDevCommand } from "./dev.js";
 export { registerConfigCommand } from "./config.js";
+export { registerShellCommand } from "./shell.js";

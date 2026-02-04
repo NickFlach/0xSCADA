@@ -14,6 +14,7 @@ import {
   registerBlockchainCommand,
   registerDevCommand,
   registerConfigCommand,
+  registerShellCommand,
 } from "./commands/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -69,6 +70,7 @@ Examples:
   $ 0xscada dev seed                  Seed database with test data
   $ 0xscada config show               Display current configuration
   $ 0xscada config set apiUrl <url>   Update API URL
+  $ 0xscada shell                     Start interactive shell mode
 
 Environment Variables:
   OXSCADA_API_URL     API server URL (default: http://localhost:5000)
@@ -92,6 +94,7 @@ registerEventsCommand(program);
 registerBlockchainCommand(program);
 registerDevCommand(program);
 registerConfigCommand(program);
+registerShellCommand(program);
 
 // Error handling for unknown commands
 program.on("command:*", (operands) => {
