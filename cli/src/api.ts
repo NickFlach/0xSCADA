@@ -291,6 +291,99 @@ export class ApiClient {
   > {
     return this.request("/api/controllers");
   }
+
+  // Blueprints - CM Types
+  async getCMTypes(): Promise<ApiResponse<CMType[]>> {
+    return this.request<CMType[]>("/api/blueprints/cm-types");
+  }
+
+  async getCMTypeByName(name: string): Promise<ApiResponse<CMType>> {
+    return this.request<CMType>(`/api/blueprints/cm-types/${encodeURIComponent(name)}`);
+  }
+
+  async createCMType(data: unknown): Promise<ApiResponse<CMType>> {
+    return this.request<CMType>("/api/blueprints/cm-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Unit Types
+  async getUnitTypes(): Promise<ApiResponse<UnitType[]>> {
+    return this.request<UnitType[]>("/api/blueprints/unit-types");
+  }
+
+  async createUnitType(data: unknown): Promise<ApiResponse<UnitType>> {
+    return this.request<UnitType>("/api/blueprints/unit-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Phase Types
+  async getPhaseTypes(): Promise<ApiResponse<PhaseType[]>> {
+    return this.request<PhaseType[]>("/api/blueprints/phase-types");
+  }
+
+  async createPhaseType(data: unknown): Promise<ApiResponse<PhaseType>> {
+    return this.request<PhaseType>("/api/blueprints/phase-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Import
+  async importBlueprints(data: unknown): Promise<
+    ApiResponse<{
+      success: boolean;
+      imported?: {
+        cmTypes: number;
+        cmInstances: number;
+        unitTypes: number;
+        unitInstances: number;
+        phaseTypes: number;
+      };
+      warnings?: string[];
+      errors?: string[];
+    }>
+  > {
+    return this.request("/api/blueprints/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+}
+
+// Blueprint types
+export interface CMType {
+  id: string;
+  name: string;
+  inputs: unknown[];
+  outputs: unknown[];
+  inOuts: unknown[];
+  sourcePackage?: string;
+  createdAt?: string;
+}
+
+export interface UnitType {
+  id: string;
+  name: string;
+  description?: string;
+  variables?: unknown[];
+  createdAt?: string;
+}
+
+export interface PhaseType {
+  id: string;
+  name: string;
+  description?: string;
+  linkedModules?: unknown[];
+  inputs?: unknown[];
+  outputs?: unknown[];
+  inOuts?: unknown[];
+  internalValues?: unknown[];
+  sequences?: Record<string, unknown>;
+  createdAt?: string;
 }
 
 // Singleton instance
