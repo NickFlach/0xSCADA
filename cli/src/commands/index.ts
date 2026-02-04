@@ -14,3 +14,4 @@ export { registerShellCommand } from "./shell.js";
 export { registerAnchorCommand } from "./anchor.js";
 export { registerCompletionCommand } from "./completion.js";
 export { registerAgentsCommand } from "./agents.js";
+export { registerWatchCommand } from "./watch.js";
