@@ -83,6 +83,99 @@ agentRoutes.delete("/:id", async (req, res) => {
   }
 });
 
+// POST /api/agents/:id/start - Start agent
+agentRoutes.post("/:id/start", async (req, res) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
+    // Update status to ACTIVE
+    const [updated] = await db
+      .update(agents)
+      .set({ status: "ACTIVE", lastActiveAt: new Date(), updatedAt: new Date() })
+      .where(eq(agents.id, req.params.id))
+      .returning();
+
+    // In production, this would also start the actual agent runtime
+    // For now, we just update the database status
+
+    res.json({ success: true, agent: updated });
+  } catch (error) {
+    console.error("Error starting agent:", error);
+    res.status(500).json({ error: "Failed to start agent" });
+  }
+});
+
+// POST /api/agents/:id/stop - Stop agent
+agentRoutes.post("/:id/stop", async (req, res) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
+    // Update status to INACTIVE
+    const [updated] = await db
+      .update(agents)
+      .set({ status: "INACTIVE", updatedAt: new Date() })
+      .where(eq(agents.id, req.params.id))
+      .returning();
+
+    // In production, this would also stop the actual agent runtime
+    // For now, we just update the database status
+
+    res.json({ success: true, agent: updated });
+  } catch (error) {
+    console.error("Error stopping agent:", error);
+    res.status(500).json({ error: "Failed to stop agent" });
+  }
+});
+
+// GET /api/agents/:id/logs - Get agent audit logs
+// Note: In production, this would query from a dedicated audit log table
+// For now, we return a simulated response based on agent activity
+agentRoutes.get("/:id/logs", async (req, res) => {
+  try {
+    const [agent] = await db.select().from(agents).where(eq(agents.id, req.params.id));
+    if (!agent) {
+      return res.status(404).json({ error: "Agent not found" });
+    }
+
+    const limit = parseInt(req.query.limit as string) || 100;
+
+    // Simulated audit log entries based on agent state
+    // In production, this would come from a dedicated audit_logs table
+    const logs = [];
+
+    if (agent.lastActiveAt) {
+      logs.push({
+        id: `log-${agent.id}-1`,
+        agentId: agent.id,
+        action: agent.status === "ACTIVE" ? "START" : "STOP",
+        details: { status: agent.status },
+        timestamp: agent.lastActiveAt,
+      });
+    }
+
+    if (agent.lastError) {
+      logs.push({
+        id: `log-${agent.id}-error`,
+        agentId: agent.id,
+        action: "ERROR",
+        details: { error: agent.lastError },
+        timestamp: agent.updatedAt || new Date().toISOString(),
+      });
+    }
+
+    res.json(logs.slice(0, limit));
+  } catch (error) {
+    console.error("Error fetching agent logs:", error);
+    res.status(500).json({ error: "Failed to fetch agent logs" });
+  }
+});
+
 // =============================================================================
 // AGENT OUTPUTS
 // =============================================================================

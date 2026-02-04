@@ -9,9 +9,9 @@ import {
   outputError,
   outputSuccess,
   formatDate,
-  setOutputOptions,
   colors,
 } from "../output.js";
+import { initOutputFromCommand, addOutputOptions } from "../lib/commandHelpers.js";
 
 export function registerSitesCommand(program: Command): void {
   const sites = program
@@ -19,15 +19,13 @@ export function registerSitesCommand(program: Command): void {
     .description("Manage registered sites");
 
   // List sites
-  sites
+  const listCmd = sites
     .command("list")
-    .description("List all registered sites")
-    .option("--json", "Output as JSON")
-    .option("--no-color", "Disable colorized output")
-    .action(async (options) => {
-      setOutputOptions({ json: options.json, color: options.color });
-      
-      const spinner = options.json ? null : ora("Fetching sites...").start();
+    .description("List all registered sites");
+  addOutputOptions(listCmd)
+    .action(async (options, command) => {
+      const useStructured = initOutputFromCommand(options, command);
+      const spinner = useStructured ? null : ora("Fetching sites...").start();
       const api = getApiClient();
 
       try {
@@ -39,7 +37,7 @@ export function registerSitesCommand(program: Command): void {
           return;
         }
 
-        if (options.json) {
+        if (useStructured) {
           output(response.data);
           return;
         }
@@ -71,16 +69,14 @@ export function registerSitesCommand(program: Command): void {
     });
 
   // Get site by ID
-  sites
+  const getCmd = sites
     .command("get <id>")
     .description("Get details of a specific site")
-    .option("--json", "Output as JSON")
-    .option("--no-color", "Disable colorized output")
-    .option("--with-assets", "Include assets for this site")
-    .action(async (id: string, options) => {
-      setOutputOptions({ json: options.json, color: options.color });
-      
-      const spinner = options.json ? null : ora("Fetching site details...").start();
+    .option("--with-assets", "Include assets for this site");
+  addOutputOptions(getCmd)
+    .action(async (id: string, options, command) => {
+      const useStructured = initOutputFromCommand(options, command);
+      const spinner = useStructured ? null : ora("Fetching site details...").start();
       const api = getApiClient();
 
       try {
@@ -98,7 +94,7 @@ export function registerSitesCommand(program: Command): void {
 
         const site = siteResponse.data;
 
-        if (options.json) {
+        if (useStructured) {
           output({
             ...site,
             assets: assetsResponse?.data || undefined,
@@ -143,18 +139,16 @@ export function registerSitesCommand(program: Command): void {
     });
 
   // Create site
-  sites
+  const createCmd = sites
     .command("create")
     .description("Create a new site")
     .requiredOption("--name <name>", "Site name")
     .requiredOption("--location <location>", "Site location")
-    .requiredOption("--owner <owner>", "Site owner address")
-    .option("--json", "Output as JSON")
-    .option("--no-color", "Disable colorized output")
-    .action(async (options) => {
-      setOutputOptions({ json: options.json, color: options.color });
-      
-      const spinner = options.json ? null : ora("Creating site...").start();
+    .requiredOption("--owner <owner>", "Site owner address");
+  addOutputOptions(createCmd)
+    .action(async (options, command) => {
+      const useStructured = initOutputFromCommand(options, command);
+      const spinner = useStructured ? null : ora("Creating site...").start();
       const api = getApiClient();
 
       try {
@@ -171,7 +165,7 @@ export function registerSitesCommand(program: Command): void {
           return;
         }
 
-        if (options.json) {
+        if (useStructured) {
           output(response.data);
           return;
         }

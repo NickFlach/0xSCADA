@@ -291,6 +291,213 @@ export class ApiClient {
   > {
     return this.request("/api/controllers");
   }
+
+  // ==========================================================================
+  // AGENTS (Issue #90: Governance Agent Management)
+  // ==========================================================================
+
+  // List all agents
+  async getAgents(): Promise<ApiResponse<Agent[]>> {
+    return this.request<Agent[]>("/api/agents");
+  }
+
+  // Get agent by ID
+  async getAgentById(id: string): Promise<ApiResponse<Agent>> {
+    return this.request<Agent>(`/api/agents/${id}`);
+  }
+
+  // Get agent state
+  async getAgentState(agentId: string): Promise<ApiResponse<AgentState[]>> {
+    return this.request<AgentState[]>(`/api/agents/${agentId}/state`);
+  }
+
+  // Get agent outputs
+  async getAgentOutputs(agentId: string): Promise<ApiResponse<AgentOutput[]>> {
+    return this.request<AgentOutput[]>(`/api/agents/${agentId}/outputs`);
+  }
+
+  // Get agent logs (audit entries)
+  async getAgentLogs(agentId: string, limit = 100): Promise<ApiResponse<AgentAuditEntry[]>> {
+    return this.request<AgentAuditEntry[]>(`/api/agents/${agentId}/logs?limit=${limit}`);
+  }
+
+  // Start agent
+  async startAgent(agentId: string): Promise<ApiResponse<{ success: boolean }>> {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}/start`, {
+      method: "POST",
+    });
+  }
+
+  // Stop agent
+  async stopAgent(agentId: string): Promise<ApiResponse<{ success: boolean }>> {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}/stop`, {
+      method: "POST",
+    });
+  }
+
+  // Set agent configuration value
+  async setAgentConfig(
+    agentId: string,
+    key: string,
+    value: string
+  ): Promise<ApiResponse<{ success: boolean }>> {
+    return this.request<{ success: boolean }>(`/api/agents/${agentId}/state/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  // ==========================================================================
+  // AGENT PROPOSALS
+  // ==========================================================================
+
+  // List all proposals
+  async getProposals(): Promise<ApiResponse<AgentProposal[]>> {
+    return this.request<AgentProposal[]>("/api/agents/proposals");
+  }
+
+  // Get proposal by ID
+  async getProposalById(id: string): Promise<ApiResponse<AgentProposal>> {
+    // Try to find in list first (API doesn't have direct get by ID)
+    const response = await this.getProposals();
+    if (!response.success || !response.data) {
+      return { success: false, error: response.error || "Failed to fetch proposals" };
+    }
+    const proposal = response.data.find((p) => p.id === id);
+    if (!proposal) {
+      return { success: false, error: `Proposal with ID '${id}' not found` };
+    }
+    return { success: true, data: proposal };
+  }
+
+  // Approve proposal
+  async approveProposal(
+    proposalId: string,
+    approval: {
+      userId: string;
+      userName: string;
+      comment?: string;
+    }
+  ): Promise<ApiResponse<AgentProposal>> {
+    return this.request<AgentProposal>(`/api/agents/proposals/${proposalId}/approve`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...approval,
+        signature: `cli-signature-${Date.now()}`, // CLI generates a simple signature
+      }),
+    });
+  }
+
+  // Reject proposal
+  async rejectProposal(
+    proposalId: string,
+    rejection: {
+      userId: string;
+      userName: string;
+      comment: string;
+    }
+  ): Promise<ApiResponse<AgentProposal>> {
+    return this.request<AgentProposal>(`/api/agents/proposals/${proposalId}/reject`, {
+      method: "POST",
+      body: JSON.stringify({
+        ...rejection,
+        signature: `cli-signature-${Date.now()}`, // CLI generates a simple signature
+      }),
+    });
+  }
+}
+
+// =============================================================================
+// AGENT TYPES (for CLI)
+// =============================================================================
+
+export interface Agent {
+  id: string;
+  name: string;
+  displayName: string;
+  agentType: string;
+  status: "ACTIVE" | "INACTIVE" | "SUSPENDED" | "ERROR";
+  capabilities: string[];
+  scope: {
+    allSites?: boolean;
+    siteIds?: string[];
+    allAssets?: boolean;
+    assetIds?: string[];
+    assetTypes?: string[];
+    allEventTypes?: boolean;
+    eventTypes?: string[];
+    maxHistoryDays?: number;
+  };
+  publicKey: string;
+  version?: string;
+  createdAt: string;
+  updatedAt?: string;
+  lastActiveAt?: string;
+  errorCount?: number;
+  lastError?: string;
+}
+
+export interface AgentProposal {
+  id: string;
+  agentId: string;
+  proposalType: string;
+  title: string;
+  description: string;
+  action: unknown;
+  reasoning: string;
+  confidence: number;
+  supportingEventIds: string[];
+  riskLevel: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+  riskFactors: string[];
+  hash: string;
+  signature: string;
+  status: "DRAFT" | "PENDING_APPROVAL" | "APPROVED" | "REJECTED" | "EXPIRED" | "EXECUTED" | "FAILED";
+  requiredApprovals: number;
+  approvals: Array<{
+    userId: string;
+    userName: string;
+    decision: "APPROVE" | "REJECT";
+    comment?: string;
+    signature: string;
+    decidedAt: string;
+  }>;
+  createdAt: string;
+  expiresAt?: string;
+  executedAt?: string;
+  executionResult?: unknown;
+  executionError?: string;
+}
+
+export interface AgentOutput {
+  id: string;
+  agentId: string;
+  outputType: string;
+  title: string;
+  content: unknown;
+  siteId?: string;
+  assetIds?: string[];
+  eventIds?: string[];
+  hash: string;
+  signature: string;
+  confidence?: number;
+  reasoning?: string;
+  createdAt: string;
+}
+
+export interface AgentState {
+  key: string;
+  value: unknown;
+  updatedAt?: string;
+  expiresAt?: string;
+}
+
+export interface AgentAuditEntry {
+  id: string;
+  agentId: string;
+  action: string;
+  details: Record<string, unknown>;
+  timestamp: string;
+  signature?: string;
 }
 
 // Singleton instance
