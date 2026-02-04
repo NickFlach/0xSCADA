@@ -23,6 +23,7 @@ import {
   registerAnchorCommand,
   registerCompletionCommand,
   registerAgentsCommand,
+  registerWatchCommand,
 } from "./commands/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -134,6 +135,7 @@ registerShellCommand(program);
 registerAnchorCommand(program);
 registerCompletionCommand(program);
 registerAgentsCommand(program);
+registerWatchCommand(program);
 
 // Error handling for unknown commands
 program.on("command:*", (operands) => {
