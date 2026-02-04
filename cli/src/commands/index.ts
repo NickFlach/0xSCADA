@@ -5,3 +5,7 @@ export { registerEventsCommand } from "./events.js";
 export { registerBlockchainCommand } from "./blockchain.js";
 export { registerDevCommand } from "./dev.js";
 export { registerConfigCommand } from "./config.js";
+export { registerBlueprintsCommand } from "./blueprints.js";
+export { registerAuthCommand } from "./auth.js";
+export { registerWalletCommand } from "./wallet.js";
+export { registerLogsCommand } from "./logs.js";
