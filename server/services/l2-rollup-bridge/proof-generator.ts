@@ -312,10 +312,22 @@ export class InclusionProofGenerator {
    * Verify an inclusion proof
    */
   verifyInclusionProof(inclusionProof: InclusionProof): boolean {
+    // Validate proof structure
+    if (!inclusionProof.eventHash || !inclusionProof.batchId || !inclusionProof.stateRoot) {
+      return false;
+    }
+    if (inclusionProof.index < 0 || !Array.isArray(inclusionProof.proof)) {
+      return false;
+    }
+
     let hash = inclusionProof.eventHash;
     let index = inclusionProof.index;
 
+    // Traverse up the Merkle tree using the proof
     for (const sibling of inclusionProof.proof) {
+      if (!sibling || typeof sibling !== 'string') {
+        return false;
+      }
       const isRight = index % 2 === 1;
       if (isRight) {
         hash = this.hashPair(sibling, hash);
@@ -325,9 +337,45 @@ export class InclusionProofGenerator {
       index = Math.floor(index / 2);
     }
 
-    // Note: The Merkle root from events is part of state computation,
-    // so we verify against a recomputed event root here
-    return true; // Simplified - full implementation would verify against state root
+    // Verify the computed Merkle root matches the batch's event root
+    // The events Merkle root should be derivable from the state root
+    const batch = this.stateManager.getBatch(inclusionProof.batchId);
+    if (!batch) {
+      return false;
+    }
+
+    // Recompute the expected event Merkle root from batch events
+    const eventHashes = batch.events.map(e => e.hash);
+    const expectedRoot = this.computeMerkleRoot(eventHashes);
+
+    // The computed hash should match the expected Merkle root
+    return hash.toLowerCase() === expectedRoot.toLowerCase();
+  }
+
+  /**
+   * Compute Merkle root from an array of hashes
+   */
+  private computeMerkleRoot(hashes: string[]): string {
+    if (hashes.length === 0) {
+      return keccak256(toUtf8Bytes('EMPTY_TREE'));
+    }
+    if (hashes.length === 1) {
+      return hashes[0].startsWith('0x') ? hashes[0] : `0x${hashes[0]}`;
+    }
+
+    let currentLevel = hashes.map(h => h.startsWith('0x') ? h : `0x${h}`);
+
+    while (currentLevel.length > 1) {
+      const nextLevel: string[] = [];
+      for (let i = 0; i < currentLevel.length; i += 2) {
+        const left = currentLevel[i];
+        const right = currentLevel[i + 1] || left;
+        nextLevel.push(this.hashPair(left, right));
+      }
+      currentLevel = nextLevel;
+    }
+
+    return currentLevel[0];
   }
 
   /**

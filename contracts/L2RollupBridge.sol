@@ -9,14 +9,30 @@ pragma solidity ^0.8.20;
  * - State commitment submissions from L2
  * - Batch finalization
  * - Fraud proof verification (optimistic rollups)
- * - Validity proof verification (ZK rollups - placeholder)
+ * - Validity proof verification (ZK rollups)
  *
  * Architecture:
  * - Sequencer submits state commitments
  * - Challenge period for optimistic mode
  * - Direct finalization for ZK mode (after proof verification)
+ *
+ * Security Features:
+ * - Reentrancy protection on all external calls
+ * - Input validation on all public functions
+ * - Configurable ZK verifier contract
  */
 contract L2RollupBridge {
+    // Reentrancy guard
+    uint256 private constant NOT_ENTERED = 1;
+    uint256 private constant ENTERED = 2;
+    uint256 private _reentrancyStatus = NOT_ENTERED;
+
+    modifier nonReentrant() {
+        require(_reentrancyStatus != ENTERED, "ReentrancyGuard: reentrant call");
+        _reentrancyStatus = ENTERED;
+        _;
+        _reentrancyStatus = NOT_ENTERED;
+    }
 
     // =========================================================================
     // TYPES
@@ -55,6 +71,12 @@ contract L2RollupBridge {
     uint256 public immutable challengePeriod;
     address public sequencer;
     address public owner;
+
+    // ZK Verifier contract (for ZK mode)
+    address public zkVerifier;
+
+    // Timestamp validation bounds
+    uint256 public constant MAX_TIMESTAMP_DRIFT = 1 hours;
 
     // State commitments: batchIndex => StateCommitment
     mapping(uint256 => StateCommitment) public stateCommitments;
@@ -187,10 +209,17 @@ contract L2RollupBridge {
         uint256 eventCount,
         uint256 timestamp
     ) external onlySequencerOrOwner whenNotPaused {
+        // Validate all inputs
         require(stateRoot != bytes32(0), "Invalid state root");
+        require(dataHash != bytes32(0), "Invalid data hash");
+        require(eventCount > 0, "Event count must be positive");
         require(batchIndex == latestBatchIndex + 1, "Invalid batch index");
         require(prevStateRoot == latestStateRoot, "State root mismatch");
         require(stateCommitments[batchIndex].submittedAt == 0, "Batch already submitted");
+
+        // Validate timestamp is reasonable (not too far in past or future)
+        require(timestamp <= block.timestamp + MAX_TIMESTAMP_DRIFT, "Timestamp too far in future");
+        require(timestamp >= block.timestamp - MAX_TIMESTAMP_DRIFT, "Timestamp too far in past");
 
         stateCommitments[batchIndex] = StateCommitment({
             stateRoot: stateRoot,
@@ -294,7 +323,7 @@ contract L2RollupBridge {
         uint256 invalidEventIndex,
         bytes32 expectedStateRoot,
         bytes32[] calldata proof
-    ) external payable whenNotPaused {
+    ) external payable whenNotPaused nonReentrant {
         require(mode == RollupMode.OPTIMISTIC, "Not in optimistic mode");
 
         StateCommitment storage commitment = stateCommitments[batchIndex];
@@ -338,7 +367,7 @@ contract L2RollupBridge {
     function resolveChallenge(
         uint256 batchIndex,
         bool challengeSuccessful
-    ) external onlyOwner {
+    ) external onlyOwner nonReentrant {
         Challenge storage challenge = challenges[batchIndex];
         require(challenge.timestamp > 0, "No challenge exists");
         require(!challenge.resolved, "Already resolved");
@@ -411,13 +440,24 @@ contract L2RollupBridge {
         require(commitment.submittedAt > 0, "Batch not submitted");
         require(!commitment.finalized, "Already finalized");
 
-        // Verify the proof
-        // Note: In a real implementation, this would call a verifier contract
-        // For now, we do basic validation
-        require(proof.length > 0, "Empty proof");
+        // Validate proof structure
+        require(proof.length >= 32, "Proof too short");
         require(publicInputs.length >= 2, "Missing public inputs");
         require(publicInputs[0] == commitment.prevStateRoot, "Invalid prev state root");
         require(publicInputs[1] == commitment.stateRoot, "Invalid state root");
+
+        // Verify the ZK proof using the verifier contract
+        // If no verifier is set, require owner to manually verify
+        if (zkVerifier != address(0)) {
+            // Call external verifier contract
+            (bool success, bytes memory result) = zkVerifier.staticcall(
+                abi.encodeWithSignature("verify(bytes,bytes32[])", proof, publicInputs)
+            );
+            require(success && abi.decode(result, (bool)), "ZK proof verification failed");
+        } else {
+            // No verifier set - only owner can submit proofs (for testing/bootstrap)
+            require(msg.sender == owner, "No verifier set, only owner can submit");
+        }
 
         // Mark as finalized (ZK proofs provide instant finality)
         commitment.finalized = true;
@@ -428,6 +468,14 @@ contract L2RollupBridge {
 
         emit ValidityProofSubmitted(batchIndex, msg.sender);
         emit BatchFinalized(batchIndex, commitment.stateRoot, block.timestamp);
+    }
+
+    /**
+     * @notice Set the ZK verifier contract address
+     * @param _zkVerifier Address of the ZK proof verifier contract
+     */
+    function setZkVerifier(address _zkVerifier) external onlyOwner {
+        zkVerifier = _zkVerifier;
     }
 
     // =========================================================================
@@ -536,8 +584,10 @@ contract L2RollupBridge {
     /**
      * @notice Emergency withdrawal of stuck funds
      */
-    function emergencyWithdraw() external onlyOwner {
-        payable(owner).transfer(address(this).balance);
+    function emergencyWithdraw() external onlyOwner nonReentrant {
+        uint256 balance = address(this).balance;
+        require(balance > 0, "No funds to withdraw");
+        payable(owner).transfer(balance);
     }
 
     /**
