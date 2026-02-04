@@ -18,6 +18,11 @@ import {
   registerAuthCommand,
   registerWalletCommand,
   registerLogsCommand,
+  registerDeployCommand,
+  registerShellCommand,
+  registerAnchorCommand,
+  registerCompletionCommand,
+  registerAgentsCommand,
 } from "./commands/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -80,44 +85,22 @@ Examples:
   $ 0xscada config show               Display current configuration
   $ 0xscada config set apiUrl <url>   Update API URL
   $ 0xscada blueprints list           List all blueprints
-  $ 0xscada blueprints list --type cm-types  List control modules
   $ 0xscada blueprints show <id>      Show blueprint details
-  $ 0xscada blueprints create --file blueprint.yaml  Create blueprint
-  $ 0xscada blueprints import --file package.yaml  Import blueprints
-  $ 0xscada blueprints export <id>    Export blueprint
-  $ 0xscada blueprints validate --file blueprint.yaml  Validate blueprint
   $ 0xscada auth login --key <api-key>  Login with API key
-  $ 0xscada auth logout                 Logout and clear credentials
   $ 0xscada auth status                 Show authentication status
-  $ 0xscada auth keys list              List stored API keys
-  $ 0xscada auth keys create --name ci  Create new API key
-  $ 0xscada auth keys revoke <id>       Revoke an API key
-  $ 0xscada auth keys rotate <id>       Rotate an API key
   $ 0xscada wallet list                 List configured wallets
-  $ 0xscada wallet add --name ops --keyfile key.json  Add wallet
-  $ 0xscada wallet remove <name>        Remove a wallet
   $ 0xscada wallet balance [name]       Get wallet balance
-  $ 0xscada wallet sign --message "data"  Sign a message
-  $ 0xscada wallet set-default <name>   Set default wallet
   $ 0xscada logs server                   View server logs
-  $ 0xscada logs server --tail 100        Last 100 lines
   $ 0xscada logs server --follow          Stream in real-time
-  $ 0xscada logs server --level error     Filter by log level
-  $ 0xscada logs blockchain               View blockchain logs
-  $ 0xscada logs blockchain --tx <hash>   Specific transaction logs
-  $ 0xscada logs export --from 2024-01-01 Export logs to file
-
-Output Formats:
-  json              JSON format
-  yaml              YAML format
-  csv               Comma-separated values
-  tsv               Tab-separated values
-  table             Default table (Unicode borders)
-  table:minimal     Table without borders
-  table:ascii       ASCII box drawing characters
-  table:rounded     Rounded Unicode corners
-  table:heavy       Bold/heavy borders
-  table:double      Double-line borders
+  $ 0xscada deploy compose generate   Generate docker-compose.yml
+  $ 0xscada deploy k8s generate       Generate Kubernetes manifests
+  $ 0xscada shell                     Start interactive shell mode
+  $ 0xscada completion bash           Generate bash completion script
+  $ 0xscada agents list               List all governance agents
+  $ 0xscada agents proposals list     List all proposals
+  $ 0xscada anchor create --data <hash>   Create a new anchor
+  $ 0xscada anchor verify <id>        Verify an anchor
+  $ 0xscada anchor tree show          Show Merkle tree info
 
 Environment Variables:
   OXSCADA_API_URL     API server URL (default: http://localhost:5000)
@@ -146,6 +129,11 @@ registerBlueprintsCommand(program);
 registerAuthCommand(program);
 registerWalletCommand(program);
 registerLogsCommand(program);
+registerDeployCommand(program);
+registerShellCommand(program);
+registerAnchorCommand(program);
+registerCompletionCommand(program);
+registerAgentsCommand(program);
 
 // Error handling for unknown commands
 program.on("command:*", (operands) => {
