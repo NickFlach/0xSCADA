@@ -9,3 +9,8 @@ export { registerBlueprintsCommand } from "./blueprints.js";
 export { registerAuthCommand } from "./auth.js";
 export { registerWalletCommand } from "./wallet.js";
 export { registerLogsCommand } from "./logs.js";
+export { registerDeployCommand } from "./deploy.js";
+export { registerShellCommand } from "./shell.js";
+export { registerAnchorCommand } from "./anchor.js";
+export { registerCompletionCommand } from "./completion.js";
+export { registerAgentsCommand } from "./agents.js";

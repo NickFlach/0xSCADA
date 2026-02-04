@@ -81,6 +81,68 @@ export interface BlueprintsSummary {
   vendors: number;
 }
 
+export interface Agent {
+  id: string;
+  name: string;
+  displayName?: string;
+  description?: string;
+  agentType?: string;
+  status?: string;
+  version?: string;
+  publicKey?: string;
+  capabilities?: string[];
+  scope?: {
+    allSites?: boolean;
+    siteIds?: string[];
+    allAssets?: boolean;
+    assetIds?: string[];
+    allEventTypes?: boolean;
+    eventTypes?: string[];
+  };
+  createdAt: string;
+  updatedAt?: string;
+  lastActiveAt?: string;
+  lastError?: string;
+}
+
+export interface AgentProposal {
+  id: string;
+  agentId: string;
+  proposalType?: string;
+  title?: string;
+  description?: string;
+  action?: unknown;
+  reasoning?: string;
+  confidence?: number;
+  riskLevel?: string;
+  riskFactors?: string[];
+  status?: string;
+  requiredApprovals?: number;
+  approvals?: Array<{
+    userId: string;
+    userName: string;
+    decision: string;
+    comment?: string;
+    decidedAt: string;
+  }>;
+  createdAt: string;
+  expiresAt?: string;
+  executedAt?: string;
+}
+
+export interface AgentLog {
+  timestamp: string;
+  level: string;
+  message: string;
+}
+
+export interface AgentStateEntry {
+  key: string;
+  value: unknown;
+  updatedAt?: string;
+  expiresAt?: string;
+}
+
 export class ApiClient {
   private config: Config;
 
@@ -350,6 +412,250 @@ export class ApiClient {
     return this.request("/api/blueprints/import", {
       method: "POST",
       body: JSON.stringify(data),
+    });
+  }
+
+  // Anchor Operations
+  async createAnchor(data: {
+    dataHash: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<
+    ApiResponse<{
+      anchorId: string;
+      dataHash: string;
+      status: string;
+      batchId?: string;
+    }>
+  > {
+    return this.request("/api/anchor", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async batchAnchor(hashes: string[]): Promise<
+    ApiResponse<{
+      batchId: string;
+      hashCount: number;
+      status: string;
+    }>
+  > {
+    return this.request("/api/anchor/batch", {
+      method: "POST",
+      body: JSON.stringify({ hashes }),
+    });
+  }
+
+  async verifyAnchor(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      valid: boolean;
+      dataHash: string;
+      merkleRoot?: string;
+      blockNumber?: number;
+      txHash?: string;
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}/verify`);
+  }
+
+  async getAnchorProof(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      dataHash: string;
+      merkleRoot: string;
+      leafIndex: number;
+      proof: string[];
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}/proof`);
+  }
+
+  async getAnchorStatus(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      status: string;
+      dataHash: string;
+      batchId?: string;
+      merkleRoot?: string;
+      txHash?: string;
+      blockNumber?: number;
+      createdAt: string;
+      anchoredAt?: string;
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}`);
+  }
+
+  // Tree Operations
+  async getTreeInfo(): Promise<
+    ApiResponse<{
+      root: string | null;
+      leafCount: number;
+      height: number;
+      lastUpdated?: string;
+    }>
+  > {
+    return this.request("/api/anchor/tree");
+  }
+
+  async getTreeRoot(): Promise<
+    ApiResponse<{
+      root: string | null;
+    }>
+  > {
+    return this.request("/api/anchor/tree/root");
+  }
+
+  async getPendingAnchors(): Promise<
+    ApiResponse<{
+      count: number;
+      events: Array<{
+        id: string;
+        eventType?: string;
+        type?: string;
+        assetId?: string;
+        receivedAt?: string;
+        timestamp?: string;
+      }>;
+    }>
+  > {
+    return this.request("/api/batch/pending");
+  }
+
+  async getBatchHistory(limit = 20): Promise<
+    ApiResponse<
+      Array<{
+        batchId: string;
+        eventCount: number;
+        merkleRoot: string;
+        txHash?: string;
+        anchoredAt?: string;
+      }>
+    >
+  > {
+    return this.request(`/api/batch/history?limit=${limit}`);
+  }
+
+  // Audit Operations
+  async auditAnchors(params: {
+    from?: string;
+    to?: string;
+  }): Promise<
+    ApiResponse<{
+      totalAnchors: number;
+      anchoredCount: number;
+      pendingCount: number;
+      failedCount: number;
+      batchCount: number;
+      avgEventsPerBatch?: number;
+      issues?: string[];
+    }>
+  > {
+    const queryParams = new URLSearchParams();
+    if (params.from) queryParams.set("from", params.from);
+    if (params.to) queryParams.set("to", params.to);
+    const query = queryParams.toString();
+    return this.request(`/api/anchor/audit${query ? `?${query}` : ""}`);
+  }
+
+  // ==========================================================================
+  // AGENTS
+  // ==========================================================================
+
+  async getAgents(): Promise<ApiResponse<Agent[]>> {
+    return this.request<Agent[]>("/api/agents");
+  }
+
+  async getAgentById(id: string): Promise<ApiResponse<Agent>> {
+    return this.request<Agent>(`/api/agents/${id}`);
+  }
+
+  async startAgent(id: string): Promise<ApiResponse<Agent>> {
+    return this.request<Agent>(`/api/agents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "ACTIVE" }),
+    });
+  }
+
+  async stopAgent(id: string): Promise<ApiResponse<Agent>> {
+    return this.request<Agent>(`/api/agents/${id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ status: "INACTIVE" }),
+    });
+  }
+
+  async getAgentLogs(id: string, limit = 100): Promise<ApiResponse<AgentLog[]>> {
+    const response = await this.request<Array<{ createdAt: string; outputType: string; title: string; content: unknown }>>(
+      `/api/agents/${id}/outputs`
+    );
+    if (!response.success || !response.data) {
+      return { success: false, error: response.error };
+    }
+    const logs: AgentLog[] = response.data.slice(0, limit).map((output) => ({
+      timestamp: output.createdAt,
+      level: output.outputType === "ALERT" ? "warn" : "info",
+      message: output.title || JSON.stringify(output.content),
+    }));
+    return { success: true, data: logs };
+  }
+
+  async getAgentConfig(id: string): Promise<ApiResponse<AgentStateEntry[]>> {
+    return this.request<AgentStateEntry[]>(`/api/agents/${id}/state`);
+  }
+
+  async setAgentConfig(
+    id: string,
+    key: string,
+    value: unknown
+  ): Promise<ApiResponse<AgentStateEntry>> {
+    return this.request<AgentStateEntry>(`/api/agents/${id}/state/${key}`, {
+      method: "PUT",
+      body: JSON.stringify({ value }),
+    });
+  }
+
+  // ==========================================================================
+  // AGENT PROPOSALS
+  // ==========================================================================
+
+  async getProposals(): Promise<ApiResponse<AgentProposal[]>> {
+    return this.request<AgentProposal[]>("/api/agents/proposals");
+  }
+
+  async getAgentProposals(agentId: string): Promise<ApiResponse<AgentProposal[]>> {
+    return this.request<AgentProposal[]>(`/api/agents/${agentId}/proposals`);
+  }
+
+  async getProposalById(id: string): Promise<ApiResponse<AgentProposal>> {
+    const response = await this.getProposals();
+    if (!response.success || !response.data) {
+      return { success: false, error: response.error || "Failed to fetch proposals" };
+    }
+    const proposal = response.data.find((p) => p.id === id);
+    if (!proposal) {
+      return { success: false, error: `Proposal with ID '${id}' not found` };
+    }
+    return { success: true, data: proposal };
+  }
+
+  async approveProposal(
+    id: string,
+    approval: { userId: string; userName: string; comment?: string; signature?: string }
+  ): Promise<ApiResponse<AgentProposal>> {
+    return this.request<AgentProposal>(`/api/agents/proposals/${id}/approve`, {
+      method: "POST",
+      body: JSON.stringify(approval),
+    });
+  }
+
+  async rejectProposal(
+    id: string,
+    rejection: { userId: string; userName: string; comment: string; signature?: string }
+  ): Promise<ApiResponse<AgentProposal>> {
+    return this.request<AgentProposal>(`/api/agents/proposals/${id}/reject`, {
+      method: "POST",
+      body: JSON.stringify(rejection),
     });
   }
 }
