@@ -14,6 +14,8 @@ import {
   registerBlockchainCommand,
   registerDevCommand,
   registerConfigCommand,
+  // registerCompletionCommand, // TODO: Fix completion.ts syntax errors
+  registerAgentsCommand,
 } from "./commands/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -52,6 +54,7 @@ program
   .description("CLI tool for 0xSCADA development and operations")
   .version(version, "-v, --version", "Output the version number")
   .option("--json", "Output as JSON (applies to all commands)")
+  .option("-o, --output <format>", "Output format: json, yaml, csv, tsv, table, table:minimal, table:ascii, table:rounded, table:heavy, table:double")
   .option("--no-color", "Disable colorized output")
   .helpOption("-h, --help", "Display help for command")
   .addHelpText(
@@ -60,15 +63,35 @@ program
 Examples:
   $ 0xscada status                    Show system health
   $ 0xscada sites list                List all registered sites
+  $ 0xscada sites list -o json        Output as JSON
+  $ 0xscada sites list -o yaml        Output as YAML
+  $ 0xscada sites list -o csv         Output as CSV
+  $ 0xscada sites list -o tsv         Output as TSV
+  $ 0xscada sites list -o table:rounded  Use rounded table theme
   $ 0xscada sites get <id>            Get site details
   $ 0xscada assets list               List all assets
   $ 0xscada events list --limit 10    List recent events
   $ 0xscada events anchor             Trigger batch anchoring
   $ 0xscada blockchain info           Show blockchain status
+  $ 0xscada agents list               List governance agents
+  $ 0xscada agents status <id>        Show agent status
+  $ 0xscada agents proposals list     List agent proposals
   $ 0xscada dev start                 Start local dev environment
   $ 0xscada dev seed                  Seed database with test data
   $ 0xscada config show               Display current configuration
   $ 0xscada config set apiUrl <url>   Update API URL
+
+Output Formats:
+  json              JSON format
+  yaml              YAML format
+  csv               Comma-separated values
+  tsv               Tab-separated values
+  table             Default table (Unicode borders)
+  table:minimal     Table without borders
+  table:ascii       ASCII box drawing characters
+  table:rounded     Rounded Unicode corners
+  table:heavy       Bold/heavy borders
+  table:double      Double-line borders
 
 Environment Variables:
   OXSCADA_API_URL     API server URL (default: http://localhost:5000)
@@ -90,8 +113,10 @@ registerSitesCommand(program);
 registerAssetsCommand(program);
 registerEventsCommand(program);
 registerBlockchainCommand(program);
+registerAgentsCommand(program);
 registerDevCommand(program);
 registerConfigCommand(program);
+// registerCompletionCommand(program); // TODO: Fix completion.ts syntax errors
 
 // Error handling for unknown commands
 program.on("command:*", (operands) => {

@@ -1,16 +1,67 @@
 import chalk from "chalk";
-import Table from "cli-table3";
 import { loadConfig } from "./config.js";
+import {
+  Formatter,
+  createFormatter,
+  OutputFormat,
+  TableTheme,
+  isValidOutputFormat,
+  VALID_OUTPUT_FORMATS,
+  parseOutputFormat,
+} from "./lib/formatter.js";
 
 export interface OutputOptions {
   json?: boolean;
   color?: boolean;
+  output?: OutputFormat | string;
 }
 
 let globalOptions: OutputOptions = {};
+let globalFormatter: Formatter | null = null;
+
+// Re-export formatter types and utilities
+export { OutputFormat, TableTheme, isValidOutputFormat, VALID_OUTPUT_FORMATS, parseOutputFormat };
+export type { Formatter };
 
 export function setOutputOptions(options: OutputOptions): void {
   globalOptions = { ...globalOptions, ...options };
+  // Create formatter based on options
+  if (options.output || options.json !== undefined) {
+    const format = options.output || (options.json ? "json" : "table");
+    globalFormatter = createFormatter({
+      format: format as OutputFormat,
+      color: options.color,
+    });
+  }
+}
+
+/**
+ * Get the current formatter instance
+ */
+export function getFormatter(): Formatter {
+  if (!globalFormatter) {
+    globalFormatter = createFormatter({
+      format: globalOptions.output as OutputFormat || (globalOptions.json ? "json" : "table"),
+      color: globalOptions.color,
+    });
+  }
+  return globalFormatter;
+}
+
+/**
+ * Get the current output format
+ */
+export function getOutputFormat(): OutputFormat | string {
+  return globalOptions.output || (globalOptions.json ? "json" : "table");
+}
+
+/**
+ * Check if using a structured output format (non-table)
+ */
+export function isStructuredOutput(): boolean {
+  const format = getOutputFormat();
+  const { format: baseFormat } = parseOutputFormat(format);
+  return ["json", "yaml", "csv", "tsv"].includes(baseFormat);
 }
 
 function shouldUseColor(): boolean {
@@ -19,11 +70,6 @@ function shouldUseColor(): boolean {
   return config.colorOutput;
 }
 
-function shouldOutputJson(): boolean {
-  if (globalOptions.json !== undefined) return globalOptions.json;
-  const config = loadConfig();
-  return config.jsonOutput;
-}
 
 // Color helpers
 export const colors = {
@@ -64,55 +110,38 @@ export function statusIcon(status: string): string {
 
 // Output functions
 export function output(data: unknown): void {
-  if (shouldOutputJson()) {
-    console.log(JSON.stringify(data, null, 2));
+  const formatter = getFormatter();
+  if (isStructuredOutput()) {
+    console.log(formatter.formatData(data));
   } else if (typeof data === "string") {
     console.log(data);
   } else {
-    console.log(JSON.stringify(data, null, 2));
+    console.log(formatter.formatData(data));
   }
 }
 
 export function outputTable(
   headers: string[],
   rows: string[][],
-  options?: { head?: string[] }
+  _options?: { head?: string[] }
 ): void {
-  if (shouldOutputJson()) {
-    const data = rows.map((row) => {
-      const obj: Record<string, string> = {};
-      headers.forEach((header, i) => {
-        obj[header] = row[i];
-      });
-      return obj;
-    });
-    console.log(JSON.stringify(data, null, 2));
-    return;
-  }
-
-  const table = new Table({
-    head: options?.head || headers.map((h) => colors.bold(h)),
-    style: {
-      head: shouldUseColor() ? ["cyan"] : [],
-      border: shouldUseColor() ? ["gray"] : [],
-    },
-  });
-
-  rows.forEach((row) => table.push(row));
-  console.log(table.toString());
+  const formatter = getFormatter();
+  console.log(formatter.formatTableData(headers, rows));
 }
 
 export function outputSuccess(message: string): void {
-  if (shouldOutputJson()) {
-    console.log(JSON.stringify({ success: true, message }));
+  if (isStructuredOutput()) {
+    const formatter = getFormatter();
+    console.log(formatter.formatData({ success: true, message }));
   } else {
     console.log(colors.success("✓ ") + message);
   }
 }
 
 export function outputError(message: string, details?: string): void {
-  if (shouldOutputJson()) {
-    console.log(JSON.stringify({ success: false, error: message, details }));
+  if (isStructuredOutput()) {
+    const formatter = getFormatter();
+    console.log(formatter.formatData({ success: false, error: message, details }));
   } else {
     console.error(colors.error("✗ ") + message);
     if (details) {
@@ -123,22 +152,23 @@ export function outputError(message: string, details?: string): void {
 }
 
 export function outputWarning(message: string): void {
-  if (shouldOutputJson()) {
-    console.log(JSON.stringify({ warning: message }));
+  if (isStructuredOutput()) {
+    const formatter = getFormatter();
+    console.log(formatter.formatData({ warning: message }));
   } else {
     console.log(colors.warning("⚠ ") + message);
   }
 }
 
 export function outputInfo(message: string): void {
-  if (!shouldOutputJson()) {
+  if (!isStructuredOutput()) {
     console.log(colors.info("ℹ ") + message);
   }
 }
 
 // Section headers
 export function outputSection(title: string): void {
-  if (!shouldOutputJson()) {
+  if (!isStructuredOutput()) {
     console.log();
     console.log(colors.bold(colors.cyan(title)));
     console.log(colors.dim("─".repeat(title.length)));
@@ -147,12 +177,13 @@ export function outputSection(title: string): void {
 
 // Key-value output
 export function outputKeyValue(items: Array<{ key: string; value: string }>): void {
-  if (shouldOutputJson()) {
+  if (isStructuredOutput()) {
     const obj: Record<string, string> = {};
     items.forEach(({ key, value }) => {
       obj[key] = value;
     });
-    console.log(JSON.stringify(obj, null, 2));
+    const formatter = getFormatter();
+    console.log(formatter.formatData(obj));
     return;
   }
 
