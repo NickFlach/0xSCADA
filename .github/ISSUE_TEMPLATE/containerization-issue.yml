@@ -1,0 +1,141 @@
+name: Containerization Issue
+description: Create an issue for the 0xSCADA containerization epic (9.3)
+title: "[9.3.x] "
+labels: ["phase:9-os", "type:feature"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 0xSCADA Containerization Issue
+        Part of Epic 9.3: Process Isolation & Containerization
+
+        See [CONTAINERIZATION_ISSUES.md](../docs/architecture/CONTAINERIZATION_ISSUES.md) for full context.
+
+  - type: input
+    id: issue-id
+    attributes:
+      label: Issue ID
+      description: "Format: 9.3.X (e.g., 9.3.1 for K8s Bootstrap)"
+      placeholder: "9.3.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: track
+    attributes:
+      label: Learning Track
+      description: Primary track for this issue
+      options:
+        - "B - Backend Engineering"
+        - "C - Blockchain Engineering"
+        - "D - Systems Engineering"
+        - "E - Industrial Automation"
+        - "Q - Quality Engineering"
+        - "B+E - Backend + Automation"
+        - "D+Q - Systems + Quality"
+        - "B+Q - Backend + Quality"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: level
+    attributes:
+      label: Difficulty Level
+      description: What skill level is required?
+      options:
+        - "Level 1 - Beginner (Foundation)"
+        - "Level 2 - Intermediate (Core Competency)"
+        - "Level 3 - Advanced"
+        - "Level 4 - Expert"
+    validations:
+      required: true
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Issue Description
+      description: What needs to be implemented?
+      placeholder: Describe the containerization task clearly...
+    validations:
+      required: true
+
+  - type: textarea
+    id: learning-objectives
+    attributes:
+      label: Learning Objectives
+      description: What will the contributor learn by completing this issue?
+      placeholder: |
+        By completing this issue, you will learn:
+        - Kubernetes concept 1
+        - Container pattern 2
+        - Industrial integration 3
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: How do we know the issue is complete?
+      placeholder: |
+        - [ ] Kubernetes manifests created in k8s/
+        - [ ] Tests pass
+        - [ ] Documentation updated
+    validations:
+      required: true
+
+  - type: textarea
+    id: files-to-create
+    attributes:
+      label: Files to Create/Modify
+      description: List of files that need to be created or modified
+      placeholder: |
+        - `k8s/component/manifest.yaml` - Description
+        - `docs/deployment/guide.md` - Documentation
+    validations:
+      required: true
+
+  - type: textarea
+    id: agent-onboarding
+    attributes:
+      label: Agent Onboarding Context
+      description: Context block for agentic workers to quickly understand the task
+      placeholder: |
+        Context: Brief description of existing state
+        Goal: What the agent should accomplish
+        Constraints: Important limitations or requirements
+        Test: How to verify success
+    validations:
+      required: true
+
+  - type: textarea
+    id: implementation-hints
+    attributes:
+      label: Implementation Hints
+      description: Optional hints for getting started
+      placeholder: |
+        - Start by looking at existing docker-compose.yml
+        - Consider using the existing Dockerfile patterns
+        - Reference k8s best practices at...
+    validations:
+      required: false
+
+  - type: textarea
+    id: dependencies
+    attributes:
+      label: Dependencies
+      description: What issues must be completed before this one?
+      placeholder: |
+        - Requires #9.3.1 (K8s Bootstrap)
+        - Requires #9.3.2 (Container Images)
+    validations:
+      required: false
+
+  - type: input
+    id: estimated-effort
+    attributes:
+      label: Estimated Effort
+      description: Approximate effort level (hours)
+      placeholder: "4-6 hours"
+    validations:
+      required: false
