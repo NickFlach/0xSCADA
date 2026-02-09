@@ -86,15 +86,16 @@
 ### Phase 11: AI & Digital Twins
 **Milestone**: `v3.2.0-ai`
 **Duration**: ~12-16 weeks
-**Learning Focus**: ML, simulation, predictive analytics
+**Learning Focus**: ML, simulation, predictive analytics, agent propagation
 
 | Epic | Issues | Skills Learned |
 |------|--------|----------------|
-| Process Simulation Engine | 11.1.x | Physics modeling, ODE solvers |
-| AI-Assisted Code Generation | 11.2.x | LLM integration, prompt engineering |
-| Anomaly Detection | 11.3.x | Time-series ML, threshold learning |
-| Predictive Maintenance | 11.4.x | Failure prediction, RUL estimation |
-| Digital Twin Visualization | 11.5.x | 3D rendering, WebGL, Three.js |
+| **GhostOS Propagation Model** | 11.1.x | Agent coordination, safety guardrails, intent propagation ([spec](./propagation-model.md)) |
+| Process Simulation Engine | 11.2.x | Physics modeling, ODE solvers |
+| AI-Assisted Code Generation | 11.3.x | LLM integration, prompt engineering |
+| Anomaly Detection | 11.4.x | Time-series ML, threshold learning |
+| Predictive Maintenance | 11.5.x | Failure prediction, RUL estimation |
+| Digital Twin Visualization | 11.6.x | 3D rendering, WebGL, Three.js |
 
 ### Phase 12: Quantum Integration
 **Milestone**: `v3.3.0-quantum`

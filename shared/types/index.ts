@@ -1,6 +1,6 @@
 /**
  * 0xSCADA Shared Types
- * 
+ *
  * VERITY Architecture - Type Definitions
  */
 
@@ -13,3 +13,6 @@ export * from "./twin-checkpoint";
 
 // Time-Travel Reconstruction Types
 export * from "./time-travel";
+
+// GhostOS Propagation Model Types
+export * from "./intent-packet";
