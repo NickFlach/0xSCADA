@@ -41,7 +41,7 @@ jobs:
   vendor-onboarding:
     name: Vendor Onboarding Checks
     runs-on: ubuntu-latest
-    if: github.event.inputs.vendor || contains(github.event.pull_request.labels.*name, 'vendor')
+    if: github.event.inputs.vendor || contains(github.event.pull_request.labels.*.name, 'vendor')
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -60,20 +60,20 @@ jobs:
           VENDOR_DIR="vendor/${{ github.event.inputs.vendor || 'unknown' }}"
           
           if [ -d "$VENDOR_DIR" ]; then
-            echo "✅ Vendor directory exists: $VENDOR_DIR"
+            echo " Vendor directory exists: $VENDOR_DIR"
             
             # Check required files
             REQUIRED_FILES=("README.md" "package.json" "CONTRIBUTING.md")
             for file in "${REQUIRED_FILES[@]}"; do
               if [ -f "$VENDOR_DIR/$file" ]; then
-                echo "✅ Found: $file"
+                echo " Found: $file"
               else
-                echo "❌ Missing: $file"
+                echo " Missing: $file"
                 exit 1
               fi
             done
           else
-            echo "❌ Vendor directory not found: $VENDOR_DIR"
+            echo " Vendor directory not found: $VENDOR_DIR"
             exit 1
           fi
 
@@ -83,16 +83,16 @@ jobs:
           
           # Check if vendor has completed orientation checklist
           if [ -f "$VENDOR_DIR/orientation-checklist.md" ]; then
-            echo "✅ Orientation checklist found"
+            echo " Orientation checklist found"
             
             # Validate checklist completion
             if grep -q "## Completed" "$VENDOR_DIR/orientation-checklist.md"; then
-              echo "✅ Orientation checklist completed"
+              echo " Orientation checklist completed"
             else
-              echo "⚠️ Orientation checklist not completed"
+              echo " Orientation checklist not completed"
             fi
           else
-            echo "❌ Orientation checklist missing"
+            echo " Orientation checklist missing"
           fi
 
   # ==========================================================================
@@ -102,7 +102,7 @@ jobs:
     name: Learning Tract Validation
     runs-on: ubuntu-latest
     needs: vendor-onboarding
-    if: github.event.inputs.tract || contains(github.event.pull_request.labels.*name, 'vendor')
+    if: github.event.inputs.tract || contains(github.event.pull_request.labels.*.name, 'vendor')
     strategy:
       matrix:
         tract: [orientation, edge, observability, security, compliance, api, testing]
@@ -323,7 +323,7 @@ jobs:
           HANDOFF_CHECKLIST="vendor/$VENDOR/handoff-checklist.md"
           
           if [ -f "$HANDOFF_CHECKLIST" ]; then
-            echo "✅ Handoff checklist found"
+            echo " Handoff checklist found"
             
             # Validate all checklist items are completed
             COMPLETED_ITEMS=$(grep -c "^\- \[x\]" "$HANDOFF_CHECKLIST" || echo "0")
@@ -332,13 +332,13 @@ jobs:
             echo "Completed: $COMPLETED_ITEMS/$TOTAL_ITEMS items"
             
             if [ "$COMPLETED_ITEMS" -eq "$TOTAL_ITEMS" ] && [ "$TOTAL_ITEMS" -gt 0 ]; then
-              echo "✅ All handoff items completed"
+              echo " All handoff items completed"
             else
-              echo "❌ Handoff checklist not fully completed"
+              echo " Handoff checklist not fully completed"
               exit 1
             fi
           else
-            echo "❌ Handoff checklist missing"
+            echo " Handoff checklist missing"
             exit 1
           fi
 
@@ -376,7 +376,7 @@ jobs:
           - Update documentation with vendor contact information
           EOF
           
-          echo "✅ Handoff report generated"
+          echo " Handoff report generated"
 
       - name: Upload handoff report
         uses: actions/upload-artifact@v4
@@ -397,17 +397,17 @@ jobs:
       - name: Notify on success
         if: needs.vendor-onboarding.result == 'success' && needs.tract-validation.result == 'success'
         run: |
-          echo "✅ Vendor onboarding and validation successful!"
+          echo " Vendor onboarding and validation successful!"
           # Add success notification logic here
 
       - name: Notify on failure
         if: needs.vendor-onboarding.result == 'failure' || needs.tract-validation.result == 'failure'
         run: |
-          echo "❌ Vendor onboarding or validation failed!"
+          echo " Vendor onboarding or validation failed!"
           # Add failure notification logic here
 
       - name: Notify handoff completion
         if: needs.vendor-handoff.result == 'success'
         run: |
-          echo "🎉 Vendor handoff completed successfully!"
+          echo " Vendor handoff completed successfully!"
           # Add handoff completion notification logic here

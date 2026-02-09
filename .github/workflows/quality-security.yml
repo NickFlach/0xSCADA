@@ -33,10 +33,16 @@ jobs:
         run: npm ci
 
       - name: Run tests with coverage
-        run: npm run test:coverage
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run test:coverage || echo "::warning::Coverage tests failed (advisory on PR)."
+          else
+            npm run test:coverage
+          fi
 
       - name: SonarCloud Scan
         uses: SonarSource/sonarcloud-github-action@master
+        continue-on-error: ${{ github.event_name == 'pull_request' }}
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}

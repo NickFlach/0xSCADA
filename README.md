@@ -568,6 +568,19 @@ END_FUNCTION_BLOCK
 └─────────────────────────────────────────────────────────────────────────────┘
 ```
 
+### PROPAGATION MODEL
+
+Agents coordinate through the **GhostOS Propagation Model**, a formal framework for intent propagation and decision-making:
+
+| Mode | Description | Use Case |
+|------|-------------|----------|
+| **M1: LOCAL_COHERENCE** | High-confidence local actions | Routine operations |
+| **M2: REMOTE_COHERENCE** | Distributed coordination | Cross-site deployments |
+| **M3: SAFE_HOLD** | Safety halt, human review | Uncertain/risky scenarios |
+| **M4: EXPLORATION** | Learning mode (non-critical) | AI experimentation |
+
+See [docs/propagation-model.md](docs/propagation-model.md) for the full specification.
+
 <br/>
 
 ---
