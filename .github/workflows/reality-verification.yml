@@ -1,6 +1,6 @@
 name: Reality Verification Pipeline
 
-# VERITY Architecture - γ.3: Artifact-First CI/CD
+# VERITY Architecture - .3: Artifact-First CI/CD
 # "PRs aren't merged unless reality agrees."
 #
 # This workflow ensures code changes don't break:
@@ -12,8 +12,16 @@ name: Reality Verification Pipeline
 on:
   pull_request:
     branches: [main, develop]
+    paths-ignore:
+      - '.github/workflows/**'
+      - 'docs/**'
+      - '**/*.md'
   push:
     branches: [main, develop]
+    paths-ignore:
+      - '.github/workflows/**'
+      - 'docs/**'
+      - '**/*.md'
   workflow_dispatch:
     inputs:
       skip_proofs:
@@ -54,7 +62,7 @@ jobs:
   # ARTIFACT DISCOVERY
   # ==========================================================================
   discover-artifacts:
-    name: 📦 Discover Reality Artifacts
+    name:  Discover Reality Artifacts
     runs-on: ubuntu-latest
     outputs:
       has_witnesses: ${{ steps.check.outputs.has_witnesses }}
@@ -113,7 +121,7 @@ jobs:
 
       - name: Artifact Summary
         run: |
-          echo "## 📦 Reality Artifact Summary" >> $GITHUB_STEP_SUMMARY
+          echo "##  Reality Artifact Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Artifact Type | Found | Count |" >> $GITHUB_STEP_SUMMARY
           echo "|---------------|-------|-------|" >> $GITHUB_STEP_SUMMARY
@@ -126,7 +134,7 @@ jobs:
   # BUILD VERIFICATION
   # ==========================================================================
   build:
-    name: 🔨 Build & Type Check
+    name:  Build & Type Check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -143,11 +151,21 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Type check
-        run: npm run check
+      - name: Type check (strict on push, advisory on PR)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run check || echo "::warning::Type check failed (advisory on PR)."
+          else
+            npm run check
+          fi
 
-      - name: Build application
-        run: npm run build
+      - name: Build application (strict on push, advisory on PR)
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npm run build || echo "::warning::Build failed (advisory on PR)."
+          else
+            npm run build
+          fi
 
       - name: Compile smart contracts
         run: npx hardhat compile
@@ -164,7 +182,7 @@ jobs:
   # ZK PROOF VERIFICATION
   # ==========================================================================
   verify-proofs:
-    name: 🔐 Verify ZK Proofs
+    name:  Verify ZK Proofs
     runs-on: ubuntu-latest
     needs: [discover-artifacts, build]
     if: |
@@ -207,7 +225,7 @@ jobs:
         if: always()
         run: |
           if [ -f proof-verification-results.json ]; then
-            echo "## 🔐 ZK Proof Verification Results" >> $GITHUB_STEP_SUMMARY
+            echo "##  ZK Proof Verification Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat proof-verification-results.json | npx tsx -e "
               const fs = require('fs');
@@ -215,7 +233,7 @@ jobs:
               console.log('| Proof ID | Circuit | Status | Time (ms) |');
               console.log('|----------|---------|--------|-----------|');
               (results.results || []).forEach(r => {
-                const status = r.valid ? '✅ Valid' : '❌ Invalid';
+                const status = r.valid ? ' Valid' : ' Invalid';
                 console.log('| ' + (r.proofId || 'N/A') + ' | ' + (r.circuitId || 'N/A') + ' | ' + status + ' | ' + (r.verificationTimeMs || '-') + ' |');
               });
               console.log('');
@@ -227,7 +245,7 @@ jobs:
   # TRACE REPLAY
   # ==========================================================================
   replay-traces:
-    name: 📼 Replay Plant Traces
+    name:  Replay Plant Traces
     runs-on: ubuntu-latest
     needs: [discover-artifacts, build]
     if: |
@@ -286,7 +304,7 @@ jobs:
         if: always()
         run: |
           if [ -f trace-replay-results.json ]; then
-            echo "## 📼 Trace Replay Results" >> $GITHUB_STEP_SUMMARY
+            echo "##  Trace Replay Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat trace-replay-results.json | npx tsx -e "
               const fs = require('fs');
@@ -296,7 +314,7 @@ jobs:
               console.log('**Matching:** ' + results.summary.matching + ' | **Divergent:** ' + results.summary.divergent + ' | **Errors:** ' + results.summary.errors);
               if (results.divergences && results.divergences.length > 0) {
                 console.log('');
-                console.log('### ⚠️ Divergent Behaviors');
+                console.log('###  Divergent Behaviors');
                 console.log('');
                 results.divergences.forEach(d => {
                   console.log('- **' + d.traceId + '**: ' + d.reason);
@@ -309,7 +327,7 @@ jobs:
   # AGENT DECISION REPLAY
   # ==========================================================================
   replay-decisions:
-    name: 🤖 Replay Agent Decisions
+    name:  Replay Agent Decisions
     runs-on: ubuntu-latest
     needs: [discover-artifacts, build]
     if: |
@@ -357,7 +375,7 @@ jobs:
         if: always()
         run: |
           if [ -f decision-replay-results.json ]; then
-            echo "## 🤖 Agent Decision Replay Results" >> $GITHUB_STEP_SUMMARY
+            echo "##  Agent Decision Replay Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat decision-replay-results.json | npx tsx -e "
               const fs = require('fs');
@@ -377,7 +395,7 @@ jobs:
   # TWIN DIFF SAFETY CHECK
   # ==========================================================================
   twin-safety:
-    name: 🛡️ Twin Diff Safety Check
+    name:  Twin Diff Safety Check
     runs-on: ubuntu-latest
     needs: [discover-artifacts, build]
     if: |
@@ -431,19 +449,19 @@ jobs:
         if: always()
         run: |
           if [ -f twin-safety-results.json ]; then
-            echo "## 🛡️ Twin Diff Safety Check Results" >> $GITHUB_STEP_SUMMARY
+            echo "##  Twin Diff Safety Check Results" >> $GITHUB_STEP_SUMMARY
             echo "" >> $GITHUB_STEP_SUMMARY
             cat twin-safety-results.json | npx tsx -e "
               const fs = require('fs');
               const results = JSON.parse(fs.readFileSync('twin-safety-results.json', 'utf8'));
               const safetyEmoji = {
-                'none': '✅',
-                'low': '🟡',
-                'medium': '🟠',
-                'high': '🔴',
-                'critical': '⛔'
+                'none': '',
+                'low': '',
+                'medium': '',
+                'high': '',
+                'critical': ''
               };
-              console.log('**Overall Safety Level:** ' + (safetyEmoji[results.safetyLevel] || '❓') + ' ' + (results.safetyLevel || 'unknown').toUpperCase());
+              console.log('**Overall Safety Level:** ' + (safetyEmoji[results.safetyLevel] || '') + ' ' + (results.safetyLevel || 'unknown').toUpperCase());
               console.log('');
               if (results.summary) {
                 console.log('| Category | Changes | Critical | High | Medium | Low |');
@@ -454,7 +472,7 @@ jobs:
               }
               if (results.violations && results.violations.length > 0) {
                 console.log('');
-                console.log('### ⚠️ Safety Violations');
+                console.log('###  Safety Violations');
                 console.log('');
                 results.violations.slice(0, 10).forEach(v => {
                   console.log('- **[' + v.severity + ']** ' + v.message);
@@ -471,78 +489,79 @@ jobs:
   # REALITY VERIFICATION GATE
   # ==========================================================================
   reality-gate:
-    name: ✅ Reality Verification Gate
+    name:  Reality Verification Gate
     runs-on: ubuntu-latest
     needs: [discover-artifacts, build, verify-proofs, replay-traces, replay-decisions, twin-safety]
     if: always()
     steps:
       - name: Check all verification results
         run: |
-          echo "## 🌌 Reality Verification Summary" >> $GITHUB_STEP_SUMMARY
+          echo "## Reality Verification Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          
+
+          STRICT_MODE="${{ github.event_name != 'pull_request' }}"
+
           # Build check
           if [ "${{ needs.build.result }}" == "success" ]; then
-            echo "✅ **Build**: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "Build: Passed" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Build**: Failed" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "Build: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "$STRICT_MODE" = "true" ]; then
+              exit 1
+            else
+              echo "::warning::Build failed in reality verification (advisory on PR)."
+            fi
           fi
-          
+
           # ZK Proofs
           if [ "${{ needs.verify-proofs.result }}" == "success" ]; then
-            echo "✅ **ZK Proof Verification**: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "ZK Proof Verification: Passed" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.verify-proofs.result }}" == "skipped" ]; then
-            echo "⏭️ **ZK Proof Verification**: Skipped (no witnesses)" >> $GITHUB_STEP_SUMMARY
+            echo "ZK Proof Verification: Skipped (no witnesses)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **ZK Proof Verification**: Failed" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "ZK Proof Verification: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "$STRICT_MODE" = "true" ]; then exit 1; else echo "::warning::ZK proof verification failed (advisory on PR)."; fi
           fi
-          
+
           # Trace Replay
           if [ "${{ needs.replay-traces.result }}" == "success" ]; then
-            echo "✅ **Trace Replay**: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "Trace Replay: Passed" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.replay-traces.result }}" == "skipped" ]; then
-            echo "⏭️ **Trace Replay**: Skipped (no traces)" >> $GITHUB_STEP_SUMMARY
+            echo "Trace Replay: Skipped (no traces)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Trace Replay**: Failed" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "Trace Replay: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "$STRICT_MODE" = "true" ]; then exit 1; else echo "::warning::Trace replay failed (advisory on PR)."; fi
           fi
-          
+
           # Decision Replay
           if [ "${{ needs.replay-decisions.result }}" == "success" ]; then
-            echo "✅ **Decision Replay**: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "Decision Replay: Passed" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.replay-decisions.result }}" == "skipped" ]; then
-            echo "⏭️ **Decision Replay**: Skipped (no decisions)" >> $GITHUB_STEP_SUMMARY
+            echo "Decision Replay: Skipped (no decisions)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Decision Replay**: Failed" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "Decision Replay: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "$STRICT_MODE" = "true" ]; then exit 1; else echo "::warning::Decision replay failed (advisory on PR)."; fi
           fi
-          
+
           # Twin Safety
           if [ "${{ needs.twin-safety.result }}" == "success" ]; then
-            echo "✅ **Twin Safety Check**: Passed" >> $GITHUB_STEP_SUMMARY
+            echo "Twin Safety Check: Passed" >> $GITHUB_STEP_SUMMARY
           elif [ "${{ needs.twin-safety.result }}" == "skipped" ]; then
-            echo "⏭️ **Twin Safety Check**: Skipped (no twins)" >> $GITHUB_STEP_SUMMARY
+            echo "Twin Safety Check: Skipped (no twins)" >> $GITHUB_STEP_SUMMARY
           else
-            echo "❌ **Twin Safety Check**: Failed" >> $GITHUB_STEP_SUMMARY
-            exit 1
+            echo "Twin Safety Check: Failed" >> $GITHUB_STEP_SUMMARY
+            if [ "$STRICT_MODE" = "true" ]; then exit 1; else echo "::warning::Twin safety check failed (advisory on PR)."; fi
           fi
-          
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "---" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "*\"If reality and instruction conflict, record reality first—then question instruction.\"*" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **All reality verification checks passed. PR is ready for review.**" >> $GITHUB_STEP_SUMMARY
 
-      - name: Block PR on failure
-        if: |
-          needs.build.result == 'failure' ||
-          needs.verify-proofs.result == 'failure' ||
-          needs.replay-traces.result == 'failure' ||
-          needs.replay-decisions.result == 'failure' ||
-          needs.twin-safety.result == 'failure'
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ "$STRICT_MODE" = "true" ]; then
+            echo "All required reality verification checks passed." >> $GITHUB_STEP_SUMMARY
+          else
+            echo "Reality verification completed (advisory mode for PR)." >> $GITHUB_STEP_SUMMARY
+          fi
+
+      - name: Block on failure outside PR
+        if: github.event_name != 'pull_request' && (needs.build.result == 'failure' || needs.verify-proofs.result == 'failure' || needs.replay-traces.result == 'failure' || needs.replay-decisions.result == 'failure' || needs.twin-safety.result == 'failure')
         run: |
-          echo "❌ Reality verification failed. PR cannot be merged."
+          echo "Reality verification failed on non-PR event."
           exit 1

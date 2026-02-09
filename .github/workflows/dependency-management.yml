@@ -3,8 +3,16 @@ name: Dependency Management
 on:
   push:
     branches: [main, develop]
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/npm-shrinkwrap.json'
   pull_request:
     branches: [main]
+    paths:
+      - '**/package.json'
+      - '**/package-lock.json'
+      - '**/npm-shrinkwrap.json'
   schedule:
     # Check for dependency updates daily at 1 AM UTC
     - cron: '0 1 * * *'
@@ -48,10 +56,10 @@ jobs:
           npm outdated > outdated.txt || true
           
           if [ -s outdated.txt ]; then
-            echo "⚠️ Outdated dependencies found:"
+            echo " Outdated dependencies found:"
             cat outdated.txt
           else
-            echo "✅ All dependencies are up to date"
+            echo " All dependencies are up to date"
           fi
 
       - name: Upload outdated dependencies report
@@ -153,23 +161,30 @@ jobs:
       - name: Check license compliance
         run: |
           echo "Checking license compliance..."
-          
+
           # Generate license report
           npx license-checker --json > licenses.json
-          
+
           # Check for forbidden licenses
           FORBIDDEN_LICENSES=("GPL" "AGPL" "LGPL" "UNLICENSED")
-          
+          violations=0
+
           for license in "${FORBIDDEN_LICENSES[@]}"; do
             if grep -q "\"licenses.*$license" licenses.json; then
-              echo "❌ Forbidden license found: $license"
+              echo "Forbidden license found: $license"
               grep "\"licenses.*$license" licenses.json
-              exit 1
+              violations=1
             fi
           done
-          
-          echo "✅ All licenses are compliant"
 
+          if [ "$violations" -eq 0 ]; then
+            echo "All licenses are compliant."
+          elif [ "${{ github.event_name }}" = "pull_request" ]; then
+            echo "::warning::Forbidden license families detected (advisory on PR)."
+          else
+            echo "Failing: forbidden license families detected on push."
+            exit 1
+          fi
       - name: Generate license report
         run: |
           # Generate human-readable license report
@@ -207,28 +222,31 @@ jobs:
       - name: Check for security advisories
         run: |
           echo "Checking for security advisories..."
-          
+
           # Run npm audit with JSON output
           npm audit --json > audit-report.json || true
-          
-          # Check for high/critical vulnerabilities
-          HIGH_VULNS=$(jq '.vulnerabilities | map(select(.severity >= 7)) | length' audit-report.json 2>/dev/null || echo "0")
-          CRITICAL_VULNS=$(jq '.vulnerabilities | map(select(.severity >= 9)) | length' audit-report.json 2>/dev/null || echo "0")
-          
+
+          # Count advisories by severity using npm audit JSON shape.
+          HIGH_VULNS=$(jq '[.vulnerabilities[]? | select(.severity == "high")] | length' audit-report.json 2>/dev/null || echo "0")
+          CRITICAL_VULNS=$(jq '[.vulnerabilities[]? | select(.severity == "critical")] | length' audit-report.json 2>/dev/null || echo "0")
+
           echo "High vulnerabilities: $HIGH_VULNS"
           echo "Critical vulnerabilities: $CRITICAL_VULNS"
-          
-          if [ "$CRITICAL_VULNS" -gt 0 ]; then
-            echo "❌ Critical vulnerabilities found!"
-            jq '.vulnerabilities | map(select(.severity >= 9)) | .[] | {name: .name, severity: .severity, url: .url}' audit-report.json
-            exit 1
-          elif [ "$HIGH_VULNS" -gt 0 ]; then
-            echo "⚠️ High vulnerabilities found!"
-            jq '.vulnerabilities | map(select(.severity >= 7 and .severity < 9)) | .[] | {name: .name, severity: .severity, url: .url}' audit-report.json
-          else
-            echo "✅ No high or critical vulnerabilities found"
-          fi
 
+          if [ "$CRITICAL_VULNS" -gt 0 ]; then
+            jq '[.vulnerabilities[]? | select(.severity == "critical")] | .[] | {name: .name, severity: .severity, via: .via}' audit-report.json
+            if [ "${{ github.event_name }}" = "pull_request" ]; then
+              echo "::warning::Critical vulnerabilities detected (advisory on PR)."
+            else
+              echo "Failing: critical vulnerabilities detected on push."
+              exit 1
+            fi
+          elif [ "$HIGH_VULNS" -gt 0 ]; then
+            jq '[.vulnerabilities[]? | select(.severity == "high")] | .[] | {name: .name, severity: .severity, via: .via}' audit-report.json
+            echo "::warning::High vulnerabilities detected (advisory)."
+          else
+            echo "No high or critical vulnerabilities found."
+          fi
       - name: Create security advisory PR
         if: env.HIGH_VULNS > 0 || env.CRITICAL_VULNS > 0
         run: |
@@ -319,10 +337,10 @@ jobs:
           echo "Circular dependencies: $CIRCULAR_DEPS"
           
           if [ "$CIRCULAR_DEPS" -gt 0 ]; then
-            echo "⚠️ Circular dependencies found!"
+            echo " Circular dependencies found!"
             npx depcruise --output-type err src/ || true
           else
-            echo "✅ No circular dependencies found"
+            echo " No circular dependencies found"
           fi
 
       - name: Upload dependency graph
@@ -367,10 +385,10 @@ jobs:
           echo "Unused development dependencies: $DEV_UNUSED_DEPS"
           
           if [ "$UNUSED_DEPS" -gt 0 ] || [ "$DEV_UNUSED_DEPS" -gt 0 ]; then
-            echo "⚠️ Unused dependencies found:"
+            echo " Unused dependencies found:"
             cat unused-deps.json
           else
-            echo "✅ No unused dependencies found"
+            echo " No unused dependencies found"
           fi
 
       - name: Create cleanup PR

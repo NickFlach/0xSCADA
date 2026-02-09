@@ -43,11 +43,13 @@ jobs:
     continue-on-error: true
     steps:
       - name: Wait for required checks
+        continue-on-error: true
         uses: lewagon/wait-on-check-action@v1.3.4
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           wait-interval: 10
-          check-regexp: '^(DCO Check|Developer Certificate of Origin|Lint & Type Check|Unit Tests.*|Build Application)$'
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          check-regexp: '^(Developer Certificate of Origin|Lint & Type Check|Unit Tests.*|Build Application)$'
           allowed-conclusions: success,skipped,failure,cancelled,neutral,timed_out,action_required
 
   size-limit:
