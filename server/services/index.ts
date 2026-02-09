@@ -16,3 +16,4 @@ export * from "./certification-workflow";
 export * from "./intent-packet-service";
 export * from "./propagation-mode-selector";
 export * from "./propagation-guardrails";
+export * from "./propagation-telemetry";
