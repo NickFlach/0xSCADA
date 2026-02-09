@@ -15,5 +15,4 @@ export * from "./twin-checkpoint";
 export * from "./time-travel";
 
 // GhostOS Propagation Model Types
-export * from "./intent-packet";
 export * from "./propagation";
