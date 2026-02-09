@@ -501,15 +501,19 @@ Implementations MUST pass:
 
 ### 11.3 Traceability Matrix
 
-| Requirement | Criterion | Test File |
-|-------------|-----------|-----------|
-| Mode M1 conditions | C1 | `propagation-mode-selector.test.ts` |
-| Mode M2 conditions | C1 | `propagation-mode-selector.test.ts` |
-| Mode M3 conditions | C2 | `propagation-guardrails.test.ts` |
-| Mode M4 conditions | C1 | `propagation-mode-selector.test.ts` |
-| Intent Packet schema | C5 | `intent-packet-schema.test.ts` |
-| Telemetry emission | C3 | `propagation-telemetry.test.ts` |
-| Conformance suite | All | `propagation-conformance.test.ts` |
+| Requirement | Criterion | Test File | Tests |
+|-------------|-----------|-----------|-------|
+| Mode M1 conditions (LOCAL_COHERENCE) | C1 | `propagation-mode-selector.test.ts`, `propagation-conformance.test.ts` | 51 + 7 |
+| Mode M2 conditions (REMOTE_COHERENCE) | C1 | `propagation-mode-selector.test.ts`, `propagation-conformance.test.ts` | 51 + 7 |
+| Mode M3 conditions (SAFE_HOLD) | C2 | `propagation-guardrails.test.ts`, `propagation-conformance.test.ts` | 51 + 8 |
+| Mode M4 conditions (EXPLORATION) | C1 | `propagation-mode-selector.test.ts`, `propagation-conformance.test.ts` | 51 + 7 |
+| Intent Packet schema | C5 | `intent-packet-schema.test.ts`, `propagation-conformance.test.ts` | 62 + 6 |
+| Telemetry emission | C3 | `propagation-telemetry.test.ts`, `propagation-conformance.test.ts` | 41 + 7 |
+| Rationale generation | C4 | `propagation-conformance.test.ts` | 7 |
+| Human escalation | C6 | `propagation-guardrails.test.ts`, `propagation-conformance.test.ts` | 51 + 8 |
+| **Conformance suite** | **All (C1-C6)** | `propagation-conformance.test.ts` | **43** |
+
+**Total Test Coverage**: 248 tests across 5 test files
 
 ---
 
@@ -517,12 +521,12 @@ Implementations MUST pass:
 
 | Issue | Title | Status |
 |-------|-------|--------|
-| [#162](https://github.com/The-ESCO-Group/0xSCADA/issues/162) | Propagation Model Specification (this doc) | In Progress |
-| [#163](https://github.com/The-ESCO-Group/0xSCADA/issues/163) | Intent Packet Schema & Validation | Ready |
-| [#164](https://github.com/The-ESCO-Group/0xSCADA/issues/164) | Propagation Mode Selection Engine | Ready |
-| [#165](https://github.com/The-ESCO-Group/0xSCADA/issues/165) | SAFE_HOLD Guardrails & Human Escalation | Ready |
-| [#166](https://github.com/The-ESCO-Group/0xSCADA/issues/166) | Propagation Telemetry | Ready |
-| [#167](https://github.com/The-ESCO-Group/0xSCADA/issues/167) | Conformance Test Harness | Ready |
+| [#162](https://github.com/The-ESCO-Group/0xSCADA/issues/162) | Propagation Model Specification (this doc) | Complete |
+| [#163](https://github.com/The-ESCO-Group/0xSCADA/issues/163) | Intent Packet Schema & Validation | Complete |
+| [#164](https://github.com/The-ESCO-Group/0xSCADA/issues/164) | Propagation Mode Selection Engine | Complete |
+| [#165](https://github.com/The-ESCO-Group/0xSCADA/issues/165) | SAFE_HOLD Guardrails & Human Escalation | Complete |
+| [#166](https://github.com/The-ESCO-Group/0xSCADA/issues/166) | Propagation Telemetry | Complete |
+| [#167](https://github.com/The-ESCO-Group/0xSCADA/issues/167) | Conformance Test Harness | Complete |
 
 ---
 
