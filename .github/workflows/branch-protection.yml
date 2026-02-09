@@ -20,11 +20,8 @@ jobs:
           echo "Checking PR requirements for main branch..."
 
           # Check if PR has description.
-          # Use a quoted heredoc so markdown backticks are treated as plain text.
-          PR_BODY="$(cat <<'EOF'
-${{ github.event.pull_request.body }}
-EOF
-)"
+          # Keep this single-quoted so markdown backticks are treated as plain text.
+          PR_BODY='${{ github.event.pull_request.body }}'
 
           if [ -z "$(echo "$PR_BODY" | tr -d '[:space:]')" ]; then
             echo "ERROR: PR must have a description"
