@@ -15,3 +15,4 @@ export * from "./certification-workflow";
 // GhostOS Propagation Model
 export * from "./intent-packet-service";
 export * from "./propagation-mode-selector";
+export * from "./propagation-guardrails";

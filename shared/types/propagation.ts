@@ -251,6 +251,322 @@ export type ModeScorer = (
 ) => number;
 
 // =============================================================================
+// SAFE_HOLD GUARDRAILS (docs/propagation-model.md Section 9)
+// Issue: #165 - SAFE_HOLD Guardrails & Human Escalation
+// =============================================================================
+
+/**
+ * Risk level for guardrail decisions
+ */
+export const RiskLevel = {
+  LOW: "LOW",
+  MEDIUM: "MEDIUM",
+  HIGH: "HIGH",
+  CRITICAL: "CRITICAL",
+} as const;
+
+export type RiskLevel = (typeof RiskLevel)[keyof typeof RiskLevel];
+
+/**
+ * Escalation status for human approval workflow
+ */
+export const EscalationStatus = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+  EXPIRED: "EXPIRED",
+  CANCELLED: "CANCELLED",
+} as const;
+
+export type EscalationStatus = (typeof EscalationStatus)[keyof typeof EscalationStatus];
+
+/**
+ * Evidence payload captured when SAFE_HOLD is triggered
+ */
+export interface SafeHoldEvidence {
+  /** Unique evidence ID */
+  evidenceId: string;
+
+  /** Intent that triggered SAFE_HOLD */
+  intentId: string;
+
+  /** Timestamp when SAFE_HOLD was triggered */
+  triggeredAt: string;
+
+  /** Primary reason for SAFE_HOLD */
+  primaryReason: string;
+
+  /** All contributing factors */
+  factors: SafeHoldFactor[];
+
+  /** Mode selection context at time of decision */
+  context: {
+    coupling: number;
+    loss: number;
+    effectiveCoupling: number;
+    distance: number;
+    targetsCritical: boolean;
+    hasAuthority: boolean;
+  };
+
+  /** Policy flags that were active */
+  activeFlags: PolicyFlag[];
+
+  /** Risk assessment */
+  riskLevel: RiskLevel;
+
+  /** Snapshot of the intent packet */
+  intentSnapshot: unknown;
+
+  /** Additional metadata */
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * Individual factor contributing to SAFE_HOLD decision
+ */
+export interface SafeHoldFactor {
+  /** Factor type/category */
+  type: PolicyFlag | string;
+
+  /** Human-readable description */
+  description: string;
+
+  /** Severity of this factor */
+  severity: RiskLevel;
+
+  /** Measured value (if applicable) */
+  value?: number;
+
+  /** Threshold that was violated (if applicable) */
+  threshold?: number;
+}
+
+/**
+ * Request for human escalation
+ */
+export interface EscalationRequest {
+  /** Unique escalation ID */
+  escalationId: string;
+
+  /** Evidence from SAFE_HOLD trigger */
+  evidence: SafeHoldEvidence;
+
+  /** Target for escalation (user ID, role, or group) */
+  escalationTarget: string;
+
+  /** Priority level */
+  priority: RiskLevel;
+
+  /** When the escalation was created */
+  createdAt: string;
+
+  /** When the escalation expires */
+  expiresAt: string;
+
+  /** Current status */
+  status: EscalationStatus;
+
+  /** Suggested actions for the approver */
+  suggestedActions: EscalationAction[];
+
+  /** Context to help approver make decision */
+  approverContext: string;
+}
+
+/**
+ * Possible actions an approver can take
+ */
+export interface EscalationAction {
+  /** Action identifier */
+  actionId: string;
+
+  /** Display label */
+  label: string;
+
+  /** Description of what this action does */
+  description: string;
+
+  /** Whether this action approves the intent */
+  approves: boolean;
+
+  /** Required confirmation level */
+  requiresConfirmation: boolean;
+}
+
+/**
+ * Response from human approval
+ */
+export interface EscalationResponse {
+  /** Escalation ID being responded to */
+  escalationId: string;
+
+  /** User who responded */
+  responderId: string;
+
+  /** Responder's role/authority */
+  responderAuthority: string;
+
+  /** Action taken */
+  action: string;
+
+  /** Whether the intent was approved */
+  approved: boolean;
+
+  /** Optional comment from approver */
+  comment?: string;
+
+  /** Timestamp of response */
+  respondedAt: string;
+
+  /** Digital signature of response */
+  signature?: string;
+}
+
+/**
+ * Result of guardrail evaluation
+ */
+export interface GuardrailResult {
+  /** Whether the intent passed all guardrails */
+  passed: boolean;
+
+  /** If blocked, the evidence payload */
+  evidence?: SafeHoldEvidence;
+
+  /** If blocked, the escalation request */
+  escalation?: EscalationRequest;
+
+  /** All guardrails that were checked */
+  checksPerformed: GuardrailCheck[];
+
+  /** Processing time in milliseconds */
+  processingTimeMs: number;
+}
+
+/**
+ * Individual guardrail check result
+ */
+export interface GuardrailCheck {
+  /** Guardrail name/identifier */
+  guardrail: string;
+
+  /** Whether this guardrail passed */
+  passed: boolean;
+
+  /** Reason for pass/fail */
+  reason: string;
+
+  /** Whether this guardrail is blocking (vs advisory) */
+  blocking: boolean;
+
+  /** Risk level if failed */
+  riskIfFailed?: RiskLevel;
+}
+
+/**
+ * Configuration for guardrail behavior
+ */
+export interface GuardrailConfig {
+  /** Enable/disable individual guardrails */
+  enabledGuardrails: string[];
+
+  /** Default escalation target */
+  defaultEscalationTarget: string;
+
+  /** Escalation timeout in milliseconds */
+  escalationTimeoutMs: number;
+
+  /** Whether to require dual approval for critical decisions */
+  requireDualApproval: boolean;
+
+  /** Minimum authority level for approvals */
+  minApprovalAuthority: string;
+
+  /** Whether to allow auto-approval for low-risk decisions */
+  allowAutoApproval: boolean;
+
+  /** Auto-approval threshold (max risk level) */
+  autoApprovalMaxRisk: RiskLevel;
+}
+
+export const DEFAULT_GUARDRAIL_CONFIG: GuardrailConfig = {
+  enabledGuardrails: [
+    "authority",
+    "coupling",
+    "loss",
+    "critical_target",
+    "confidence",
+    "policy_flags",
+  ],
+  defaultEscalationTarget: "on-call-supervisor",
+  escalationTimeoutMs: 3600000, // 1 hour
+  requireDualApproval: false,
+  minApprovalAuthority: "SUPERVISOR",
+  allowAutoApproval: false,
+  autoApprovalMaxRisk: RiskLevel.LOW,
+};
+
+/**
+ * Zod schemas for validation
+ */
+export const safeHoldFactorSchema = z.object({
+  type: z.string(),
+  description: z.string(),
+  severity: z.nativeEnum(RiskLevel),
+  value: z.number().optional(),
+  threshold: z.number().optional(),
+});
+
+export const safeHoldEvidenceSchema = z.object({
+  evidenceId: z.string().uuid(),
+  intentId: z.string().uuid(),
+  triggeredAt: z.string().datetime(),
+  primaryReason: z.string(),
+  factors: z.array(safeHoldFactorSchema),
+  context: z.object({
+    coupling: z.number(),
+    loss: z.number(),
+    effectiveCoupling: z.number(),
+    distance: z.number(),
+    targetsCritical: z.boolean(),
+    hasAuthority: z.boolean(),
+  }),
+  activeFlags: z.array(z.nativeEnum(PolicyFlag)),
+  riskLevel: z.nativeEnum(RiskLevel),
+  intentSnapshot: z.unknown(),
+  metadata: z.record(z.unknown()).optional(),
+});
+
+export const escalationRequestSchema = z.object({
+  escalationId: z.string().uuid(),
+  evidence: safeHoldEvidenceSchema,
+  escalationTarget: z.string(),
+  priority: z.nativeEnum(RiskLevel),
+  createdAt: z.string().datetime(),
+  expiresAt: z.string().datetime(),
+  status: z.nativeEnum(EscalationStatus),
+  suggestedActions: z.array(z.object({
+    actionId: z.string(),
+    label: z.string(),
+    description: z.string(),
+    approves: z.boolean(),
+    requiresConfirmation: z.boolean(),
+  })),
+  approverContext: z.string(),
+});
+
+export const escalationResponseSchema = z.object({
+  escalationId: z.string().uuid(),
+  responderId: z.string(),
+  responderAuthority: z.string(),
+  action: z.string(),
+  approved: z.boolean(),
+  comment: z.string().optional(),
+  respondedAt: z.string().datetime(),
+  signature: z.string().optional(),
+});
+
+// =============================================================================
 // EXPORTS FOR CONVENIENCE
 // =============================================================================
 
