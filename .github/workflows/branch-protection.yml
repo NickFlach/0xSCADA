@@ -37,9 +37,9 @@ jobs:
           echo "OK: PR requirements validated"
 
   required-checks:
-    name: Required Status Checks
+    name: Required Status Checks (Informational)
     runs-on: ubuntu-latest
-    # Allow workflow to proceed even if some checks are still pending
+    # Informational summary only; hard blocking is handled by dedicated checks.
     continue-on-error: true
     steps:
       - name: Wait for required checks
@@ -47,8 +47,8 @@ jobs:
         with:
           ref: ${{ github.event.pull_request.head.sha }}
           wait-interval: 10
-          check-regexp: '^(Lint|Tests|Build).*'
-          allowed-conclusions: success,skipped
+          check-regexp: '^(DCO Check|Developer Certificate of Origin|Lint & Type Check|Unit Tests.*|Build Application)$'
+          allowed-conclusions: success,skipped,failure,cancelled,neutral,timed_out,action_required
 
   size-limit:
     name: PR Size Limit
