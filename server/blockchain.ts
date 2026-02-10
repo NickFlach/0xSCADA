@@ -2,6 +2,7 @@ import { ethers } from "ethers";
 import { createHash } from "crypto";
 import fs from "fs";
 import path from "path";
+import { log, logError, logWarn } from "./logger";
 
 const REGISTRY_ABI = [
   "function registerSite(string siteId, string name, string location, address owner)",
@@ -44,12 +45,12 @@ export class BlockchainService {
       const contractAddress = this.getContractAddress();
 
       if (!privateKey) {
-        console.warn("⚠️  BLOCKCHAIN_PRIVATE_KEY not set. Blockchain features disabled.");
+        logWarn("⚠️  BLOCKCHAIN_PRIVATE_KEY not set. Blockchain features disabled.", "blockchain");
         return;
       }
 
       if (!contractAddress) {
-        console.warn("⚠️  Contract not deployed. Run 'npx hardhat run scripts/deploy.ts --network localhost' first.");
+        logWarn("⚠️  Contract not deployed. Run 'npx hardhat run scripts/deploy.ts --network localhost' first.", "blockchain");
         return;
       }
 
@@ -58,12 +59,12 @@ export class BlockchainService {
       this.config.registry = new ethers.Contract(contractAddress, REGISTRY_ABI, this.config.wallet);
       this.config.enabled = true;
 
-      console.log("✅ Blockchain service initialized");
-      console.log(`   Provider: ${rpcUrl}`);
-      console.log(`   Contract: ${contractAddress}`);
-      console.log(`   Signer: ${this.config.wallet.address}`);
+      log("✅ Blockchain service initialized", "blockchain");
+      log(`   Provider: ${rpcUrl}`, "blockchain");
+      log(`   Contract: ${contractAddress}`, "blockchain");
+      log(`   Signer: ${this.config.wallet.address}`, "blockchain");
     } catch (error) {
-      console.error("❌ Failed to initialize blockchain service:", error);
+      logError("❌ Failed to initialize blockchain service:", error, "blockchain");
     }
   }
 
@@ -75,7 +76,7 @@ export class BlockchainService {
         return deployment.address;
       }
     } catch (error) {
-      console.error("Failed to read deployment.json:", error);
+      logError("Failed to read deployment.json:", error, "blockchain");
     }
     return null;
   }
@@ -98,10 +99,10 @@ export class BlockchainService {
     try {
       const tx = await this.config.registry.registerSite(siteId, name, location, owner);
       const receipt = await tx.wait();
-      console.log(`✅ Site ${siteId} registered on-chain: ${receipt.hash}`);
+      log(`✅ Site ${siteId} registered on-chain: ${receipt.hash}`, "blockchain");
       return receipt.hash;
     } catch (error) {
-      console.error("Failed to register site on-chain:", error);
+      logError("Failed to register site on-chain:", error, "blockchain");
       return null;
     }
   }
@@ -120,10 +121,10 @@ export class BlockchainService {
     try {
       const tx = await this.config.registry.registerAsset(assetId, siteId, assetType, nameOrTag, critical);
       const receipt = await tx.wait();
-      console.log(`✅ Asset ${assetId} registered on-chain: ${receipt.hash}`);
+      log(`✅ Asset ${assetId} registered on-chain: ${receipt.hash}`, "blockchain");
       return receipt.hash;
     } catch (error) {
-      console.error("Failed to register asset on-chain:", error);
+      logError("Failed to register asset on-chain:", error, "blockchain");
       return null;
     }
   }
@@ -136,10 +137,10 @@ export class BlockchainService {
     try {
       const tx = await this.config.registry.anchorEvent(assetId, eventType, payloadHash);
       const receipt = await tx.wait();
-      console.log(`✅ Event anchored on-chain: ${receipt.hash}`);
+      log(`✅ Event anchored on-chain: ${receipt.hash}`, "blockchain");
       return receipt.hash;
     } catch (error) {
-      console.error("Failed to anchor event on-chain:", error);
+      logError("Failed to anchor event on-chain:", error, "blockchain");
       return null;
     }
   }
@@ -157,10 +158,10 @@ export class BlockchainService {
     try {
       const tx = await this.config.registry.anchorMaintenance(assetId, workOrderId, maintenanceType, performedAt);
       const receipt = await tx.wait();
-      console.log(`✅ Maintenance anchored on-chain: ${receipt.hash}`);
+      log(`✅ Maintenance anchored on-chain: ${receipt.hash}`, "blockchain");
       return receipt.hash;
     } catch (error) {
-      console.error("Failed to anchor maintenance on-chain:", error);
+      logError("Failed to anchor maintenance on-chain:", error, "blockchain");
       return null;
     }
   }
@@ -177,13 +178,13 @@ export class BlockchainService {
     try {
       const tx = await this.config.registry.anchorBatchRoot(batchId, merkleRoot, eventCount);
       const receipt = await tx.wait();
-      console.log(`✅ Batch root anchored on-chain: ${receipt.hash}`);
-      console.log(`   Batch ID: ${batchId}`);
-      console.log(`   Merkle Root: ${merkleRoot}`);
-      console.log(`   Event Count: ${eventCount}`);
+      log(`✅ Batch root anchored on-chain: ${receipt.hash}`, "blockchain");
+      log(`   Batch ID: ${batchId}`, "blockchain");
+      log(`   Merkle Root: ${merkleRoot}`, "blockchain");
+      log(`   Event Count: ${eventCount}`, "blockchain");
       return receipt.hash;
     } catch (error) {
-      console.error("Failed to anchor batch root on-chain:", error);
+      logError("Failed to anchor batch root on-chain:", error, "blockchain");
       return null;
     }
   }
@@ -199,7 +200,7 @@ export class BlockchainService {
       const formatted = ethers.formatUnits(gasPrice, "gwei") + " gwei";
       return { gasPrice, formatted };
     } catch (error) {
-      console.error("Failed to get gas price:", error);
+      logError("Failed to get gas price:", error, "blockchain");
       return null;
     }
   }
@@ -213,7 +214,7 @@ export class BlockchainService {
       const gasEstimate = await this.config.registry[functionName].estimateGas(...args);
       return gasEstimate;
     } catch (error) {
-      console.error(`Failed to estimate gas for ${functionName}:`, error);
+      logError(`Failed to estimate gas for ${functionName}:`, error, "blockchain");
       return null;
     }
   }
