@@ -1,6 +1,7 @@
 import { createHash } from "crypto";
-import { keccak256, getBytes, hexlify, concat, toUtf8Bytes } from "ethers";
+import { keccak256, getBytes, concat, toUtf8Bytes } from "ethers";
 import { blockchainService } from "./blockchain";
+import { log, logError, logWarn } from "./logger";
 
 export interface BatchableEvent {
   id: string;
@@ -162,9 +163,9 @@ export class BatchAnchoringService {
       this.startBatchTimer();
     }
 
-    console.log("📦 BatchAnchoringService initialized");
-    console.log(`   Max batch size: ${this.config.maxBatchSize}`);
-    console.log(`   Max batch age: ${this.config.maxBatchAgeMs}ms`);
+    log("📦 BatchAnchoringService initialized", "batch-anchor");
+    log(`   Max batch size: ${this.config.maxBatchSize}`, "batch-anchor");
+    log(`   Max batch age: ${this.config.maxBatchAgeMs}ms`, "batch-anchor");
   }
 
   private startBatchTimer() {
@@ -220,7 +221,7 @@ export class BatchAnchoringService {
     this.eventQueue = [];
     this.stats.pendingEvents = 0;
 
-    console.log(`🔗 Flushing batch (trigger: ${trigger}): ${eventsToAnchor.length} events`);
+    log(`🔗 Flushing batch (trigger: ${trigger}): ${eventsToAnchor.length} events`, "batch-anchor");
 
     const eventHashes = eventsToAnchor.map(e => 
       JSON.stringify({
@@ -249,7 +250,7 @@ export class BatchAnchoringService {
           eventsToAnchor.length
         );
       } catch (error) {
-        console.error("Failed to anchor batch root:", error);
+        logError("Failed to anchor batch root", error, "batch-anchor");
       }
     }
 
@@ -280,10 +281,10 @@ export class BatchAnchoringService {
     this.stats.estimatedGasSavings += 
       (eventsToAnchor.length * individualGasCost) - batchGasCost;
 
-    console.log(`✅ Batch ${batchId} anchored: ${eventsToAnchor.length} events`);
-    console.log(`   Merkle root: ${merkleRoot}`);
+    log(`✅ Batch ${batchId} anchored: ${eventsToAnchor.length} events`, "batch-anchor");
+    log(`   Merkle root: ${merkleRoot}`, "batch-anchor");
     if (txHash) {
-      console.log(`   TX hash: ${txHash}`);
+      log(`   TX hash: ${txHash}`, "batch-anchor");
     }
 
     return result;
@@ -340,7 +341,7 @@ export class BatchAnchoringService {
     }
 
     if (this.eventQueue.length > 0) {
-      console.log(`⚠️  ${this.eventQueue.length} events pending - forcing final batch`);
+      logWarn(`${this.eventQueue.length} events pending - forcing final batch`, "batch-anchor");
       this.flushBatch("manual");
     }
   }

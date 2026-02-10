@@ -2,6 +2,7 @@ import type { Express } from "express";
 import { type Server } from "http";
 import { storage } from "./storage";
 import { blockchainService } from "./blockchain";
+import { logError } from "./logger";
 import { insertSiteSchema, insertAssetSchema, insertEventAnchorSchema, insertMaintenanceRecordSchema } from "@shared/schema";
 import { fromZodError } from "zod-validation-error";
 import { 
@@ -30,7 +31,6 @@ import { aasRouter } from "./routes/aas";
 import ubiquityRoutes from "./routes/ubiquity";
 import { certificationRoutes } from "./routes/certifications";
 import artifactRoutes from "./routes/ArtifactRoutes";
-import { batchAnchoringService } from "./batch-anchoring";
 import { eventStreamServer } from "./websocket";
 
 export async function registerRoutes(
@@ -109,7 +109,7 @@ export async function registerRoutes(
         res.status(503).json(response);
       }
     } catch (error) {
-      console.error("Health check failed:", error);
+      logError("Health check failed:", error, "routes");
       res.status(503).json({
         status: "unhealthy",
         timestamp: new Date().toISOString(),
@@ -130,7 +130,7 @@ export async function registerRoutes(
       const sites = await storage.getSites();
       res.json(sites);
     } catch (error) {
-      console.error("Error fetching sites:", error);
+      logError("Error fetching sites:", error, "routes");
       res.status(500).json({ error: "Failed to fetch sites" });
     }
   });
@@ -153,7 +153,7 @@ export async function registerRoutes(
 
       res.status(201).json(site);
     } catch (error) {
-      console.error("Error creating site:", error);
+      logError("Error creating site:", error, "routes");
       res.status(500).json({ error: "Failed to create site" });
     }
   });
@@ -164,7 +164,7 @@ export async function registerRoutes(
       const assets = await storage.getAssets();
       res.json(assets);
     } catch (error) {
-      console.error("Error fetching assets:", error);
+      logError("Error fetching assets:", error, "routes");
       res.status(500).json({ error: "Failed to fetch assets" });
     }
   });
@@ -174,7 +174,7 @@ export async function registerRoutes(
       const assets = await storage.getAssetsBySiteId(req.params.siteId);
       res.json(assets);
     } catch (error) {
-      console.error("Error fetching assets:", error);
+      logError("Error fetching assets:", error, "routes");
       res.status(500).json({ error: "Failed to fetch assets" });
     }
   });
@@ -198,7 +198,7 @@ export async function registerRoutes(
 
       res.status(201).json(asset);
     } catch (error) {
-      console.error("Error creating asset:", error);
+      logError("Error creating asset:", error, "routes");
       res.status(500).json({ error: "Failed to create asset" });
     }
   });
@@ -237,7 +237,7 @@ export async function registerRoutes(
         prevPage: hasPrevPage ? page - 1 : null,
       });
     } catch (error) {
-      console.error("Error fetching events:", error);
+      logError("Error fetching events:", error, "routes");
       res.status(500).json({ error: "Failed to fetch events" });
     }
   });
@@ -281,7 +281,7 @@ export async function registerRoutes(
 
       res.status(201).json(event);
     } catch (error) {
-      console.error("Error creating event:", error);
+      logError("Error creating event:", error, "routes");
       res.status(500).json({ error: "Failed to create event" });
     }
   });
@@ -292,7 +292,7 @@ export async function registerRoutes(
       const records = await storage.getMaintenanceRecords();
       res.json(records);
     } catch (error) {
-      console.error("Error fetching maintenance records:", error);
+      logError("Error fetching maintenance records:", error, "routes");
       res.status(500).json({ error: "Failed to fetch maintenance records" });
     }
   });
@@ -315,7 +315,7 @@ export async function registerRoutes(
 
       res.status(201).json(record);
     } catch (error) {
-      console.error("Error creating maintenance record:", error);
+      logError("Error creating maintenance record:", error, "routes");
       res.status(500).json({ error: "Failed to create maintenance record" });
     }
   });
@@ -337,7 +337,7 @@ export async function registerRoutes(
       const cmTypes = await storage.getControlModuleTypes();
       res.json(cmTypes);
     } catch (error) {
-      console.error("Error fetching CM types:", error);
+      logError("Error fetching CM types:", error, "routes");
       res.status(500).json({ error: "Failed to fetch control module types" });
     }
   });
@@ -350,7 +350,7 @@ export async function registerRoutes(
       }
       res.json(cmType);
     } catch (error) {
-      console.error("Error fetching CM type:", error);
+      logError("Error fetching CM type:", error, "routes");
       res.status(500).json({ error: "Failed to fetch control module type" });
     }
   });
@@ -360,7 +360,7 @@ export async function registerRoutes(
       const cmType = await storage.createControlModuleType(req.body);
       res.status(201).json(cmType);
     } catch (error) {
-      console.error("Error creating CM type:", error);
+      logError("Error creating CM type:", error, "routes");
       res.status(500).json({ error: "Failed to create control module type" });
     }
   });
@@ -371,7 +371,7 @@ export async function registerRoutes(
       const instances = await storage.getControlModuleInstances();
       res.json(instances);
     } catch (error) {
-      console.error("Error fetching CM instances:", error);
+      logError("Error fetching CM instances:", error, "routes");
       res.status(500).json({ error: "Failed to fetch control module instances" });
     }
   });
@@ -382,7 +382,7 @@ export async function registerRoutes(
       const unitTypes = await storage.getUnitTypes();
       res.json(unitTypes);
     } catch (error) {
-      console.error("Error fetching unit types:", error);
+      logError("Error fetching unit types:", error, "routes");
       res.status(500).json({ error: "Failed to fetch unit types" });
     }
   });
@@ -392,7 +392,7 @@ export async function registerRoutes(
       const unitType = await storage.createUnitType(req.body);
       res.status(201).json(unitType);
     } catch (error) {
-      console.error("Error creating unit type:", error);
+      logError("Error creating unit type:", error, "routes");
       res.status(500).json({ error: "Failed to create unit type" });
     }
   });
@@ -403,7 +403,7 @@ export async function registerRoutes(
       const instances = await storage.getUnitInstances();
       res.json(instances);
     } catch (error) {
-      console.error("Error fetching unit instances:", error);
+      logError("Error fetching unit instances:", error, "routes");
       res.status(500).json({ error: "Failed to fetch unit instances" });
     }
   });
@@ -414,7 +414,7 @@ export async function registerRoutes(
       const phaseTypes = await storage.getPhaseTypes();
       res.json(phaseTypes);
     } catch (error) {
-      console.error("Error fetching phase types:", error);
+      logError("Error fetching phase types:", error, "routes");
       res.status(500).json({ error: "Failed to fetch phase types" });
     }
   });
@@ -424,7 +424,7 @@ export async function registerRoutes(
       const phaseType = await storage.createPhaseType(req.body);
       res.status(201).json(phaseType);
     } catch (error) {
-      console.error("Error creating phase type:", error);
+      logError("Error creating phase type:", error, "routes");
       res.status(500).json({ error: "Failed to create phase type" });
     }
   });
@@ -435,7 +435,7 @@ export async function registerRoutes(
       const instances = await storage.getPhaseInstances();
       res.json(instances);
     } catch (error) {
-      console.error("Error fetching phase instances:", error);
+      logError("Error fetching phase instances:", error, "routes");
       res.status(500).json({ error: "Failed to fetch phase instances" });
     }
   });
@@ -446,7 +446,7 @@ export async function registerRoutes(
       const specs = await storage.getDesignSpecifications();
       res.json(specs);
     } catch (error) {
-      console.error("Error fetching design specs:", error);
+      logError("Error fetching design specs:", error, "routes");
       res.status(500).json({ error: "Failed to fetch design specifications" });
     }
   });
@@ -584,7 +584,7 @@ export async function registerRoutes(
         warnings: parseResult.warnings,
       });
     } catch (error) {
-      console.error("Error importing blueprints:", error);
+      logError("Error importing blueprints:", error, "routes");
       res.status(500).json({ error: "Failed to import blueprints" });
     }
   });
@@ -612,7 +612,7 @@ export async function registerRoutes(
         vendors: vendors.length,
       });
     } catch (error) {
-      console.error("Error fetching blueprints summary:", error);
+      logError("Error fetching blueprints summary:", error, "routes");
       res.status(500).json({ error: "Failed to fetch blueprints summary" });
     }
   });
@@ -627,7 +627,7 @@ export async function registerRoutes(
       const vendors = await storage.getVendors();
       res.json(vendors);
     } catch (error) {
-      console.error("Error fetching vendors:", error);
+      logError("Error fetching vendors:", error, "routes");
       res.status(500).json({ error: "Failed to fetch vendors" });
     }
   });
@@ -640,7 +640,7 @@ export async function registerRoutes(
       }
       res.json(vendor);
     } catch (error) {
-      console.error("Error fetching vendor:", error);
+      logError("Error fetching vendor:", error, "routes");
       res.status(500).json({ error: "Failed to fetch vendor" });
     }
   });
@@ -650,7 +650,7 @@ export async function registerRoutes(
       const vendor = await storage.createVendor(req.body);
       res.status(201).json(vendor);
     } catch (error) {
-      console.error("Error creating vendor:", error);
+      logError("Error creating vendor:", error, "routes");
       res.status(500).json({ error: "Failed to create vendor" });
     }
   });
@@ -661,7 +661,7 @@ export async function registerRoutes(
       const templates = await storage.getTemplatePackages();
       res.json(templates);
     } catch (error) {
-      console.error("Error fetching templates:", error);
+      logError("Error fetching templates:", error, "routes");
       res.status(500).json({ error: "Failed to fetch template packages" });
     }
   });
@@ -671,7 +671,7 @@ export async function registerRoutes(
       const templates = await storage.getTemplatePackagesByVendor(req.params.vendorId);
       res.json(templates);
     } catch (error) {
-      console.error("Error fetching templates:", error);
+      logError("Error fetching templates:", error, "routes");
       res.status(500).json({ error: "Failed to fetch template packages" });
     }
   });
@@ -681,7 +681,7 @@ export async function registerRoutes(
       const template = await storage.createTemplatePackage(req.body);
       res.status(201).json(template);
     } catch (error) {
-      console.error("Error creating template:", error);
+      logError("Error creating template:", error, "routes");
       res.status(500).json({ error: "Failed to create template package" });
     }
   });
@@ -692,7 +692,7 @@ export async function registerRoutes(
       const mappings = await storage.getDataTypeMappingsByVendor(req.params.vendorId);
       res.json(mappings);
     } catch (error) {
-      console.error("Error fetching data type mappings:", error);
+      logError("Error fetching data type mappings:", error, "routes");
       res.status(500).json({ error: "Failed to fetch data type mappings" });
     }
   });
@@ -702,7 +702,7 @@ export async function registerRoutes(
       const mapping = await storage.createDataTypeMapping(req.body);
       res.status(201).json(mapping);
     } catch (error) {
-      console.error("Error creating data type mapping:", error);
+      logError("Error creating data type mapping:", error, "routes");
       res.status(500).json({ error: "Failed to create data type mapping" });
     }
   });
@@ -713,7 +713,7 @@ export async function registerRoutes(
       const controllers = await storage.getControllers();
       res.json(controllers);
     } catch (error) {
-      console.error("Error fetching controllers:", error);
+      logError("Error fetching controllers:", error, "routes");
       res.status(500).json({ error: "Failed to fetch controllers" });
     }
   });
@@ -723,7 +723,7 @@ export async function registerRoutes(
       const controllers = await storage.getControllersByVendor(req.params.vendorId);
       res.json(controllers);
     } catch (error) {
-      console.error("Error fetching controllers:", error);
+      logError("Error fetching controllers:", error, "routes");
       res.status(500).json({ error: "Failed to fetch controllers" });
     }
   });
@@ -733,7 +733,7 @@ export async function registerRoutes(
       const controllers = await storage.getControllersBySite(req.params.siteId);
       res.json(controllers);
     } catch (error) {
-      console.error("Error fetching controllers:", error);
+      logError("Error fetching controllers:", error, "routes");
       res.status(500).json({ error: "Failed to fetch controllers" });
     }
   });
@@ -743,7 +743,7 @@ export async function registerRoutes(
       const controller = await storage.createController(req.body);
       res.status(201).json(controller);
     } catch (error) {
-      console.error("Error creating controller:", error);
+      logError("Error creating controller:", error, "routes");
       res.status(500).json({ error: "Failed to create controller" });
     }
   });
@@ -754,7 +754,7 @@ export async function registerRoutes(
       const code = await storage.getGeneratedCode();
       res.json(code);
     } catch (error) {
-      console.error("Error fetching generated code:", error);
+      logError("Error fetching generated code:", error, "routes");
       res.status(500).json({ error: "Failed to fetch generated code" });
     }
   });
@@ -764,7 +764,7 @@ export async function registerRoutes(
       const code = await storage.getGeneratedCodeBySource(req.params.sourceType, req.params.sourceId);
       res.json(code);
     } catch (error) {
-      console.error("Error fetching generated code:", error);
+      logError("Error fetching generated code:", error, "routes");
       res.status(500).json({ error: "Failed to fetch generated code" });
     }
   });
@@ -774,7 +774,7 @@ export async function registerRoutes(
       const code = await storage.createGeneratedCode(req.body);
       res.status(201).json(code);
     } catch (error) {
-      console.error("Error creating generated code:", error);
+      logError("Error creating generated code:", error, "routes");
       res.status(500).json({ error: "Failed to create generated code" });
     }
   });
@@ -800,7 +800,7 @@ export async function registerRoutes(
       const result = await seedDatabase();
       res.json(result);
     } catch (error) {
-      console.error("Error seeding database:", error);
+      logError("Error seeding database:", error, "routes");
       res.status(500).json({ error: "Failed to seed database" });
     }
   });
@@ -900,7 +900,7 @@ export async function registerRoutes(
         vendor: vendor.displayName,
       });
     } catch (error) {
-      console.error("Error generating code:", error);
+      logError("Error generating code:", error, "routes");
       res.status(500).json({ error: "Failed to generate code" });
     }
   });
@@ -979,7 +979,7 @@ export async function registerRoutes(
         vendor: vendor.displayName,
       });
     } catch (error) {
-      console.error("Error generating phase code:", error);
+      logError("Error generating phase code:", error, "routes");
       res.status(500).json({ error: "Failed to generate phase code" });
     }
   });
@@ -1024,7 +1024,7 @@ export async function registerRoutes(
         });
       }
     } catch (error) {
-      console.error("Error anchoring code:", error);
+      logError("Error anchoring code:", error, "routes");
       res.status(500).json({ error: "Failed to anchor code" });
     }
   });
@@ -1045,7 +1045,7 @@ export async function registerRoutes(
         res.json(INSTRUCTION_LIBRARY);
       }
     } catch (error) {
-      console.error("Error fetching instructions:", error);
+      logError("Error fetching instructions:", error, "routes");
       res.status(500).json({ error: "Failed to fetch instruction library" });
     }
   });
@@ -1129,7 +1129,7 @@ export async function registerRoutes(
         warnings: result.warnings,
       });
     } catch (error) {
-      console.error("Error generating ladder logic:", error);
+      logError("Error generating ladder logic:", error, "routes");
       res.status(500).json({ error: "Failed to generate ladder logic" });
     }
   });
@@ -1221,7 +1221,7 @@ export async function registerRoutes(
         warnings: result.warnings,
       });
     } catch (error) {
-      console.error("Error generating phase ladder logic:", error);
+      logError("Error generating phase ladder logic:", error, "routes");
       res.status(500).json({ error: "Failed to generate phase ladder logic" });
     }
   });
@@ -1283,7 +1283,7 @@ export async function registerRoutes(
         warnings: result.warnings,
       });
     } catch (error) {
-      console.error("Error in batch rung generation:", error);
+      logError("Error in batch rung generation:", error, "routes");
       res.status(500).json({ error: "Failed to generate batch rungs" });
     }
   });
@@ -1322,7 +1322,7 @@ export async function registerRoutes(
         },
       });
     } catch (error) {
-      console.error("Error generating AI context:", error);
+      logError("Error generating AI context:", error, "routes");
       res.status(500).json({ error: "Failed to generate AI context" });
     }
   });
