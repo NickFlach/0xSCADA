@@ -11,6 +11,11 @@ node_modules/
 dist/
 build/
 *.log
+server/blockchain.js
+
+# Caches
+cache/
+data/*.db
 
 # IDE
 .vscode/
@@ -24,6 +29,8 @@ test-integration-*/
 docker-compose.generated.yml
 k8s-deployment.yaml
 charts/
+typechain-types/
+proof-verification-results.json
 
 # OS
 .DS_Store
