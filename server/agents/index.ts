@@ -13,11 +13,12 @@ export * from "./decision-record";
 import { OpsAgent } from "./ops-agent";
 import { ChangeControlAgent } from "./change-control-agent";
 import { ComplianceAgent } from "./compliance-agent";
-import { BaseAgent, generateAgentKeys } from "./base";
+import { BaseAgent } from "./base";
 import { getEventService } from "../events";
 import { db } from "../db";
 import { agents } from "@shared/schema";
 import { eq } from "drizzle-orm";
+import { log, logError } from "../logger";
 
 // =============================================================================
 // AGENT REGISTRY
@@ -36,7 +37,7 @@ class AgentRegistry {
     }
 
     this.agents.set(agent.id, agent);
-    console.log(`📝 Agent registered: ${agent.displayName} (${agent.id})`);
+    log(`📝 Agent registered: ${agent.displayName} (${agent.id})`, "agents");
   }
 
   /**
@@ -59,7 +60,7 @@ class AgentRegistry {
     }
 
     this.agents.delete(agentId);
-    console.log(`🗑️ Agent unregistered: ${agent.displayName}`);
+    log(`🗑️ Agent unregistered: ${agent.displayName}`, "agents");
   }
 
   /**
@@ -79,7 +80,7 @@ class AgentRegistry {
       try {
         await agent.processEvent(event);
       } catch (error) {
-        console.error(`Agent ${agentId} error processing event:`, error);
+        logError(`Agent ${agentId} error processing event:`, error, "agents");
       }
     });
 
@@ -218,7 +219,7 @@ export async function initializeDefaultAgents(): Promise<{
   agentRegistry.register(complianceAgent);
   await persistAgentToDb(complianceAgent);
 
-  console.log("🤖 Default agents initialized");
+  log("🤖 Default agents initialized", "agents");
 
   return { opsAgent, changeControlAgent, complianceAgent };
 }
@@ -228,7 +229,7 @@ export async function initializeDefaultAgents(): Promise<{
  */
 export async function startDefaultAgents(): Promise<void> {
   await agentRegistry.startAll();
-  console.log("🚀 All agents started");
+  log("🚀 All agents started", "agents");
 }
 
 /**
@@ -236,5 +237,5 @@ export async function startDefaultAgents(): Promise<void> {
  */
 export async function stopAllAgents(): Promise<void> {
   await agentRegistry.stopAll();
-  console.log("🛑 All agents stopped");
+  log("🛑 All agents stopped", "agents");
 }

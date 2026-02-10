@@ -1,5 +1,6 @@
 import { createHash } from "crypto";
 import { ethers } from "ethers";
+import { log, logWarn } from "./logger";
 
 export interface BlobConfig {
   enabled: boolean;
@@ -34,9 +35,9 @@ export class BlobAnchoringService {
       compressionEnabled: config.compressionEnabled ?? true,
     };
 
-    console.log("🔮 BlobAnchoringService initialized (EIP-4844 prototype)");
-    console.log(`   Enabled: ${this.config.enabled}`);
-    console.log(`   Max blob size: ${this.config.maxBlobSize} bytes`);
+    log("🔮 BlobAnchoringService initialized (EIP-4844 prototype)", "blob-anchor");
+    log(`   Enabled: ${this.config.enabled}`, "blob-anchor");
+    log(`   Max blob size: ${this.config.maxBlobSize} bytes`, "blob-anchor");
   }
 
   isEnabled(): boolean {
@@ -61,20 +62,8 @@ export class BlobAnchoringService {
       return data;
     }
 
-    const chunks: string[] = [];
-    const seen = new Map<string, number>();
-    let pos = 0;
-
-    const str = data.toString("utf-8");
-    
-    for (let i = 0; i < str.length; i++) {
-      const char = str[i];
-      if (seen.has(char)) {
-        continue;
-      }
-      seen.set(char, pos++);
-    }
-
+    // TODO: Implement actual compression (e.g., zlib/gzip)
+    // Currently returns data uncompressed as a placeholder
     return data;
   }
 
@@ -150,18 +139,18 @@ export class BlobAnchoringService {
     wallet: ethers.Wallet
   ): Promise<{ txHash: string; blobCommitment: BlobCommitment } | null> {
     if (!this.config.enabled) {
-      console.warn("⚠️  Blob anchoring is disabled");
+      logWarn("⚠️  Blob anchoring is disabled", "blob-anchor");
       return null;
     }
 
     const serialized = this.serializeEvents(payload.events);
     const commitment = this.computeKZGCommitment(serialized);
 
-    console.log("🔮 Simulating EIP-4844 blob transaction");
-    console.log(`   Blob ID: ${payload.blobId}`);
-    console.log(`   Versioned Hash: ${commitment.versionedHash}`);
-    console.log(`   Event Count: ${payload.events.length}`);
-    console.log(`   Blob Size: ${payload.compressedSize} bytes`);
+    log("🔮 Simulating EIP-4844 blob transaction", "blob-anchor");
+    log(`   Blob ID: ${payload.blobId}`, "blob-anchor");
+    log(`   Versioned Hash: ${commitment.versionedHash}`, "blob-anchor");
+    log(`   Event Count: ${payload.events.length}`, "blob-anchor");
+    log(`   Blob Size: ${payload.compressedSize} bytes`, "blob-anchor");
 
     const tx = await wallet.sendTransaction({
       to: wallet.address,
@@ -177,7 +166,7 @@ export class BlobAnchoringService {
 
     const receipt = await tx.wait();
 
-    console.log(`✅ Blob transaction submitted: ${receipt?.hash}`);
+    log(`✅ Blob transaction submitted: ${receipt?.hash}`, "blob-anchor");
 
     return {
       txHash: receipt?.hash || "",

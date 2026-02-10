@@ -10,6 +10,7 @@
 import { Router } from "express";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { logError } from "./logger";
 
 export const swaggerRouter = Router();
 
@@ -37,7 +38,7 @@ swaggerRouter.get("/openapi.yaml", (req, res) => {
     const specContent = readFileSync(specPath, "utf8");
     res.type("text/yaml").send(specContent);
   } catch (error) {
-    console.error("Failed to read OpenAPI spec:", error);
+    logError("Failed to read OpenAPI spec", error, "swagger");
     res.status(404).json({ error: "OpenAPI spec not found" });
   }
 });
