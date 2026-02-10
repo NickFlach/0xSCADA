@@ -96,8 +96,14 @@ export function corsConfig(allowedOrigins: string[] = []) {
   return (req: Request, res: Response, next: NextFunction) => {
     const origin = req.headers.origin;
     
+    // Use CORS_ORIGIN env var in development, fall back to localhost origins
     if (process.env.NODE_ENV === "development") {
-      res.setHeader("Access-Control-Allow-Origin", "*");
+      const devOrigins = process.env.CORS_ORIGIN
+        ? process.env.CORS_ORIGIN.split(",")
+        : ["http://localhost:5000", "http://localhost:3000", "http://127.0.0.1:5000"];
+      if (origin && devOrigins.includes(origin)) {
+        res.setHeader("Access-Control-Allow-Origin", origin);
+      }
     } else if (origin && allowedOrigins.includes(origin)) {
       res.setHeader("Access-Control-Allow-Origin", origin);
     }

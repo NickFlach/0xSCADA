@@ -704,8 +704,12 @@ let securityServiceInstance: SecurityService | null = null;
 
 export function getSecurityService(): SecurityService {
   if (!securityServiceInstance) {
-    const auditKey = process.env.AUDIT_SIGNING_KEY || "development-audit-key";
-    securityServiceInstance = new SecurityService(auditKey);
+    const auditKey = process.env.AUDIT_SIGNING_KEY;
+    if (!auditKey) {
+      console.warn("⚠️  AUDIT_SIGNING_KEY not set — generating ephemeral key (audit logs will not survive restarts)");
+    }
+    const key = auditKey || randomBytes(32).toString("hex");
+    securityServiceInstance = new SecurityService(key);
   }
   return securityServiceInstance;
 }
