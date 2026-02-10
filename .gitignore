@@ -16,6 +16,15 @@ build/
 .vscode/
 .idea/
 
+# Test artifacts
+test-artifacts-*/
+test-integration-*/
+
+# Generated files
+docker-compose.generated.yml
+k8s-deployment.yaml
+charts/
+
 # OS
 .DS_Store
 Thumbs.db
