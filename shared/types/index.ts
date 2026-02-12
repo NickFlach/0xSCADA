@@ -17,6 +17,9 @@ export * from "./time-travel";
 // GhostOS Propagation Model Types
 export * from "./propagation";
 
+// Zero-Trust Capability Token Types (ADR-0008)
+export * from "./capability-token";
+
 // Operational Envelope & Trust Tier Types (ADR-0009)
 // Note: PropagationMode is intentionally re-declared in operational-envelope.ts
 // for self-contained usage. Import from this module via @shared/types/operational-envelope directly.
