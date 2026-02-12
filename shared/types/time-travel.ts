@@ -339,17 +339,6 @@ export type ReplayResult = z.infer<typeof replayResultSchema>;
 // =============================================================================
 
 /**
- * Change type in diff
- */
-export const DiffChangeType = {
-  ADDED: "added",
-  REMOVED: "removed",
-  MODIFIED: "modified",
-} as const;
-
-export type DiffChangeType = (typeof DiffChangeType)[keyof typeof DiffChangeType];
-
-/**
  * Single artifact change in diff
  */
 export const artifactDiffEntrySchema = z.object({
