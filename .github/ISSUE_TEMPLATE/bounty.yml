@@ -1,0 +1,232 @@
+name: 💰 Bounty Issue
+description: Create a bounty issue for paid contributions (humans and AI agents)
+title: "[BOUNTY] "
+labels: ["bounty", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## 💰 Gitcoin Bounty Issue
+
+        This template is for creating **paid bounty issues**. Contributors who complete this work will be compensated via Gitcoin/Allo Protocol.
+
+        **For contributors**: See [CONTRIBUTING.md](../../CONTRIBUTING.md#gitcoin-bounties) for claim instructions.
+
+  - type: dropdown
+    id: bounty-tier
+    attributes:
+      label: Bounty Tier
+      description: Select the appropriate bounty tier based on complexity
+      options:
+        - "bounty:small ($50-150) - Bug fixes, docs, simple features"
+        - "bounty:medium ($150-500) - New adapters, API endpoints, moderate features"
+        - "bounty:large ($500-1500) - Major features, smart contracts, kernel modules"
+        - "bounty:xl ($1500+) - Multi-phase initiatives, architectural work, security audits"
+    validations:
+      required: true
+
+  - type: input
+    id: bounty-amount
+    attributes:
+      label: Exact Bounty Amount
+      description: Specific USD-equivalent amount for this bounty
+      placeholder: "$250 USD equivalent in MATIC"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: payment-network
+    attributes:
+      label: Payment Network
+      description: Which blockchain network will be used for payment
+      options:
+        - "Polygon (recommended - low gas)"
+        - "Arbitrum One"
+        - "Optimism"
+        - "Base"
+        - "Ethereum Mainnet"
+        - "0x5CADA Chain (experimental)"
+      default: 0
+    validations:
+      required: true
+
+  - type: dropdown
+    id: track
+    attributes:
+      label: Learning Track
+      description: Which track does this bounty belong to?
+      options:
+        - "track:frontend (A) - React, visualization, UX"
+        - "track:backend (B) - APIs, databases, services"
+        - "track:blockchain (C) - Smart contracts, consensus"
+        - "track:systems (D) - Kernel, drivers, security"
+        - "track:automation (E) - PLCs, HMI, control systems"
+        - "track:quality (Q) - Testing, automation, QE"
+        - "track:cross-functional - Multiple tracks"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: difficulty
+    attributes:
+      label: Difficulty Level
+      description: Technical difficulty level
+      options:
+        - "difficulty:beginner - Good first issue"
+        - "difficulty:intermediate - Some experience required"
+        - "difficulty:advanced - Significant expertise required"
+        - "difficulty:expert - Deep specialized knowledge required"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: agent-suitable
+    attributes:
+      label: AI Agent Suitable?
+      description: Can AI agents autonomously complete this bounty?
+      options:
+        - "Yes - Fully suitable for AI agents"
+        - "Partial - Agent + human review required"
+        - "No - Human-only (subjective decisions, UX, complex architecture)"
+      default: 0
+    validations:
+      required: true
+
+  - type: input
+    id: estimated-hours
+    attributes:
+      label: Estimated Hours
+      description: Approximate time to complete (helps contributors decide)
+      placeholder: "8 hours"
+    validations:
+      required: true
+
+  - type: input
+    id: deadline
+    attributes:
+      label: Deadline (Optional)
+      description: Target completion date (ISO 8601 format)
+      placeholder: "2026-03-01T00:00:00Z"
+    validations:
+      required: false
+
+  - type: textarea
+    id: description
+    attributes:
+      label: Description
+      description: Clear description of what needs to be done
+      placeholder: |
+        Provide a detailed description of the work required.
+
+        **What**: What should be built/fixed?
+        **Why**: Why is this important?
+        **Context**: Any background information?
+    validations:
+      required: true
+
+  - type: textarea
+    id: acceptance-criteria
+    attributes:
+      label: Acceptance Criteria
+      description: Specific, measurable criteria that must be met for bounty approval
+      placeholder: |
+        - [ ] All unit tests pass
+        - [ ] Integration tests added for new functionality
+        - [ ] Documentation updated (README, API docs, code comments)
+        - [ ] No breaking changes to existing APIs
+        - [ ] Code follows project style guide
+        - [ ] Performance benchmarks met (if applicable)
+        - [ ] Security considerations addressed
+      value: |
+        - [ ] All unit tests pass
+        - [ ] Code follows project coding standards
+        - [ ] Documentation updated (if applicable)
+        - [ ] DCO sign-off on all commits
+        - [ ] PR template fully completed
+        - [ ] No breaking changes (unless explicitly required)
+    validations:
+      required: true
+
+  - type: textarea
+    id: technical-requirements
+    attributes:
+      label: Technical Requirements
+      description: Specific technical requirements or constraints
+      placeholder: |
+        - Must follow existing adapter pattern (see rockwell-adapter.ts)
+        - Use Drizzle ORM for database operations
+        - TypeScript strict mode compliance
+        - Minimum 80% test coverage
+    validations:
+      required: false
+
+  - type: textarea
+    id: resources
+    attributes:
+      label: Resources & References
+      description: Links to documentation, examples, or related issues
+      placeholder: |
+        - [ABB AC500 Programming Guide](https://example.com/abb-manual.pdf)
+        - Similar implementation: #42
+        - Related discussion: #discussion-123
+    validations:
+      required: false
+
+  - type: dropdown
+    id: requires-verification
+    attributes:
+      label: Requires Special Verification?
+      description: Does this need security audit, hardware testing, or other special verification?
+      options:
+        - "No special verification"
+        - "Security audit required"
+        - "Hardware testing required"
+        - "Performance benchmarking required"
+        - "Compliance audit required (FDA, IEC, etc.)"
+      default: 0
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: requirements
+    attributes:
+      label: Required Deliverables
+      options:
+        - label: "Code implementation"
+          required: true
+        - label: "Unit tests"
+          required: true
+        - label: "Integration tests (if applicable)"
+          required: false
+        - label: "Documentation updates"
+          required: true
+        - label: "API documentation (OpenAPI spec)"
+          required: false
+        - label: "Example usage / tutorial"
+          required: false
+        - label: "Migration guide (for breaking changes)"
+          required: false
+
+  - type: markdown
+    attributes:
+      value: |
+        ---
+
+        ## For Maintainers
+
+        After creating this issue:
+        1. Add appropriate labels: `bounty:*`, `track:*`, `difficulty:*`
+        2. If agent-suitable, add `ai-agent-friendly` label
+        3. Update issue with final bounty amount if estimated
+        4. Add to project board for tracking
+
+        ## For Contributors
+
+        To claim this bounty:
+        1. Comment `/claim` with your timeline, approach, and wallet address
+        2. Wait for maintainer approval
+        3. Complete the work according to acceptance criteria
+        4. Submit PR referencing this issue
+        5. Receive payment upon merge! 🎉
+
+        See [CONTRIBUTING.md](../../CONTRIBUTING.md#gitcoin-bounties) for full details.

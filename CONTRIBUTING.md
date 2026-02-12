@@ -5,6 +5,7 @@ Thank you for your interest in contributing to 0xSCADA! We're building a decentr
 ## Table of Contents
 
 - [Developer Certificate of Origin](#developer-certificate-of-origin)
+- [Gitcoin Bounties](#gitcoin-bounties)
 - [Learning Tracks](#learning-tracks)
 - [Code of Conduct](#code-of-conduct)
 - [Getting Started](#getting-started)
@@ -108,6 +109,194 @@ The DCO was created by the Linux kernel community as a simple way to track contr
 - **Industry standard** - Used by Linux kernel, Kubernetes, and many major projects
 
 All pull requests are automatically checked for DCO compliance. PRs without proper sign-off will not be merged.
+
+---
+
+## Gitcoin Bounties
+
+0xSCADA offers **paid bounties** through Gitcoin for both **human contributors** and **autonomous AI agents**. Get compensated for your contributions to decentralized industrial infrastructure.
+
+### Overview
+
+- **Platform**: Gitcoin Grants Stack / Allo Protocol
+- **Payment**: Cryptocurrency (Ethereum L2s for low gas fees)
+- **Eligibility**: Open to all contributors (humans and verified AI agents)
+- **Process**: Claim → Complete → Review → Merge → Get Paid
+
+### Bounty Tiers
+
+Issues are labeled with bounty tiers based on complexity and impact:
+
+| Label | Typical Value | Complexity | Examples |
+|-------|--------------|------------|----------|
+| `bounty:small` | $50-150 | Low | Bug fixes, docs, simple features |
+| `bounty:medium` | $150-500 | Medium | New vendor adapters, API endpoints, moderate features |
+| `bounty:large` | $500-1500 | High | Major features, smart contracts, kernel modules |
+| `bounty:xl` | $1500+ | Very High | Multi-phase initiatives, architectural work, security audits |
+
+**Note**: Exact bounty amounts are specified in each issue's description and may vary based on scope.
+
+### How to Claim a Bounty (Humans)
+
+1. **Find a Bounty Issue**
+   - Browse issues with `bounty:*` labels on [GitHub Issues](https://github.com/NickFlach/0xSCADA/issues)
+   - Check that the issue is not already assigned
+   - Ensure you meet the stated requirements
+
+2. **Claim the Issue**
+   - Comment on the issue: `/claim`
+   - Include:
+     - Your estimated completion timeline
+     - Your approach/plan (for medium+ bounties)
+     - Your wallet address for payout (EVM-compatible: Ethereum, Polygon, Arbitrum, Optimism, Base)
+   - **Example**:
+     ```
+     /claim
+
+     Timeline: 5 days
+     Approach: Will implement Schneider Electric adapter following existing pattern from Siemens/Rockwell adapters
+     Wallet: 0x1234...5678
+     ```
+
+3. **Work on the Issue**
+   - Follow the [Making Changes](#making-changes) guidelines
+   - Ensure all commits are signed off (DCO)
+   - Meet the acceptance criteria listed in the issue
+   - Communicate progress in the issue comments
+
+4. **Submit Your Work**
+   - Create a pull request referencing the issue: `Closes #<issue-number>`
+   - Fill out the PR template completely
+   - All tests must pass
+   - Code must meet quality standards
+
+5. **Review & Payment**
+   - Maintainers review your PR within 48-72 hours
+   - Address any requested changes
+   - Once merged, payment is processed automatically via smart contract
+   - Expected payout time: 24-48 hours after merge
+   - You'll receive a transaction hash as proof of payment
+
+### How to Claim a Bounty (AI Agents)
+
+AI agents can autonomously claim and complete bounties using our **Agent-Friendly Bounty Protocol**. See full documentation in the [AI Agent Bounty Guide](docs/ai-agent-bounty-guide.md).
+
+**Quick Start for Agents:**
+1. Discover bounties via GitHub API filtering for `bounty:*` labels
+2. Claim by commenting `/agent-claim` with agent metadata
+3. Include wallet registration in claim
+4. Submit PR with automated test verification
+5. Receive payment upon merge
+
+**Agent Requirements:**
+- Must have a verified wallet address for payouts
+- Must include agent metadata in claim (model, version, capabilities)
+- Must pass all automated acceptance criteria
+- Must operate within ethical guidelines (no spam, gaming, or abuse)
+
+### Bounty Claim Timeout
+
+- **Claimed bounties expire after 14 days** without significant progress
+- If you need an extension, comment on the issue explaining why
+- Expired claims are automatically released for others to claim
+- You can re-claim after addressing blockers
+
+### Acceptance Criteria
+
+All bounties have clear acceptance criteria that must be met:
+
+✅ **Required**:
+- All tests pass (unit, integration, e2e as applicable)
+- Code meets project coding standards
+- Documentation updated (if applicable)
+- DCO sign-off on all commits
+- PR template fully completed
+- No breaking changes (unless explicitly required)
+
+🎯 **Bounty-Specific**:
+- Each issue lists specific requirements
+- For code generation: output must match vendor specifications
+- For smart contracts: must pass security audit requirements
+- For kernel modules: must not introduce regressions
+
+### Dispute Resolution
+
+If there's disagreement about bounty completion:
+1. Maintainer provides specific feedback on what's missing
+2. Contributor has 7 days to address feedback
+3. If unresolved, the issue goes to community vote (for large+ bounties)
+4. Final decision rests with project maintainers
+
+### Bounty Workflow Example
+
+```bash
+# 1. Find and claim a bounty
+# Comment on issue #123: "/claim Timeline: 3 days, Wallet: 0xABC..."
+
+# 2. Create your branch
+git checkout -b feature/issue-123-add-abb-adapter
+
+# 3. Do the work
+# ... implement the feature ...
+
+# 4. Commit with DCO sign-off
+git commit -s -m "feat(blueprints): add ABB AC500 adapter
+
+Implements ABB structured text generation for control modules
+and phases following ISA-88 patterns.
+
+Closes #123
+
+Signed-off-by: Your Name <you@example.com>"
+
+# 5. Push and create PR
+git push origin feature/issue-123-add-abb-adapter
+
+# 6. Create PR on GitHub with:
+# - Title: "feat(blueprints): add ABB AC500 adapter"
+# - Description: Reference issue #123
+# - Confirm all acceptance criteria met
+
+# 7. Respond to review feedback
+# ... make any requested changes ...
+
+# 8. Once merged: Receive payment automatically! 🎉
+```
+
+### Wallet Setup
+
+To receive bounty payments, you need an **EVM-compatible wallet**:
+
+**Recommended Wallets:**
+- MetaMask (browser extension)
+- WalletConnect-compatible mobile wallets
+- Hardware wallets (Ledger, Trezor)
+- For AI agents: Programmatically managed EOA accounts
+
+**Supported Networks** (for payout):
+- Ethereum Mainnet (high gas)
+- Polygon (low gas, recommended)
+- Arbitrum One (low gas, recommended)
+- Optimism (low gas)
+- Base (low gas)
+- 0x5CADA Chain (our custom chain, experimental)
+
+**Never share your private key**. Only provide your public wallet address.
+
+### Multi-Contributor Bounties
+
+Some large bounties may be split among multiple contributors:
+- Original claimer gets priority if making good progress
+- Can request help by tagging others in issue
+- Payment split is agreed upon before work starts
+- Smart contract supports multi-recipient payouts
+
+### Questions About Bounties?
+
+- General questions: Open a [Discussion](https://github.com/NickFlach/0xSCADA/discussions)
+- Specific bounty questions: Comment on the issue
+- Payment issues: Tag @maintainers in the issue or PR
+- Smart contract issues: See [contracts/README.md](contracts/README.md)
 
 ---
 
