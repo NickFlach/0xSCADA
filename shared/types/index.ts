@@ -16,3 +16,6 @@ export * from "./time-travel";
 
 // GhostOS Propagation Model Types
 export * from "./propagation";
+
+// Zero-Trust Capability Token Types (ADR-0008)
+export * from "./capability-token";

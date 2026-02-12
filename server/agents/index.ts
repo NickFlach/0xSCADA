@@ -9,6 +9,8 @@ export * from "./ops-agent";
 export * from "./change-control-agent";
 export * from "./compliance-agent";
 export * from "./decision-record";
+export * from "./capability-manager";
+export * from "./zero-trust-guard";
 
 import { OpsAgent } from "./ops-agent";
 import { ChangeControlAgent } from "./change-control-agent";
