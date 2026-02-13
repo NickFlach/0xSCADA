@@ -31,6 +31,10 @@ ADRs follow this lifecycle:
 | [ADR-0005](ADR-0005-opcua-protocol-driver.md) | OPC-UA as Primary Protocol Driver | Accepted |
 | [ADR-0006](ADR-0006-postgresql-event-persistence.md) | PostgreSQL for Event Persistence | Accepted |
 | [ADR-0007](ADR-0007-agent-based-governance.md) | Agent-Based Governance Model | Accepted |
+| [ADR-0008](ADR-0008-zero-trust-agent-deployment.md) | Zero-Trust Agent Deployment Model | Proposed |
+| [ADR-0009](ADR-0009-measured-emergence-guardrails.md) | Measured Emergence Guardrails for Autonomous Agents | Proposed |
+| [ADR-0010](ADR-0010-agent-certification-framework.md) | Agent Certification Framework | Proposed |
+| [ADR-0011](ADR-0011-ot-it-convergence-standards.md) | OT/IT Convergence Standards for Agentic Systems | Proposed |
 <!-- ADR-INDEX-END -->
 
 ## Creating a New ADR
