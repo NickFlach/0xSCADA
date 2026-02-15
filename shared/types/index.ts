@@ -4,6 +4,9 @@
  * VERITY Architecture - Type Definitions
  */
 
+// RBAC Types
+export * from "./rbac";
+
 // Agent Decision Types
 export * from "./agent-decision";
 export * from "./agent-decision-storage";
