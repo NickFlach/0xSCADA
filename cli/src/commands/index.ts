@@ -15,3 +15,7 @@ export { registerAnchorCommand } from "./anchor.js";
 export { registerCompletionCommand } from "./completion.js";
 export { registerAgentsCommand } from "./agents.js";
 export { registerWatchCommand } from "./watch.js";
+export { registerGatewayCommand } from "./gateway.js";
+export { registerTagsCommand } from "./tags.js";
+export { registerAlarmsCommand } from "./alarms.js";
+export { registerDbCommand } from "./db.js";
