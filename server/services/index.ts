@@ -12,6 +12,11 @@ export * from "./decision-replay";
 export * from "./time-travel";
 export * from "./certification-workflow";
 
+// Security & Compliance
+export * from "./audit-logger";
+export * from "./recipe-audit";
+export * from "./config-tracker";
+
 // GhostOS Propagation Model
 export * from "./intent-packet-service";
 export * from "./propagation-mode-selector";
