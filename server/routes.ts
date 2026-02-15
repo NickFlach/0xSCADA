@@ -33,6 +33,7 @@ import { certificationRoutes } from "./routes/certifications";
 import artifactRoutes from "./routes/ArtifactRoutes";
 import { assetRoutes } from "./routes/assets";
 import { alarmRoutes } from "./routes/alarms";
+import pidRoutes from "./routes/pid";
 import { eventStreamServer } from "./websocket";
 
 export async function registerRoutes(
@@ -52,6 +53,7 @@ export async function registerRoutes(
   app.use("/api/artifacts", artifactRoutes);
   app.use("/api/assets", assetRoutes);
   app.use("/api/alarms", alarmRoutes);
+  app.use("/api/pid", pidRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {

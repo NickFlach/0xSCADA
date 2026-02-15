@@ -13,6 +13,7 @@ import Agents from "@/pages/agents";
 import DigitalTwin from "@/pages/digital-twin";
 import Home from "@/pages/home";
 import NotFound from "@/pages/not-found";
+import PIDView from "@/pages/pid-view";
 
 function Router() {
   return (
@@ -26,6 +27,8 @@ function Router() {
       <Route path="/codegen" component={CodeGen} />
       <Route path="/agents" component={Agents} />
       <Route path="/digital-twin" component={DigitalTwin} />
+      <Route path="/pid/:id" component={PIDView} />
+      <Route path="/pid" component={PIDView} />
       <Route component={NotFound} />
     </Switch>
   );
