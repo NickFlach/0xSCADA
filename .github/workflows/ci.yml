@@ -2,231 +2,127 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, 'feat/**']
   pull_request:
-    branches: [main, develop]
-  release:
-    types: [published]
+    branches: [main]
 
 env:
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/0xscada
 
 jobs:
-  # ==========================================================================
-  # LINT & TYPE CHECK
-  # ==========================================================================
   lint:
-    name: Lint & Type Check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+      - run: npm ci
+      - run: npm run lint --if-present
 
-      - name: Install dependencies
-        run: npm ci
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
 
-      - name: Type check (strict on push, advisory on PR)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            set +e
-            npm run check > typecheck.log 2>&1
-            status=$?
-            if [ $status -ne 0 ]; then
-              echo "::warning::Type check failed on this PR. Treating as advisory while repo-wide type debt is reduced."
-              tail -n 200 typecheck.log || true
-            else
-              echo "Type check passed."
-            fi
-          else
-            npm run check
-          fi
-
-      - name: Run lint script (if present)
-        run: |
-          if npm run | grep -qE "^  lint$|^  lint:"; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              npm run lint || echo "::warning::Lint script failed on PR (advisory)."
-            else
-              npm run lint
-            fi
-          else
-            echo "No lint script defined; skipping."
-          fi
-
-      - name: Check formatting (if script exists)
-        run: |
-          if npm run | grep -q " format:check"; then
-            if [ "${{ github.event_name }}" = "pull_request" ]; then
-              npm run format:check || echo "::warning::Format check failed on PR (advisory)."
-            else
-              npm run format:check
-            fi
-          else
-            echo "No format:check script defined; skipping."
-          fi
-
-  # ==========================================================================
-  # UNIT TESTS
-  # ==========================================================================
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    needs: lint
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test -- --coverage --passWithNoTests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build --if-present
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: dist/
+
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push'
+    strategy:
+      matrix:
+        service: [server, client, gateway, validator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/${{ matrix.service }}/Dockerfile
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: |
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
+            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [build]
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
+          POSTGRES_DB: oxscada_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests (strict on push, advisory on PR)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm test || echo "::warning::Unit tests failed on PR (advisory)."
-          else
-            npm test
-          fi
+      - run: npm ci
+      - run: npm run test:integration --if-present
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
-
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: ./coverage/coverage-final.json
-          fail_ci_if_error: false
-
-  # ==========================================================================
-  # BUILD
-  # ==========================================================================
-  build:
-    name: Build Application
-    runs-on: ubuntu-latest
-    needs: [lint, test]
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build application (strict on push, advisory on PR)
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            npm run build || echo "::warning::Build failed on PR (advisory)."
-          else
-            npm run build
-          fi
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          retention-days: 7
-
-  # ==========================================================================
-  # DOCKER BUILD
-  # ==========================================================================
-  docker:
-    name: Docker Build
-    runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: oxscada:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ==========================================================================
-  # SECURITY SCAN
-  # ==========================================================================
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run npm audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-
-  # ==========================================================================
-  # SMART CONTRACT TESTS (Optional)
-  # ==========================================================================
-  contracts:
-    name: Smart Contract Tests
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Compile contracts
-        run: npx hardhat compile
-        continue-on-error: true
+          DATABASE_URL: postgresql://test:test@localhost:5432/oxscada_test
+          NODE_ENV: test
