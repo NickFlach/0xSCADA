@@ -31,6 +31,8 @@ import { aasRouter } from "./routes/aas";
 import ubiquityRoutes from "./routes/ubiquity";
 import { certificationRoutes } from "./routes/certifications";
 import artifactRoutes from "./routes/ArtifactRoutes";
+import { assetRoutes } from "./routes/assets";
+import { alarmRoutes } from "./routes/alarms";
 import { eventStreamServer } from "./websocket";
 
 export async function registerRoutes(
@@ -48,6 +50,8 @@ export async function registerRoutes(
   app.use("/api/ubiquity", ubiquityRoutes);
   app.use("/api/certifications", certificationRoutes);
   app.use("/api/artifacts", artifactRoutes);
+  app.use("/api/assets", assetRoutes);
+  app.use("/api/alarms", alarmRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {

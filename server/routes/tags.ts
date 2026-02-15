@@ -10,6 +10,7 @@ import { Router, type Request, type Response } from "express";
 import type { WebSocket } from "ws";
 import { createModbusDriver, type RealModbusTcpDriver } from "../gateway/modbus-driver";
 import { createGateway, gatewayRegistry, type TagDefinition, type TagValue } from "../gateway";
+import { parsePagination, paginatedResponse } from "../middleware/pagination";
 
 // =============================================================================
 // TYPES
@@ -257,13 +258,15 @@ export const tagRoutes = Router();
 
 /**
  * GET /api/tags
- * List all registered tags with current values
+ * List all registered tags with current values.
+ * Supports pagination, filtering by unit/name, and sorting.
  */
-tagRoutes.get("/", (_req: Request, res: Response) => {
+tagRoutes.get("/", parsePagination("name"), (req: Request, res: Response) => {
+  const p = req.pagination!;
   const tags = tagService.getTagDefinitions();
   const values = tagService.getAllTagValues();
 
-  const result = tags.map((tag) => {
+  let result = tags.map((tag) => {
     const value = values.find((v) => v.tag === tag.name);
     return {
       name: tag.name,
@@ -282,7 +285,32 @@ tagRoutes.get("/", (_req: Request, res: Response) => {
     };
   });
 
-  res.json(result);
+  // Filtering
+  if (p.filters.search) {
+    const q = p.filters.search.toLowerCase();
+    result = result.filter(t => t.name.toLowerCase().includes(q));
+  }
+  if (p.filters.unit) {
+    result = result.filter(t => t.unit === p.filters.unit);
+  }
+  if (p.filters.has_value) {
+    const wantValue = p.filters.has_value === "true";
+    result = result.filter(t => wantValue ? t.currentValue !== null : t.currentValue === null);
+  }
+
+  // Sorting
+  const sortKey = p.sortBy as keyof typeof result[0];
+  result.sort((a, b) => {
+    const av = String((a as any)[sortKey] ?? "");
+    const bv = String((b as any)[sortKey] ?? "");
+    return p.sortOrder === "asc" ? av.localeCompare(bv) : bv.localeCompare(av);
+  });
+
+  // Pagination
+  const total = result.length;
+  const paged = result.slice(p.offset, p.offset + p.limit);
+
+  res.json(paginatedResponse(paged, total, p, "/api/tags"));
 });
 
 /**
