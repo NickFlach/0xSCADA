@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oxscada-config
+  labels:
+    app.kubernetes.io/part-of: oxscada
+data:
+  NODE_ENV: production
+  SERVER_PORT: "{{ .Values.server.port }}"
+  GATEWAY_PORT: "{{ .Values.gateway.port }}"
+  CLIENT_PORT: "{{ .Values.client.port }}"
