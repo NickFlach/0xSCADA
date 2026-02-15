@@ -24,6 +24,10 @@ import {
   registerCompletionCommand,
   registerAgentsCommand,
   registerWatchCommand,
+  registerGatewayCommand,
+  registerTagsCommand,
+  registerAlarmsCommand,
+  registerDbCommand,
 } from "./commands/index.js";
 
 const __filename = fileURLToPath(import.meta.url);
@@ -136,6 +140,10 @@ registerAnchorCommand(program);
 registerCompletionCommand(program);
 registerAgentsCommand(program);
 registerWatchCommand(program);
+registerGatewayCommand(program);
+registerTagsCommand(program);
+registerAlarmsCommand(program);
+registerDbCommand(program);
 
 // Error handling for unknown commands
 program.on("command:*", (operands) => {
