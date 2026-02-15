@@ -513,6 +513,67 @@ eventRoutes.post("/batches/:id/anchor", async (req, res) => {
 });
 
 // =============================================================================
+// SERVER-SENT EVENTS (SSE) STREAM
+// Issue #22 — [Optix/REST] REST/WebSocket server patterns
+// =============================================================================
+
+/**
+ * GET /api/v2/events/stream
+ * Server-Sent Events endpoint for real-time event streaming
+ *
+ * Query parameters for filtering:
+ *   ?siteId=site-001&eventType=ALARM&eventType=COMMAND
+ */
+eventRoutes.get("/stream", (req, res) => {
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache",
+    "Connection": "keep-alive",
+    "X-Accel-Buffering": "no",
+  });
+
+  const toArray = (v: unknown): string[] | undefined => {
+    if (!v) return undefined;
+    return Array.isArray(v) ? (v as string[]) : [v as string];
+  };
+  const siteIds = toArray(req.query.siteId);
+  const assetIds = toArray(req.query.assetId);
+  const eventTypes = toArray(req.query.eventType);
+
+  res.write(`event: connected\ndata: ${JSON.stringify({ time: new Date().toISOString(), filters: { siteIds, assetIds, eventTypes } })}\n\n`);
+
+  const heartbeat = setInterval(() => {
+    res.write(`: heartbeat\n\n`);
+  }, 30000);
+
+  const eventService = getEventService();
+  const unsubscribe = eventService.onEvent((event) => {
+    if (siteIds?.length && !siteIds.includes(event.siteId)) return;
+    if (assetIds?.length && event.assetId && !assetIds.includes(event.assetId)) return;
+    if (eventTypes?.length && !eventTypes.includes(event.eventType)) return;
+
+    const data = JSON.stringify({
+      eventType: event.eventType,
+      siteId: event.siteId,
+      assetId: event.assetId,
+      originType: event.originType,
+      originId: event.originId,
+      payload: event.payload,
+      details: event.details,
+      hash: event.hash,
+      sourceTimestamp: event.sourceTimestamp,
+    });
+
+    res.write(`event: ${event.eventType}\ndata: ${data}\n\n`);
+  });
+
+  req.on("close", () => {
+    clearInterval(heartbeat);
+    unsubscribe();
+  });
+});
+
+// =============================================================================
 // STATISTICS & METADATA
 // =============================================================================
 
