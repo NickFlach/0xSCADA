@@ -47,17 +47,23 @@ spec:
             limits:
               cpu: "1"
               memory: 512Mi
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: 5000
+            failureThreshold: 30
+            periodSeconds: 2
           livenessProbe:
             httpGet:
-              path: /health
+              path: /healthz
               port: 5000
-            initialDelaySeconds: 15
-            periodSeconds: 20
+            initialDelaySeconds: 0
+            periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /health
+              path: /readyz
               port: 5000
-            initialDelaySeconds: 5
+            initialDelaySeconds: 0
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
