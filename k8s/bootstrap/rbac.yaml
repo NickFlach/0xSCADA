@@ -1,0 +1,104 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxscada-admin
+  namespace: oxscada
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: oxscada-cluster-admin
+  labels:
+    app.kubernetes.io/part-of: oxscada
+rules:
+  - apiGroups: [""]
+    resources: ["namespaces", "nodes", "persistentvolumes"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods", "services", "configmaps", "secrets", "persistentvolumeclaims"]
+    verbs: ["*"]
+  - apiGroups: ["apps"]
+    resources: ["deployments", "statefulsets", "daemonsets", "replicasets"]
+    verbs: ["*"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["*"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oxscada-cluster-admin-binding
+subjects:
+  - kind: ServiceAccount
+    name: oxscada-admin
+    namespace: oxscada
+roleRef:
+  kind: ClusterRole
+  name: oxscada-cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxscada-app
+  namespace: oxscada
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oxscada-app-role
+  namespace: oxscada
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps", "secrets"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oxscada-app-binding
+  namespace: oxscada
+subjects:
+  - kind: ServiceAccount
+    name: oxscada-app
+    namespace: oxscada
+roleRef:
+  kind: Role
+  name: oxscada-app-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxscada-protocol
+  namespace: oxscada-protocols
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: oxscada-protocol-role
+  namespace: oxscada-protocols
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: oxscada-protocol-binding
+  namespace: oxscada-protocols
+subjects:
+  - kind: ServiceAccount
+    name: oxscada-protocol
+    namespace: oxscada-protocols
+roleRef:
+  kind: Role
+  name: oxscada-protocol-role
+  apiGroup: rbac.authorization.k8s.io

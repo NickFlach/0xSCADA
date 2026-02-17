@@ -1,0 +1,114 @@
+# Custom Kubernetes Scheduler Configuration for Real-Time Workloads
+apiVersion: kubescheduler.config.k8s.io/v1
+kind: KubeSchedulerConfiguration
+profiles:
+  - schedulerName: oxscada-realtime-scheduler
+    plugins:
+      score:
+        enabled:
+          - name: NodeResourcesFit
+          - name: NodeAffinity
+        disabled:
+          - name: NodeResourcesBalancedAllocation
+    pluginConfig:
+      - name: NodeResourcesFit
+        args:
+          scoringStrategy:
+            type: MostAllocated  # Pack pods tightly for cache locality
+---
+# Priority Classes for real-time workloads
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: oxscada-realtime-critical
+globalDefault: false
+value: 1000000
+preemptionPolicy: PreemptLowerPriority
+description: "Critical real-time SCADA data acquisition pods"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: oxscada-realtime-high
+globalDefault: false
+value: 500000
+preemptionPolicy: PreemptLowerPriority
+description: "High priority protocol processing pods"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: oxscada-standard
+globalDefault: false
+value: 100000
+preemptionPolicy: PreemptLowerPriority
+description: "Standard 0xSCADA application pods"
+---
+apiVersion: scheduling.k8s.io/v1
+kind: PriorityClass
+metadata:
+  name: oxscada-batch
+globalDefault: false
+value: 10000
+preemptionPolicy: Never
+description: "Batch processing and analytics pods"
+---
+# Scheduler Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: oxscada-realtime-scheduler
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: oxscada-realtime-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oxscada-realtime-scheduler
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oxscada-realtime-scheduler
+    spec:
+      serviceAccountName: oxscada-scheduler
+      containers:
+        - name: scheduler
+          image: registry.k8s.io/kube-scheduler:v1.29.0
+          command:
+            - kube-scheduler
+            - --config=/etc/kubernetes/scheduler-config.yaml
+            - --leader-elect=false
+          volumeMounts:
+            - name: scheduler-config
+              mountPath: /etc/kubernetes/
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 200m
+              memory: 256Mi
+      volumes:
+        - name: scheduler-config
+          configMap:
+            name: oxscada-scheduler-config
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: oxscada-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: oxscada-scheduler-binding
+subjects:
+  - kind: ServiceAccount
+    name: oxscada-scheduler
+    namespace: kube-system
+roleRef:
+  kind: ClusterRole
+  name: system:kube-scheduler
+  apiGroup: rbac.authorization.k8s.io
