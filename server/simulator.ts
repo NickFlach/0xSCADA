@@ -1,5 +1,7 @@
 import { storage } from "./storage";
 import type { InsertSite, InsertAsset, InsertEventAnchor } from "@shared/schema";
+import { log, logError, logWarn } from "./logger";
+import { tagStreamServer } from "./websocket/tag-stream";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -22,19 +24,19 @@ class FieldSimulator {
 
   async initialize() {
     if (!this.config.enabled) {
-      console.log("⚠️  Field simulator disabled");
+      log("⚠️  Field simulator disabled", "simulator");
       return;
     }
 
-    console.log("🏭 Initializing field simulator...");
+    log("🏭 Initializing field simulator...", "simulator");
 
     try {
       await this.seedData();
       this.isInitialized = true;
-      console.log(`✅ Field simulator ready (${this.assetIds.length} assets monitored)`);
-      console.log(`   Event generation interval: ${this.config.eventIntervalMs}ms`);
+      log(`✅ Field simulator ready (${this.assetIds.length} assets monitored)`, "simulator");
+      log(`   Event generation interval: ${this.config.eventIntervalMs}ms`, "simulator");
     } catch (error) {
-      console.error("❌ Failed to initialize simulator:", error);
+      logError("❌ Failed to initialize simulator", error, "simulator");
     }
   }
 
@@ -42,7 +44,7 @@ class FieldSimulator {
     const existingSites = await storage.getSites();
     
     if (existingSites.length === 0) {
-      console.log("dY?- Seeding initial SCADA infrastructure...");
+      log("dY?- Seeding initial SCADA infrastructure...", "simulator");
 
       const sites: InsertSite[] = [
         { name: "Substation Alpha", location: "Sector 7G", owner: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", status: "ONLINE" },
@@ -95,12 +97,12 @@ class FieldSimulator {
         this.assetIds.push(asset.id);
       }
 
-      console.log(`   Created ${sites.length} sites and ${assets.length} assets`);
+      log(`   Created ${sites.length} sites and ${assets.length} assets`, "simulator");
     } else {
       this.siteIds = existingSites.map(s => s.id);
       const existingAssets = await storage.getAssets();
       this.assetIds = existingAssets.map(a => a.id);
-      console.log(`   Loaded ${this.siteIds.length} existing sites and ${this.assetIds.length} assets`);
+      log(`   Loaded ${this.siteIds.length} existing sites and ${this.assetIds.length} assets`, "simulator");
     }
   }
 
@@ -110,7 +112,7 @@ class FieldSimulator {
     }
 
     if (this.intervalId) {
-      console.warn("Simulator already running");
+      logWarn("Simulator already running", "simulator");
       return;
     }
 
@@ -118,14 +120,14 @@ class FieldSimulator {
       this.generateEvent();
     }, this.config.eventIntervalMs);
 
-    console.log("dY?- Field simulator started");
+    log("dY?- Field simulator started", "simulator");
   }
 
   stop() {
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
-      console.log("⏸️  Field simulator stopped");
+      log("⏸️  Field simulator stopped", "simulator");
     }
   }
 
@@ -173,10 +175,20 @@ class FieldSimulator {
       });
 
       if (response.ok) {
-        console.log(`📡 [${asset.nameOrTag}] ${eventType} → Anchored`);
+        log(`📡 [${asset.nameOrTag}] ${eventType} → Anchored`, "simulator");
+        
+        // Broadcast tag update to live dashboard via WebSocket
+        tagStreamServer.broadcastTagUpdate({
+          tagName: `${asset.nameOrTag}.${eventType}`,
+          value: typeof payload === 'object' && payload !== null
+            ? (payload as any).value ?? JSON.stringify(payload)
+            : payload,
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
       }
     } catch (error) {
-      console.error(`❌ Failed to submit event: ${error}`);
+      logError("❌ Failed to submit event", error, "simulator");
     }
   }
 
