@@ -1,0 +1,76 @@
+# =============================================================================
+# 0xSCADA Edge Docker Compose
+# Issue #30 — Containerized Edge Runtime Pattern
+# =============================================================================
+#
+# Usage:
+#   docker-compose -f docker/edge/docker-compose.yml up -d
+#
+# For resource-constrained devices, adjust limits under deploy.resources.
+
+version: "3.8"
+
+services:
+  # ---------------------------------------------------------------------------
+  # 0xSCADA Edge Runtime
+  # ---------------------------------------------------------------------------
+  scada-edge:
+    build:
+      context: ../..
+      dockerfile: docker/edge/Dockerfile
+    container_name: scada-edge
+    restart: always
+    ports:
+      - "${PORT:-5000}:5000"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=postgresql://scada:scada@db:5432/scada
+      - GATEWAY_MODE=edge
+      - LOG_LEVEL=${LOG_LEVEL:-warn}
+      - OPCUA_ENDPOINT=${OPCUA_ENDPOINT:-opc.tcp://host.docker.internal:4840}
+    depends_on:
+      db:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "${CPU_LIMIT:-1.0}"
+          memory: ${MEMORY_LIMIT:-512M}
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    networks:
+      - scada-edge
+
+  # ---------------------------------------------------------------------------
+  # PostgreSQL (lightweight edge database)
+  # ---------------------------------------------------------------------------
+  db:
+    image: postgres:16-alpine
+    container_name: scada-edge-db
+    restart: always
+    environment:
+      POSTGRES_DB: scada
+      POSTGRES_USER: scada
+      POSTGRES_PASSWORD: scada
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U scada"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks:
+      - scada-edge
+
+networks:
+  scada-edge:
+    driver: bridge
+
+volumes:
+  pgdata:
