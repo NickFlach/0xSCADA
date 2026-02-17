@@ -1,0 +1,430 @@
+name: Bounty Management
+
+on:
+  issues:
+    types: [labeled, unlabeled]
+  issue_comment:
+    types: [created]
+  pull_request:
+    types: [closed]
+
+permissions:
+  issues: write
+  pull-requests: write
+  contents: read
+
+jobs:
+  # ═══════════════════════════════════════════════════════════════════
+  # Handle /claim commands on bounty issues
+  # ═══════════════════════════════════════════════════════════════════
+  handle-claim:
+    name: Process Bounty Claim
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'issue_comment' &&
+      github.event.action == 'created' &&
+      startsWith(github.event.comment.body, '/claim') &&
+      contains(github.event.issue.labels.*.name, 'bounty:')
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Parse claim comment
+        id: parse
+        run: |
+          # Extract wallet address, timeline, and approach from comment
+          COMMENT="${{ github.event.comment.body }}"
+
+          # Extract wallet address (0x followed by 40 hex characters)
+          WALLET=$(echo "$COMMENT" | grep -oP '0x[a-fA-F0-9]{40}' | head -1)
+
+          # Extract timeline (looking for "Timeline:" or "ETA:")
+          TIMELINE=$(echo "$COMMENT" | grep -iP '(timeline|eta):\s*(.+)' | head -1)
+
+          # Extract approach (looking for "Approach:" section)
+          APPROACH=$(echo "$COMMENT" | sed -n '/[Aa]pproach:/,/^$/p')
+
+          echo "wallet=$WALLET" >> $GITHUB_OUTPUT
+          echo "timeline=$TIMELINE" >> $GITHUB_OUTPUT
+          echo "has_approach=$([[ -n "$APPROACH" ]] && echo "true" || echo "false")" >> $GITHUB_OUTPUT
+
+          # Check if this is an agent claim
+          IS_AGENT=$(echo "$COMMENT" | grep -i '/agent-claim' && echo "true" || echo "false")
+          echo "is_agent=$IS_AGENT" >> $GITHUB_OUTPUT
+
+      - name: Validate claim
+        id: validate
+        run: |
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          WALLET="${{ steps.parse.outputs.wallet }}"
+          IS_AGENT="${{ steps.parse.outputs.is_agent }}"
+
+          # Check if wallet address is provided
+          if [ -z "$WALLET" ]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=No valid wallet address found" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if issue is already claimed
+          if [[ "${{ contains(github.event.issue.labels.*.name, 'bounty:claimed') }}" == "true" ]]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=Bounty already claimed" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if it's an agent claim on a non-agent-friendly bounty
+          if [ "$IS_AGENT" == "true" ] && [[ "${{ contains(github.event.issue.labels.*.name, 'ai-agent-friendly') }}" == "false" ]]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=This bounty is not marked as AI agent-friendly" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          # Check if medium+ bounty has approach
+          TIER=$(echo "${{ join(github.event.issue.labels.*.name, ' ') }}" | grep -oP 'bounty:(medium|large|xl)')
+          if [ -n "$TIER" ] && [ "${{ steps.parse.outputs.has_approach }}" != "true" ]; then
+            echo "valid=false" >> $GITHUB_OUTPUT
+            echo "error=Medium+ bounties require an approach/plan in the claim" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "valid=true" >> $GITHUB_OUTPUT
+
+      - name: Register claim on smart contract
+        if: steps.validate.outputs.valid == 'true'
+        run: |
+          # Call BountyPayment.claimBounty() on the smart contract
+          npx hardhat run scripts/claim-bounty.ts \
+            --issue-number ${{ github.event.issue.number }} \
+            --claimant ${{ steps.parse.outputs.wallet }} \
+            --network ${{ secrets.BOUNTY_NETWORK }}
+        env:
+          BOUNTY_CONTRACT_ADDRESS: ${{ secrets.BOUNTY_CONTRACT_ADDRESS }}
+          BOUNTY_PRIVATE_KEY: ${{ secrets.BOUNTY_PRIVATE_KEY }}
+          RPC_URL: ${{ secrets.BOUNTY_RPC_URL }}
+
+      - name: Assign issue and add labels
+        if: steps.validate.outputs.valid == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Add claimed label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: ['bounty:claimed']
+            });
+
+            // Assign to commenter
+            await github.rest.issues.addAssignees({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              assignees: [context.payload.comment.user.login]
+            });
+
+            // Post confirmation comment
+            const expiryDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `✅ **Bounty Claimed!**
+
+            @${{ github.event.comment.user.login }} this bounty is now assigned to you.
+
+            **Wallet**: \`${{ steps.parse.outputs.wallet }}\`
+            **Timeline**: ${{ steps.parse.outputs.timeline }}
+            **Expires**: ${expiryDate.toISOString().split('T')[0]} (14 days)
+
+            Please submit a PR referencing this issue within 14 days. If no significant progress is made, the claim will expire and become available for others.
+
+            Good luck! 🚀`
+            });
+
+      - name: Post error message
+        if: steps.validate.outputs.valid == 'false'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: `❌ **Claim Error**
+
+            ${{ steps.validate.outputs.error }}
+
+            Please see [CONTRIBUTING.md](../../CONTRIBUTING.md#gitcoin-bounties) for claim requirements.`
+            });
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Process payment when PR is merged
+  # ═══════════════════════════════════════════════════════════════════
+  handle-payment:
+    name: Process Bounty Payment
+    runs-on: ubuntu-latest
+    if: |
+      github.event_name == 'pull_request' &&
+      github.event.action == 'closed' &&
+      github.event.pull_request.merged == true
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Extract bounty issue from PR
+        id: extract
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const prBody = context.payload.pull_request.body || '';
+            const issueMatch = prBody.match(/(?:close[sd]?|fix(?:e[sd])?|resolve[sd]?)\s+#(\d+)/i);
+
+            if (!issueMatch) {
+              console.log('No issue reference found in PR body');
+              return;
+            }
+
+            const issueNumber = issueMatch[1];
+
+            // Fetch the issue to check if it's a bounty
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            const isBounty = issue.data.labels.some(label => label.name.startsWith('bounty:'));
+
+            if (!isBounty) {
+              console.log('Referenced issue is not a bounty');
+              return;
+            }
+
+            // Extract wallet from issue comments
+            const comments = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            const claimComment = comments.data.find(comment =>
+              comment.body.includes('/claim') && comment.user.login === context.payload.pull_request.user.login
+            );
+
+            if (!claimComment) {
+              console.log('No claim comment found from PR author');
+              core.setFailed('Contributor must claim bounty before submitting PR');
+              return;
+            }
+
+            const walletMatch = claimComment.body.match(/0x[a-fA-F0-9]{40}/);
+            if (!walletMatch) {
+              core.setFailed('No wallet address found in claim');
+              return;
+            }
+
+            core.setOutput('issue_number', issueNumber);
+            core.setOutput('wallet', walletMatch[0]);
+            core.setOutput('has_bounty', 'true');
+
+      - name: Execute payment on smart contract
+        if: steps.extract.outputs.has_bounty == 'true'
+        run: |
+          # Call BountyPayment.payBounty() on the smart contract
+          npx hardhat run scripts/pay-bounty.ts \
+            --issue-number ${{ steps.extract.outputs.issue_number }} \
+            --pr-number ${{ github.event.pull_request.number }} \
+            --recipient ${{ steps.extract.outputs.wallet }} \
+            --network ${{ secrets.BOUNTY_NETWORK }}
+        env:
+          BOUNTY_CONTRACT_ADDRESS: ${{ secrets.BOUNTY_CONTRACT_ADDRESS }}
+          BOUNTY_PRIVATE_KEY: ${{ secrets.BOUNTY_PRIVATE_KEY }}
+          RPC_URL: ${{ secrets.BOUNTY_RPC_URL }}
+
+      - name: Post payment confirmation
+        if: steps.extract.outputs.has_bounty == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const issueNumber = ${{ steps.extract.outputs.issue_number }};
+            const wallet = '${{ steps.extract.outputs.wallet }}';
+
+            // Get bounty amount from issue labels
+            const issue = await github.rest.issues.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber
+            });
+
+            const tierLabel = issue.data.labels.find(l => l.name.startsWith('bounty:'));
+            const tier = tierLabel ? tierLabel.name.split(':')[1] : 'unknown';
+
+            // Add bounty:paid label
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              labels: ['bounty:paid']
+            });
+
+            // Remove claimed label
+            try {
+              await github.rest.issues.removeLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issueNumber,
+                name: 'bounty:claimed'
+              });
+            } catch (e) {
+              // Label might not exist
+            }
+
+            // Close the issue
+            await github.rest.issues.update({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              state: 'closed'
+            });
+
+            // Post payment confirmation on PR
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.pull_request.number,
+              body: `🎉 **Bounty Payment Processed!**
+
+            **Issue**: #${issueNumber}
+            **Tier**: ${tier}
+            **Recipient**: \`${wallet}\`
+            **Network**: ${{ secrets.BOUNTY_NETWORK }}
+            **Transaction**: [View on Explorer](https://polygonscan.com/address/${{ secrets.BOUNTY_CONTRACT_ADDRESS }})
+
+            Payment will arrive in your wallet within 24-48 hours.
+
+            Thank you for your contribution to 0xSCADA! 🚀`
+            });
+
+            // Post on the issue as well
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issueNumber,
+              body: `✅ **Bounty Paid**
+
+            This bounty has been paid following the merge of PR #${{ github.event.pull_request.number }}.
+
+            Thank you @${{ github.event.pull_request.user.login }} for your contribution!`
+            });
+
+  # ═══════════════════════════════════════════════════════════════════
+  # Check for expired claims (runs daily)
+  # ═══════════════════════════════════════════════════════════════════
+  check-expired-claims:
+    name: Check Expired Claims
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Find expired claims
+        uses: actions/github-script@v7
+        with:
+          script: |
+            // Find all issues with bounty:claimed label
+            const issues = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              labels: 'bounty:claimed',
+              state: 'open'
+            });
+
+            const now = Date.now();
+            const fourteenDays = 14 * 24 * 60 * 60 * 1000;
+
+            for (const issue of issues.data) {
+              // Find the claim comment
+              const comments = await github.rest.issues.listComments({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number
+              });
+
+              const claimComment = comments.data.find(c => c.body.includes('✅ **Bounty Claimed!**'));
+              if (!claimComment) continue;
+
+              const claimDate = new Date(claimComment.created_at).getTime();
+
+              if (now - claimDate > fourteenDays) {
+                // Check if there's been a PR
+                const prs = await github.rest.pulls.list({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  state: 'all'
+                });
+
+                const hasPR = prs.data.some(pr =>
+                  pr.body && pr.body.includes(`#${issue.number}`)
+                );
+
+                if (!hasPR) {
+                  // Expire the claim
+                  console.log(`Expiring claim for issue #${issue.number}`);
+
+                  // Remove label and assignment
+                  await github.rest.issues.removeLabel({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    name: 'bounty:claimed'
+                  });
+
+                  if (issue.assignees.length > 0) {
+                    await github.rest.issues.removeAssignees({
+                      owner: context.repo.owner,
+                      repo: context.repo.repo,
+                      issue_number: issue.number,
+                      assignees: issue.assignees.map(a => a.login)
+                    });
+                  }
+
+                  // Post expiry notice
+                  await github.rest.issues.createComment({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    issue_number: issue.number,
+                    body: `⏰ **Claim Expired**
+
+                    This bounty claim has expired after 14 days without a PR submission.
+
+                    The bounty is now available for others to claim. If you'd like to continue working on this, please comment \`/claim\` again with your updated timeline.`
+                  });
+                }
+              }
+            }
+
+# Schedule the expiry check to run daily at midnight UTC
+on:
+  schedule:
+    - cron: '0 0 * * *'
