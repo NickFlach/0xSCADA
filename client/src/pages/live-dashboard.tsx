@@ -1,97 +1,16 @@
 /**
  * [12.4] Real-Time Dashboard
  * 
- * Live dashboard connecting to WebSocket for tag data, alarm status,
- * gateway health, and recent events.
+ * Live dashboard connecting to /ws/tags WebSocket for actual gateway tag data,
+ * alarm status, pipeline health, and recent events.
+ * 
+ * Uses the useTagStream hook for WebSocket connection management.
+ * Closes #206
  */
 
-import React, { useEffect, useState, useCallback, useRef } from 'react';
-
-// --- Types ---
-
-interface TagValue {
-  tagName: string;
-  value: number | string | boolean;
-  quality: 'good' | 'bad' | 'uncertain';
-  timestamp: string;
-}
-
-interface AlarmEvent {
-  id: string;
-  name: string;
-  severity: 'critical' | 'high' | 'medium' | 'low' | 'info';
-  state: 'active' | 'acknowledged' | 'cleared';
-  tagValue?: number;
-  triggeredAt: string;
-}
-
-interface PipelineHealth {
-  status: 'healthy' | 'degraded' | 'unhealthy';
-  uptime: number;
-  eventsProcessed: number;
-  eventsDropped: number;
-  backpressureActive: boolean;
-}
-
-interface GatewayStatus {
-  connected: boolean;
-  tagCount: number;
-  lastUpdate: string;
-}
-
-// --- Hooks ---
-
-function useWebSocket(url: string) {
-  const wsRef = useRef<WebSocket | null>(null);
-  const [connected, setConnected] = useState(false);
-  const [tags, setTags] = useState<Map<string, TagValue>>(new Map());
-  const [alarms, setAlarms] = useState<AlarmEvent[]>([]);
-  const [health, setHealth] = useState<PipelineHealth | null>(null);
-  const [events, setEvents] = useState<TagValue[]>([]);
-
-  const connect = useCallback(() => {
-    const ws = new WebSocket(url);
-    wsRef.current = ws;
-
-    ws.onopen = () => setConnected(true);
-    ws.onclose = () => {
-      setConnected(false);
-      setTimeout(connect, 3000); // Auto-reconnect
-    };
-
-    ws.onmessage = (msg) => {
-      try {
-        const data = JSON.parse(msg.data);
-        switch (data.event) {
-          case 'tag:update':
-            setTags((prev) => {
-              const next = new Map(prev);
-              next.set(data.payload.tagName, data.payload);
-              return next;
-            });
-            setEvents((prev) => [data.payload, ...prev].slice(0, 50));
-            break;
-          case 'alarm:update':
-            setAlarms((prev) => {
-              const filtered = prev.filter((a) => a.id !== data.payload.id);
-              return [data.payload, ...filtered].slice(0, 100);
-            });
-            break;
-          case 'pipeline:health':
-            setHealth(data.payload);
-            break;
-        }
-      } catch { /* ignore parse errors */ }
-    };
-  }, [url]);
-
-  useEffect(() => {
-    connect();
-    return () => wsRef.current?.close();
-  }, [connect]);
-
-  return { connected, tags, alarms, health, events };
-}
+import React from 'react';
+import { useTagStream } from '@/hooks/use-tag-stream';
+import type { TagValue, AlarmEvent, PipelineHealth } from '@/hooks/use-tag-stream';
 
 // --- Components ---
 
@@ -200,8 +119,7 @@ const HealthPanel: React.FC<{ health: PipelineHealth | null; connected: boolean 
 // --- Main Dashboard ---
 
 const LiveDashboard: React.FC = () => {
-  const wsUrl = `ws://${window.location.hostname}:${window.location.port || '3000'}/ws`;
-  const { connected, tags, alarms, health, events } = useWebSocket(wsUrl);
+  const { connected, tagValues: tags, alarms, health, recentEvents: events } = useTagStream();
 
   return (
     <div style={{ padding: 24, backgroundColor: '#0a0a0a', color: '#e5e5e5', minHeight: '100vh' }}>
