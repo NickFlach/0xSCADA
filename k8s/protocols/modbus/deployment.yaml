@@ -1,0 +1,58 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: modbus-driver
+  namespace: oxscada-protocols
+  labels:
+    app.kubernetes.io/name: modbus-driver
+    app.kubernetes.io/component: protocol
+    app.kubernetes.io/part-of: oxscada
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: modbus-driver
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: modbus-driver
+        app.kubernetes.io/component: protocol
+        app.kubernetes.io/part-of: oxscada
+    spec:
+      serviceAccountName: oxscada-protocol
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: modbus-driver
+          image: ghcr.io/nickflach/oxscada-modbus-driver:latest
+          ports:
+            - containerPort: 5020
+              name: http
+          envFrom:
+            - configMapRef:
+                name: modbus-config
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+              oxscada.io/serial-port: "1"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 5020
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 5020
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
