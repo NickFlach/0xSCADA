@@ -35,6 +35,7 @@ import { assetRoutes } from "./routes/assets";
 import { alarmRoutes } from "./routes/alarms";
 import pidRoutes from "./routes/pid";
 import { eventStreamServer } from "./websocket";
+import { tagStreamServer } from "./websocket/tag-stream";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -69,6 +70,7 @@ export async function registerRoutes(
   // WEBSOCKET EVENT STREAM
   // ==========================================================================
   eventStreamServer.initialize(httpServer, "/ws/events");
+  tagStreamServer.initialize(httpServer, "/ws/tags");
 
   // WebSocket metrics endpoint
   app.get("/api/ws/metrics", (req, res) => {
@@ -77,6 +79,11 @@ export async function registerRoutes(
 
   app.get("/api/ws/clients", (req, res) => {
     res.json(eventStreamServer.getConnectedClients());
+  });
+
+  // Tag stream metrics
+  app.get("/api/ws/tags/metrics", (req, res) => {
+    res.json(tagStreamServer.getMetrics());
   });
 
   // ==========================================================================

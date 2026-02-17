@@ -1,6 +1,7 @@
 import { storage } from "./storage";
 import type { InsertSite, InsertAsset, InsertEventAnchor } from "@shared/schema";
 import { log, logError, logWarn } from "./logger";
+import { tagStreamServer } from "./websocket/tag-stream";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -175,6 +176,16 @@ class FieldSimulator {
 
       if (response.ok) {
         log(`📡 [${asset.nameOrTag}] ${eventType} → Anchored`, "simulator");
+        
+        // Broadcast tag update to live dashboard via WebSocket
+        tagStreamServer.broadcastTagUpdate({
+          tagName: `${asset.nameOrTag}.${eventType}`,
+          value: typeof payload === 'object' && payload !== null
+            ? (payload as any).value ?? JSON.stringify(payload)
+            : payload,
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
       }
     } catch (error) {
       logError("❌ Failed to submit event", error, "simulator");
