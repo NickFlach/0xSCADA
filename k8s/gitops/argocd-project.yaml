@@ -1,0 +1,39 @@
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: oxscada
+  namespace: argocd
+spec:
+  description: 0xSCADA Industrial Blockchain Platform
+  sourceRepos:
+    - https://github.com/NickFlach/0xSCADA.git
+  destinations:
+    - namespace: oxscada
+      server: https://kubernetes.default.svc
+    - namespace: oxscada-protocols
+      server: https://kubernetes.default.svc
+    - namespace: oxscada-blockchain
+      server: https://kubernetes.default.svc
+    - namespace: oxscada-observability
+      server: https://kubernetes.default.svc
+  clusterResourceWhitelist:
+    - group: ""
+      kind: Namespace
+    - group: networking.k8s.io
+      kind: NetworkPolicy
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRole
+    - group: rbac.authorization.k8s.io
+      kind: ClusterRoleBinding
+  namespaceResourceBlacklist:
+    - group: ""
+      kind: ResourceQuota
+    - group: ""
+      kind: LimitRange
+  roles:
+    - name: admin
+      description: Full access to oxscada project
+      policies:
+        - p, proj:oxscada:admin, applications, *, oxscada/*, allow
+      groups:
+        - oxscada-admins

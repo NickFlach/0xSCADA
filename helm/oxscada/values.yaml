@@ -1,0 +1,113 @@
+# Default values for 0xSCADA Helm chart
+global:
+  imageRegistry: ghcr.io/nickflach
+  imagePullPolicy: IfNotPresent
+
+server:
+  replicaCount: 2
+  image:
+    repository: oxscada-server
+    tag: latest
+  port: 5000
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 512Mi
+
+client:
+  replicaCount: 2
+  image:
+    repository: oxscada-client
+    tag: latest
+  port: 80
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+gateway:
+  replicaCount: 2
+  image:
+    repository: oxscada-gateway
+    tag: latest
+  port: 8080
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+postgresql:
+  enabled: true
+  auth:
+    username: oxscada
+    database: oxscada
+    existingSecret: postgresql-credentials
+  primary:
+    persistence:
+      size: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: oxscada.example.com
+  tls:
+    enabled: true
+    secretName: oxscada-tls
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+
+blockchain:
+  enabled: true
+  validators:
+    replicaCount: 3
+    image:
+      repository: oxscada-validator
+      tag: latest
+    persistence:
+      size: 20Gi
+
+protocols:
+  modbus:
+    enabled: true
+    image:
+      repository: oxscada-modbus-driver
+      tag: latest
+  opcua:
+    enabled: true
+    image:
+      repository: oxscada-opcua-driver
+      tag: latest
+
+observability:
+  enabled: true
+  prometheus:
+    enabled: true
+  grafana:
+    enabled: true
+  loki:
+    enabled: true
+
+networkPolicies:
+  enabled: true
+
+securityContext:
+  runAsNonRoot: true
+  runAsUser: 1000
+  fsGroup: 1000
+  seccompProfile:
+    type: RuntimeDefault
+
+containerSecurityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: ["ALL"]
