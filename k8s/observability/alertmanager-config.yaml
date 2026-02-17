@@ -1,0 +1,71 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: alertmanager-config
+  namespace: oxscada-observability
+  labels:
+    app.kubernetes.io/name: alertmanager
+    app.kubernetes.io/part-of: oxscada
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'namespace']
+      group_wait: 10s
+      group_interval: 10s
+      repeat_interval: 1h
+      receiver: 'default'
+      routes:
+        - match:
+            severity: critical
+          receiver: 'critical'
+          repeat_interval: 5m
+        - match:
+            severity: warning
+          receiver: 'warning'
+    receivers:
+      - name: 'default'
+        webhook_configs:
+          - url: 'http://oxscada-server.oxscada.svc.cluster.local:5000/api/alerts'
+      - name: 'critical'
+        webhook_configs:
+          - url: 'http://oxscada-server.oxscada.svc.cluster.local:5000/api/alerts'
+            send_resolved: true
+      - name: 'warning'
+        webhook_configs:
+          - url: 'http://oxscada-server.oxscada.svc.cluster.local:5000/api/alerts'
+            send_resolved: true
+
+  alerts.yml: |
+    groups:
+      - name: oxscada
+        rules:
+          - alert: ServerDown
+            expr: up{job="oxscada-server"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "0xSCADA server is down"
+          - alert: HighMemoryUsage
+            expr: container_memory_usage_bytes / container_spec_memory_limit_bytes > 0.9
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Container memory usage above 90%"
+          - alert: ProtocolDriverDown
+            expr: up{job="oxscada-protocols"} == 0
+            for: 30s
+            labels:
+              severity: critical
+            annotations:
+              summary: "Protocol driver is down"
+          - alert: DatabaseConnectionFailure
+            expr: pg_up == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "PostgreSQL database is unreachable"

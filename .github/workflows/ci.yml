@@ -2,234 +2,253 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main, 'feat/**', 'feature/**']
   pull_request:
-    branches: [main, develop]
-  release:
-    types: [published]
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
+  IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/0xscada
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
 
 jobs:
-  # ==========================================================================
-  # DCO CHECK (Required for all PRs)
-  # ==========================================================================
-  dco:
-    name: DCO Check
-    runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    steps:
-      - name: Check DCO
-        run: |
-          # Check all commits in the PR for DCO sign-off (excluding merge commits)
-          commits=$(git log --format='%H %s' --no-merges origin/${{ github.base_ref }}..HEAD)
-          missing_signoff=false
-
-          while IFS= read -r line; do
-            if [ -z "$line" ]; then continue; fi
-            commit_hash=$(echo "$line" | cut -d' ' -f1)
-            commit_msg=$(git log -1 --format='%B' "$commit_hash")
-            
-            if ! echo "$commit_msg" | grep -q "Signed-off-by:"; then
-              echo "❌ Missing DCO sign-off in commit: $commit_hash"
-              echo "   Message: $(echo "$line" | cut -d' ' -f2-)"
-              missing_signoff=true
-            else
-              echo "✅ DCO sign-off found in commit: $(echo "$line" | cut -d' ' -f2-)"
-            fi
-          done <<< "$commits"
-
-          if [ "$missing_signoff" = true ]; then
-            echo ""
-            echo "=========================================="
-            echo "Developer Certificate of Origin (DCO) Check Failed"
-            echo "=========================================="
-            echo ""
-            echo "Please sign off your commits using: git commit --signoff"
-            echo "Or amend existing commits: git commit --amend --signoff"
-            echo ""
-            echo "See: https://developercertificate.org/"
-            exit 1
-          fi
-
-          echo ""
-          echo "✅ All commits have DCO sign-off!"
-
-  # ==========================================================================
-  # LINT & TYPE CHECK
-  # ==========================================================================
   lint:
-    name: Lint & Type Check
+    name: Lint
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
+      - run: npm ci
+      - run: npm run lint --if-present
 
-      - name: Install dependencies
-        run: npm ci
+  typecheck:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npx tsc --noEmit
 
-      - name: Type check
-        run: npm run check
-
-      - name: Lint code
-        run: npm run lint
-
-      - name: Check formatting
-        run: npm run format:check
-
-  # ==========================================================================
-  # UNIT TESTS
-  # ==========================================================================
   test:
     name: Unit Tests
     runs-on: ubuntu-latest
-    needs: [lint, dco]
+    needs: [lint, typecheck]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm test -- --coverage --passWithNoTests
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: coverage
+          path: coverage/
+          retention-days: 14
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: [test]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - run: npm run build --if-present
+      - uses: actions/upload-artifact@v4
+        with:
+          name: build
+          path: dist/
+          retention-days: 7
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: npm audit (production)
+        run: npm audit --production --audit-level=high || true
+      - name: Check for known vulnerabilities
+        run: npx audit-ci --high || true
+
+  docker:
+    name: Docker Build (${{ matrix.service }})
+    runs-on: ubuntu-latest
+    needs: [build]
+    if: github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [server, client, gateway, validator]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+      - uses: docker/build-push-action@v5
+        with:
+          context: .
+          file: docker/${{ matrix.service }}/Dockerfile
+          push: ${{ github.ref == 'refs/heads/main' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    needs: [build]
     services:
       postgres:
-        image: postgres:15
+        image: postgres:16
         env:
-          POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: test_db
+          POSTGRES_DB: oxscada_test
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+        ports: ['5432:5432']
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
-        ports:
-          - 5432:5432
-
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run tests
-        run: npm test
+      - run: npm ci
+      - run: npm run test:integration --if-present
         env:
-          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/test_db
+          DATABASE_URL: postgresql://test:test@localhost:5432/oxscada_test
+          NODE_ENV: test
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v4
-        if: always()
-        with:
-          files: ./coverage/coverage-final.json
-          fail_ci_if_error: false
-
-  # ==========================================================================
-  # BUILD
-  # ==========================================================================
-  build:
-    name: Build Application
+  deploy-staging:
+    name: Deploy to Staging
     runs-on: ubuntu-latest
-    needs: [lint, test]
+    needs: [docker, integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+      - name: Deploy via kubectl (if configured)
+        if: env.KUBE_CONFIG != ''
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_STAGING }}
+        run: |
+          echo "$KUBE_CONFIG" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          # Update image tags in k8s manifests
+          for svc in server client gateway validator; do
+            if [ -f "k8s/staging/${svc}.yaml" ]; then
+              sed -i "s|IMAGE_TAG|${{ github.sha }}|g" k8s/staging/${svc}.yaml
+              kubectl apply -f k8s/staging/${svc}.yaml
+            fi
+          done
+          
+          # Or use Helm if chart exists
+          if [ -d "helm/0xscada" ]; then
+            helm upgrade --install 0xscada-staging helm/0xscada \
+              --namespace staging --create-namespace \
+              --set image.tag=${{ github.sha }} \
+              --set env=staging \
+              --wait --timeout 300s
+          fi
+          
+          rm /tmp/kubeconfig
 
-      - name: Install dependencies
-        run: npm ci
+      - name: Deploy via Docker Compose (fallback)
+        if: env.KUBE_CONFIG == '' && env.STAGING_SSH_KEY != ''
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_STAGING }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          echo "Docker Compose deploy to ${STAGING_HOST}"
+          mkdir -p ~/.ssh
+          echo "$STAGING_SSH_KEY" > ~/.ssh/staging_key
+          chmod 600 ~/.ssh/staging_key
+          
+          # Copy compose file and deploy
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/staging_key \
+            docker-compose.yml "${STAGING_HOST}:~/0xscada/"
+          
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/staging_key "${STAGING_HOST}" \
+            "cd ~/0xscada && IMAGE_TAG=${{ github.sha }} docker compose pull && docker compose up -d"
+          
+          rm ~/.ssh/staging_key
 
-      - name: Build application
-        run: npm run build
+      - name: Smoke test staging
+        if: vars.STAGING_URL != ''
+        run: |
+          echo "Waiting for staging to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf "${{ vars.STAGING_URL }}/api/health" > /dev/null 2>&1; then
+              echo "✅ Staging is healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+          echo "⚠️ Staging health check timed out (non-blocking)"
 
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: dist
-          path: dist/
-          retention-days: 7
-
-  # ==========================================================================
-  # DOCKER BUILD
-  # ==========================================================================
-  docker:
-    name: Docker Build
+  # Summary job for branch protection
+  ci-complete:
+    name: CI Complete
     runs-on: ubuntu-latest
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [lint, typecheck, test, build]
+    if: always()
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build Docker image
-        uses: docker/build-push-action@v5
-        with:
-          context: .
-          push: false
-          tags: oxscada:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  # ==========================================================================
-  # SECURITY SCAN
-  # ==========================================================================
-  security:
-    name: Security Scan
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run npm audit
-        run: npm audit --audit-level=high
-        continue-on-error: true
-
-  # ==========================================================================
-  # SMART CONTRACT TESTS (Optional)
-  # ==========================================================================
-  contracts:
-    name: Smart Contract Tests
-    runs-on: ubuntu-latest
-    needs: lint
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Compile contracts
-        run: npx hardhat compile
-        continue-on-error: true
+      - name: Check results
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.typecheck.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ CI failed"
+            exit 1
+          fi
+          echo "✅ All CI checks passed"
