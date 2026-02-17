@@ -60,6 +60,7 @@ vi.mock("../../src/output.js", () => ({
   outputSuccess: vi.fn(),
   outputWarning: vi.fn(),
   outputInfo: vi.fn(),
+  isStructuredOutput: vi.fn(() => false),
   colors: {
     success: (t: string) => t,
     error: (t: string) => t,

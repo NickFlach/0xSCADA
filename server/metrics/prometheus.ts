@@ -115,6 +115,10 @@ class Gauge {
     this.set(Date.now() / 1000, labels);
   }
 
+  reset(): void {
+    this.values.clear();
+  }
+
   collect(): { labels: MetricLabels; value: number }[] {
     const result: { labels: MetricLabels; value: number }[] = [];
     for (const [key, value] of this.values) {
@@ -176,6 +180,12 @@ class Histogram {
     // Update sum and count
     this.sums.set(key, (this.sums.get(key) || 0) + value);
     this.counts.set(key, (this.counts.get(key) || 0) + 1);
+  }
+
+  reset(): void {
+    this.buckets.clear();
+    this.sums.clear();
+    this.counts.clear();
   }
 
   collect(): { 
@@ -313,14 +323,18 @@ class PrometheusRegistry {
   }
 
   /**
-   * Reset all metrics
+   * Reset all metrics (clears values but keeps metrics registered)
    */
   reset(): void {
     for (const counter of this.counters.values()) {
       counter.reset();
     }
-    this.gauges.clear();
-    this.histograms.clear();
+    for (const gauge of this.gauges.values()) {
+      gauge.reset();
+    }
+    for (const histogram of this.histograms.values()) {
+      histogram.reset();
+    }
   }
 }
 
