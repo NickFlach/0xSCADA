@@ -1,0 +1,70 @@
+{{- if .Values.blockchain.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain
+  labels:
+    app.kubernetes.io/component: blockchain
+spec:
+  replicas: {{ .Values.blockchain.replicaCount }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: blockchain
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: blockchain
+    spec:
+      containers:
+        - name: blockchain
+          image: "{{ .Values.global.imageRegistry }}/blockchain:{{ .Values.blockchain.image.tag }}"
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: rpc
+              containerPort: {{ .Values.blockchain.ports.rpc }}
+            - name: ws
+              containerPort: {{ .Values.blockchain.ports.ws }}
+          resources:
+            {{- toYaml .Values.blockchain.resources | nindent 12 }}
+          {{- if .Values.blockchain.persistence.enabled }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          {{- end }}
+      {{- if .Values.blockchain.persistence.enabled }}
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxscada-full.fullname" . }}-blockchain-data
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain
+spec:
+  selector:
+    app.kubernetes.io/component: blockchain
+  ports:
+    - name: rpc
+      port: {{ .Values.blockchain.ports.rpc }}
+      targetPort: {{ .Values.blockchain.ports.rpc }}
+    - name: ws
+      port: {{ .Values.blockchain.ports.ws }}
+      targetPort: {{ .Values.blockchain.ports.ws }}
+{{- if .Values.blockchain.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain-data
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- if .Values.blockchain.persistence.storageClass }}
+  storageClassName: {{ .Values.blockchain.persistence.storageClass }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.blockchain.persistence.size }}
+{{- end }}
+{{- end }}
