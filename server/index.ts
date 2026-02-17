@@ -4,6 +4,7 @@ import { serveStatic } from "./static";
 import { createServer } from "http";
 import { securityHeaders, rateLimit } from "./middleware/security";
 import { log, logError } from "./logger";
+import { healthRouter, healthManager } from "./health";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -14,6 +15,9 @@ const httpServer = createServer(app);
 // Apply security headers and rate limiting
 app.use(securityHeaders);
 app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
+
+// Health/readiness probes — mounted before auth so k8s probes work unauthenticated
+app.use(healthRouter);
 
 declare module "http" {
   interface IncomingMessage {
@@ -103,6 +107,9 @@ app.use((req, res, next) => {
       
       const { fieldSimulator } = await import("./simulator");
       fieldSimulator.start();
+
+      // Start periodic health monitoring (every 30 s)
+      healthManager.startPeriodicCheck(30_000);
     },
   );
 })();
