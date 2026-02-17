@@ -2,9 +2,22 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
+import { securityHeaders, rateLimit } from "./middleware/security";
+import { log, logError } from "./logger";
+import { healthRouter, healthManager } from "./health";
+
+// Re-export log for backward compatibility
+export { log } from "./logger";
 
 const app = express();
 const httpServer = createServer(app);
+
+// Apply security headers and rate limiting
+app.use(securityHeaders);
+app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
+
+// Health/readiness probes — mounted before auth so k8s probes work unauthenticated
+app.use(healthRouter);
 
 declare module "http" {
   interface IncomingMessage {
@@ -21,17 +34,6 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
-
-export function log(message: string, source = "express") {
-  const formattedTime = new Date().toLocaleTimeString("en-US", {
-    hour: "numeric",
-    minute: "2-digit",
-    second: "2-digit",
-    hour12: true,
-  });
-
-  console.log(`${formattedTime} [${source}] ${message}`);
-}
 
 app.use((req, res, next) => {
   const start = Date.now();
@@ -71,10 +73,12 @@ app.use((req, res, next) => {
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
-    const message = err.message || "Internal Server Error";
+    const message = process.env.NODE_ENV === "production" && status >= 500
+      ? "Internal Server Error"
+      : err.message || "Internal Server Error";
 
     res.status(status).json({ message });
-    throw err;
+    logError("Unhandled error", err);
   });
 
   // importantly only setup vite in development and after
@@ -103,6 +107,9 @@ app.use((req, res, next) => {
       
       const { fieldSimulator } = await import("./simulator");
       fieldSimulator.start();
+
+      // Start periodic health monitoring (every 30 s)
+      healthManager.startPeriodicCheck(30_000);
     },
   );
 })();
