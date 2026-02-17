@@ -1564,3 +1564,220 @@ export const insertCertificationValidityCheckSchema = createInsertSchema(certifi
 
 export type InsertCertificationValidityCheck = z.infer<typeof insertCertificationValidityCheckSchema>;
 export type CertificationValidityCheck = typeof certificationValidityChecks.$inferSelect;
+
+// =============================================================================
+// RBAC ROLES & PERMISSIONS (ADR-0012 Wave 1 — Issue #205)
+// =============================================================================
+
+export const roles = pgTable("roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull().unique(),
+  description: text("description"),
+  /** Ordered priority — lower = more privileged */
+  priority: integer("priority").notNull().default(100),
+  /** JSON array of permission strings e.g. ["sites:read","events:write"] */
+  permissions: jsonb("permissions").notNull().default(sql`'[]'::jsonb`),
+  /** If true, role is system-defined and cannot be deleted */
+  system: boolean("system").notNull().default(false),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertRoleSchema = createInsertSchema(roles).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertRole = z.infer<typeof insertRoleSchema>;
+export type Role = typeof roles.$inferSelect;
+
+export const userRoles = pgTable("user_roles", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  userId: varchar("user_id").notNull().references(() => users.id),
+  roleId: varchar("role_id").notNull().references(() => roles.id),
+  /** Optional site-scoping — null means global */
+  siteId: varchar("site_id").references(() => sites.id),
+  grantedBy: varchar("granted_by").references(() => users.id),
+  grantedAt: timestamp("granted_at").notNull().defaultNow(),
+  expiresAt: timestamp("expires_at"),
+});
+
+export const insertUserRoleSchema = createInsertSchema(userRoles).omit({ id: true, grantedAt: true });
+export type InsertUserRole = z.infer<typeof insertUserRoleSchema>;
+export type UserRole = typeof userRoles.$inferSelect;
+
+// =============================================================================
+// AUDIT LOGS (ADR-0012 Wave 1 — Issue #205)
+// =============================================================================
+
+export const auditLogs = pgTable("audit_logs", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  /** Actor: user id, agent id, or "SYSTEM" */
+  actorId: text("actor_id").notNull(),
+  actorType: text("actor_type").notNull().default("user"), // user | agent | system | api_key
+  /** What happened */
+  action: text("action").notNull(), // e.g. "site.create", "alarm.acknowledge", "user.login"
+  /** Target resource type and id */
+  resourceType: text("resource_type"),
+  resourceId: text("resource_id"),
+  /** Before/after snapshots for change tracking */
+  before: jsonb("before"),
+  after: jsonb("after"),
+  /** Additional context */
+  metadata: jsonb("metadata").default(sql`'{}'::jsonb`),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  /** Request ID for correlation */
+  requestId: text("request_id"),
+  siteId: varchar("site_id").references(() => sites.id),
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+});
+
+export const insertAuditLogSchema = createInsertSchema(auditLogs).omit({ id: true, timestamp: true });
+export type InsertAuditLog = z.infer<typeof insertAuditLogSchema>;
+export type AuditLog = typeof auditLogs.$inferSelect;
+
+// =============================================================================
+// RECIPES (ISA-88 Batch Recipes — ADR-0012 Wave 1 — Issue #205)
+// =============================================================================
+
+export const recipes = pgTable("recipes", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  name: text("name").notNull(),
+  version: integer("version").notNull().default(1),
+  description: text("description"),
+  /** Recipe type: master | control | site */
+  recipeType: text("recipe_type").notNull().default("master"),
+  /** Target unit type this recipe runs on */
+  unitTypeId: varchar("unit_type_id").references(() => unitTypes.id),
+  siteId: varchar("site_id").references(() => sites.id),
+  /** ISA-88 procedure model as JSON */
+  procedure: jsonb("procedure").notNull().default(sql`'{}'::jsonb`),
+  /** Recipe parameters with defaults */
+  parameters: jsonb("parameters").notNull().default(sql`'[]'::jsonb`),
+  /** Approval status */
+  status: text("status").notNull().default("draft"), // draft | pending_review | approved | obsolete
+  approvedBy: varchar("approved_by").references(() => users.id),
+  approvedAt: timestamp("approved_at"),
+  /** Blockchain anchoring */
+  contentHash: text("content_hash"),
+  txHash: text("tx_hash"),
+  createdBy: varchar("created_by").references(() => users.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertRecipeSchema = createInsertSchema(recipes).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertRecipe = z.infer<typeof insertRecipeSchema>;
+export type Recipe = typeof recipes.$inferSelect;
+
+export const recipeBatches = pgTable("recipe_batches", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  recipeId: varchar("recipe_id").notNull().references(() => recipes.id),
+  batchNumber: text("batch_number").notNull(),
+  unitInstanceId: varchar("unit_instance_id").references(() => unitInstances.id),
+  /** Runtime parameter values (overrides from recipe defaults) */
+  parameterValues: jsonb("parameter_values").notNull().default(sql`'{}'::jsonb`),
+  /** Execution state */
+  state: text("state").notNull().default("idle"), // idle | running | paused | held | complete | aborted
+  currentPhase: text("current_phase"),
+  startedAt: timestamp("started_at"),
+  completedAt: timestamp("completed_at"),
+  startedBy: varchar("started_by").references(() => users.id),
+  siteId: varchar("site_id").references(() => sites.id),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertRecipeBatchSchema = createInsertSchema(recipeBatches).omit({ id: true, createdAt: true });
+export type InsertRecipeBatch = z.infer<typeof insertRecipeBatchSchema>;
+export type RecipeBatch = typeof recipeBatches.$inferSelect;
+
+// =============================================================================
+// ALARM MANAGEMENT (ADR-0012 Wave 1 — Issue #205)
+// =============================================================================
+
+export const alarmDefinitions = pgTable("alarm_definitions", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tag: text("tag").notNull(),
+  assetId: varchar("asset_id").references(() => assets.id),
+  siteId: varchar("site_id").references(() => sites.id),
+  /** ISA-18.2 priority 1-4 (1=critical, 4=low) */
+  priority: integer("priority").notNull().default(3),
+  /** Alarm class: process | safety | equipment | diagnostic */
+  alarmClass: text("alarm_class").notNull().default("process"),
+  description: text("description"),
+  /** Condition expression (e.g. "value > 100") */
+  condition: text("condition").notNull(),
+  /** Setpoints */
+  setpointHigh: text("setpoint_high"),
+  setpointLow: text("setpoint_low"),
+  deadband: text("deadband"),
+  /** Delay before triggering (ms) */
+  onDelayMs: integer("on_delay_ms").default(0),
+  offDelayMs: integer("off_delay_ms").default(0),
+  enabled: boolean("enabled").notNull().default(true),
+  /** Shelved until */
+  shelvedUntil: timestamp("shelved_until"),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+  updatedAt: timestamp("updated_at").notNull().defaultNow(),
+});
+
+export const insertAlarmDefinitionSchema = createInsertSchema(alarmDefinitions).omit({ id: true, createdAt: true, updatedAt: true });
+export type InsertAlarmDefinition = z.infer<typeof insertAlarmDefinitionSchema>;
+export type AlarmDefinition = typeof alarmDefinitions.$inferSelect;
+
+export const alarmEvents = pgTable("alarm_events", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  alarmDefinitionId: varchar("alarm_definition_id").notNull().references(() => alarmDefinitions.id),
+  /** ISA-18.2 state: active_unack | active_ack | cleared_unack | cleared_ack | shelved */
+  state: text("state").notNull().default("active_unack"),
+  value: text("value"),
+  message: text("message"),
+  activatedAt: timestamp("activated_at").notNull().defaultNow(),
+  acknowledgedAt: timestamp("acknowledged_at"),
+  acknowledgedBy: varchar("acknowledged_by").references(() => users.id),
+  clearedAt: timestamp("cleared_at"),
+  returnedToNormalAt: timestamp("returned_to_normal_at"),
+  siteId: varchar("site_id").references(() => sites.id),
+});
+
+export const insertAlarmEventSchema = createInsertSchema(alarmEvents).omit({ id: true });
+export type InsertAlarmEvent = z.infer<typeof insertAlarmEventSchema>;
+export type AlarmEvent = typeof alarmEvents.$inferSelect;
+
+// =============================================================================
+// HISTORIAN DATA (ADR-0012 Wave 1 — Issue #205)
+// =============================================================================
+
+export const historianTags = pgTable("historian_tags", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tag: text("tag").notNull().unique(),
+  description: text("description"),
+  assetId: varchar("asset_id").references(() => assets.id),
+  siteId: varchar("site_id").references(() => sites.id),
+  /** Data type: float | int | bool | string */
+  dataType: text("data_type").notNull().default("float"),
+  /** Engineering units (e.g. "°C", "bar", "L/min") */
+  engUnits: text("eng_units"),
+  /** Compression settings */
+  compressionDeviation: text("compression_deviation"),
+  compressionTimeout: integer("compression_timeout"),
+  /** Sampling rate hint (ms) */
+  scanRateMs: integer("scan_rate_ms").default(1000),
+  enabled: boolean("enabled").notNull().default(true),
+  createdAt: timestamp("created_at").notNull().defaultNow(),
+});
+
+export const insertHistorianTagSchema = createInsertSchema(historianTags).omit({ id: true, createdAt: true });
+export type InsertHistorianTag = z.infer<typeof insertHistorianTagSchema>;
+export type HistorianTag = typeof historianTags.$inferSelect;
+
+export const historianData = pgTable("historian_data", {
+  id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
+  tagId: varchar("tag_id").notNull().references(() => historianTags.id),
+  value: text("value").notNull(),
+  quality: integer("quality").notNull().default(192), // OPC UA Good = 192
+  timestamp: timestamp("timestamp").notNull().defaultNow(),
+  /** Batch anchor reference for blockchain proof */
+  batchId: varchar("batch_id").references(() => eventBatches.id),
+});
+
+export const insertHistorianDataSchema = createInsertSchema(historianData).omit({ id: true });
+export type InsertHistorianData = z.infer<typeof insertHistorianDataSchema>;
+export type HistorianData = typeof historianData.$inferSelect;
