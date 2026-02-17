@@ -1,0 +1,18 @@
+{{- range $name, $component := dict "server" .Values.server "client" .Values.client "gateway" .Values.gateway }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: oxscada-{{ $name }}
+  labels:
+    app.kubernetes.io/name: oxscada-{{ $name }}
+    app.kubernetes.io/part-of: oxscada
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ $component.port }}
+      targetPort: {{ $component.port }}
+      name: http
+  selector:
+    app.kubernetes.io/name: oxscada-{{ $name }}
+---
+{{- end }}
