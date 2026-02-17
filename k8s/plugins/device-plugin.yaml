@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: oxscada-io-device-plugin
+  namespace: kube-system
+  labels:
+    app.kubernetes.io/name: oxscada-io-device-plugin
+    app.kubernetes.io/part-of: oxscada
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: oxscada-io-device-plugin
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: oxscada-io-device-plugin
+    spec:
+      nodeSelector:
+        oxscada.io/role: protocol
+      tolerations:
+        - key: oxscada.io/industrial-io
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-node-critical
+      containers:
+        - name: device-plugin
+          image: ghcr.io/nickflach/oxscada-device-plugin:latest
+          securityContext:
+            privileged: true
+          volumeMounts:
+            - name: device-plugin-socket
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: dev
+              mountPath: /dev
+            - name: sys
+              mountPath: /sys
+              readOnly: true
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            # Devices to expose: serial ports and GPIO
+            - name: SERIAL_DEVICES
+              value: "/dev/ttyS*,/dev/ttyUSB*,/dev/ttyACM*"
+            - name: GPIO_CHIPS
+              value: "/dev/gpiochip*"
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 100m
+              memory: 128Mi
+      volumes:
+        - name: device-plugin-socket
+          hostPath:
+            path: /var/lib/kubelet/device-plugins
+        - name: dev
+          hostPath:
+            path: /dev
+        - name: sys
+          hostPath:
+            path: /sys
+---
+# ConfigMap for device plugin configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: oxscada-device-plugin-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    # Industrial I/O Device Plugin Configuration
+    resources:
+      - resourceName: oxscada.io/serial-port
+        devicePattern: "/dev/ttyS*,/dev/ttyUSB*,/dev/ttyACM*"
+        permissions: "rw"
+      - resourceName: oxscada.io/gpio
+        devicePattern: "/dev/gpiochip*"
+        permissions: "rw"
+      - resourceName: oxscada.io/spi
+        devicePattern: "/dev/spidev*"
+        permissions: "rw"
+      - resourceName: oxscada.io/i2c
+        devicePattern: "/dev/i2c-*"
+        permissions: "rw"
