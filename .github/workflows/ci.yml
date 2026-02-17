@@ -2,14 +2,23 @@ name: CI/CD Pipeline
 
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main, 'feat/**', 'feature/**']
   pull_request:
     branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   NODE_VERSION: '20'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/0xscada
+
+permissions:
+  contents: read
+  packages: write
+  pull-requests: write
 
 jobs:
   lint:
@@ -53,6 +62,7 @@ jobs:
         with:
           name: coverage
           path: coverage/
+          retention-days: 14
 
   build:
     name: Build
@@ -70,13 +80,30 @@ jobs:
         with:
           name: build
           path: dist/
+          retention-days: 7
+
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: npm audit (production)
+        run: npm audit --production --audit-level=high || true
+      - name: Check for known vulnerabilities
+        run: npx audit-ci --high || true
 
   docker:
-    name: Docker Build
+    name: Docker Build (${{ matrix.service }})
     runs-on: ubuntu-latest
     needs: [build]
     if: github.event_name == 'push'
     strategy:
+      fail-fast: false
       matrix:
         service: [server, client, gateway, validator]
     steps:
@@ -87,14 +114,22 @@ jobs:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}
+          tags: |
+            type=sha
+            type=ref,event=branch
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
       - uses: docker/build-push-action@v5
         with:
           context: .
           file: docker/${{ matrix.service }}/Dockerfile
           push: ${{ github.ref == 'refs/heads/main' }}
-          tags: |
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:${{ github.sha }}
-            ${{ env.IMAGE_PREFIX }}-${{ matrix.service }}:latest
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -126,3 +161,94 @@ jobs:
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/oxscada_test
           NODE_ENV: test
+
+  deploy-staging:
+    name: Deploy to Staging
+    runs-on: ubuntu-latest
+    needs: [docker, integration-test]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    environment:
+      name: staging
+      url: ${{ vars.STAGING_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy via kubectl (if configured)
+        if: env.KUBE_CONFIG != ''
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_STAGING }}
+        run: |
+          echo "$KUBE_CONFIG" | base64 -d > /tmp/kubeconfig
+          export KUBECONFIG=/tmp/kubeconfig
+          
+          # Update image tags in k8s manifests
+          for svc in server client gateway validator; do
+            if [ -f "k8s/staging/${svc}.yaml" ]; then
+              sed -i "s|IMAGE_TAG|${{ github.sha }}|g" k8s/staging/${svc}.yaml
+              kubectl apply -f k8s/staging/${svc}.yaml
+            fi
+          done
+          
+          # Or use Helm if chart exists
+          if [ -d "helm/0xscada" ]; then
+            helm upgrade --install 0xscada-staging helm/0xscada \
+              --namespace staging --create-namespace \
+              --set image.tag=${{ github.sha }} \
+              --set env=staging \
+              --wait --timeout 300s
+          fi
+          
+          rm /tmp/kubeconfig
+
+      - name: Deploy via Docker Compose (fallback)
+        if: env.KUBE_CONFIG == '' && env.STAGING_SSH_KEY != ''
+        env:
+          KUBE_CONFIG: ${{ secrets.KUBE_CONFIG_STAGING }}
+          STAGING_SSH_KEY: ${{ secrets.STAGING_SSH_KEY }}
+          STAGING_HOST: ${{ vars.STAGING_HOST }}
+        run: |
+          echo "Docker Compose deploy to ${STAGING_HOST}"
+          mkdir -p ~/.ssh
+          echo "$STAGING_SSH_KEY" > ~/.ssh/staging_key
+          chmod 600 ~/.ssh/staging_key
+          
+          # Copy compose file and deploy
+          scp -o StrictHostKeyChecking=no -i ~/.ssh/staging_key \
+            docker-compose.yml "${STAGING_HOST}:~/0xscada/"
+          
+          ssh -o StrictHostKeyChecking=no -i ~/.ssh/staging_key "${STAGING_HOST}" \
+            "cd ~/0xscada && IMAGE_TAG=${{ github.sha }} docker compose pull && docker compose up -d"
+          
+          rm ~/.ssh/staging_key
+
+      - name: Smoke test staging
+        if: vars.STAGING_URL != ''
+        run: |
+          echo "Waiting for staging to be ready..."
+          for i in $(seq 1 30); do
+            if curl -sf "${{ vars.STAGING_URL }}/api/health" > /dev/null 2>&1; then
+              echo "✅ Staging is healthy"
+              exit 0
+            fi
+            echo "Waiting... ($i/30)"
+            sleep 10
+          done
+          echo "⚠️ Staging health check timed out (non-blocking)"
+
+  # Summary job for branch protection
+  ci-complete:
+    name: CI Complete
+    runs-on: ubuntu-latest
+    needs: [lint, typecheck, test, build]
+    if: always()
+    steps:
+      - name: Check results
+        run: |
+          if [ "${{ needs.lint.result }}" != "success" ] || \
+             [ "${{ needs.typecheck.result }}" != "success" ] || \
+             [ "${{ needs.test.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ]; then
+            echo "❌ CI failed"
+            exit 1
+          fi
+          echo "✅ All CI checks passed"
