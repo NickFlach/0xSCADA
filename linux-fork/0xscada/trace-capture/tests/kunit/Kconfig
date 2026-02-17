@@ -1,8 +1,0 @@
-config SCADA_TRACE_TEST
-	tristate "0xSCADA trace capture KUnit tests"
-	depends on KUNIT
-	depends on SCADA_TRACE
-	help
-	  KUnit tests for the 0xSCADA kernel trace capture module.
-	  
-	  If unsure, say N.
