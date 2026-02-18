@@ -5,6 +5,8 @@ import { createServer } from "http";
 import { securityHeaders, rateLimit } from "./middleware/security";
 import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
+import { registerSwaggerRoutes } from "./openapi";
+import { setupApiGateway } from "./middleware/api-gateway";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -18,6 +20,21 @@ app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
 
 // Health/readiness probes — mounted before auth so k8s probes work unauthenticated
 app.use(healthRouter);
+
+// API Gateway middleware (#256) — sets up rate limiting, API key auth, CORS, request IDs
+const gatewayRateLimit = {
+  windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
+  maxRequests: parseInt(process.env.RATE_LIMIT_MAX || '100', 10),
+};
+const gatewayConfig = {
+  rateLimit: gatewayRateLimit,
+  enableApiKeyAuth: process.env.ENABLE_API_KEYS === 'true',
+  publicRoutes: ['/api/health', '/api/healthz', '/api/readyz', '/api/docs'],
+  corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(','),
+};
+
+// Wire OpenAPI docs to gateway config so Swagger UI reflects live settings
+registerSwaggerRoutes(app, gatewayConfig);
 
 declare module "http" {
   interface IncomingMessage {

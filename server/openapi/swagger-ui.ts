@@ -6,6 +6,7 @@
 
 import type { Express, Request, Response } from 'express';
 import { openApiSpec } from './openapi-spec.js';
+import type { OpenAPIV3 } from 'openapi-types';
 
 // Swagger UI HTML template (embedded to avoid additional dependencies)
 const swaggerUiHtml = (specUrl: string) => `
@@ -63,21 +64,95 @@ const swaggerUiHtml = (specUrl: string) => `
 `;
 
 /**
- * Register Swagger UI routes
+ * Enrich the OpenAPI spec with actual gateway config values:
+ * rate limits, auth requirements, and public routes.
  */
-export function registerSwaggerRoutes(app: Express): void {
-  // Serve OpenAPI spec as JSON
+export function enrichSpecFromGateway(
+  spec: OpenAPIV3.Document,
+  gatewayConfig?: {
+    rateLimit?: { windowMs: number; maxRequests: number; routeOverrides?: Record<string, { maxRequests: number }> };
+    enableApiKeyAuth?: boolean;
+    publicRoutes?: string[];
+    corsOrigins?: string[];
+  },
+): OpenAPIV3.Document {
+  if (!gatewayConfig) return spec;
+
+  const enriched = JSON.parse(JSON.stringify(spec)) as OpenAPIV3.Document;
+
+  // Add rate limit info to spec description
+  const rl = gatewayConfig.rateLimit;
+  if (rl) {
+    const rateLimitBlock = [
+      `\n## Rate Limiting (live)\n`,
+      `- Default: **${rl.maxRequests} requests / ${rl.windowMs / 1000}s**`,
+    ];
+    if (rl.routeOverrides) {
+      for (const [route, override] of Object.entries(rl.routeOverrides)) {
+        rateLimitBlock.push(`- \`${route}\`: **${override.maxRequests} req/window**`);
+      }
+    }
+    enriched.info.description = (enriched.info.description || '') + rateLimitBlock.join('\n');
+  }
+
+  // Mark public routes (no auth required)
+  const publicSet = new Set(gatewayConfig.publicRoutes ?? []);
+  if (enriched.paths) {
+    for (const [pathKey, pathItem] of Object.entries(enriched.paths)) {
+      if (!pathItem) continue;
+      const fullPath = `/api${pathKey}`;
+      const isPublic = Array.from(publicSet).some(pr => fullPath.startsWith(pr));
+      if (isPublic) {
+        // Remove security requirement from public routes
+        for (const method of ['get', 'post', 'put', 'delete', 'patch'] as const) {
+          const op = (pathItem as any)[method] as OpenAPIV3.OperationObject | undefined;
+          if (op) {
+            op.security = [];
+            op.description = (op.description || '') + '\n\n> **Public endpoint** — no authentication required.';
+          }
+        }
+      }
+    }
+  }
+
+  // Add CORS info
+  if (gatewayConfig.corsOrigins?.length) {
+    enriched.info.description = (enriched.info.description || '') +
+      `\n\n## CORS (live)\n\nAllowed origins: ${gatewayConfig.corsOrigins.map(o => `\`${o}\``).join(', ')}`;
+  }
+
+  // Add auth requirement note if API key auth is enabled
+  if (gatewayConfig.enableApiKeyAuth) {
+    enriched.info.description = (enriched.info.description || '') +
+      '\n\n> ⚠️ **API Key authentication is ENABLED.** Non-public endpoints require `X-API-Key` header.';
+  }
+
+  return enriched;
+}
+
+/**
+ * Register Swagger UI routes.
+ * Optionally accepts gateway config to enrich the spec with live values.
+ */
+export function registerSwaggerRoutes(
+  app: Express,
+  gatewayConfig?: Parameters<typeof enrichSpecFromGateway>[1],
+): void {
+  // Build enriched spec if gateway config provided
+  const spec = enrichSpecFromGateway(openApiSpec, gatewayConfig);
+
+  // Serve OpenAPI spec as JSON (enriched with live gateway config)
   app.get('/api/docs/openapi.json', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'application/json');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.json(openApiSpec);
+    res.json(spec);
   });
 
   // Serve OpenAPI spec as YAML (optional)
   app.get('/api/docs/openapi.yaml', (_req: Request, res: Response) => {
     res.setHeader('Content-Type', 'text/yaml');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.send(jsonToYaml(openApiSpec));
+    res.send(jsonToYaml(spec));
   });
 
   // Serve Swagger UI

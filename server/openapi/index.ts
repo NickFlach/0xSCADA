@@ -9,5 +9,5 @@
  */
 
 export { openApiSpec } from './openapi-spec.js';
-export { registerSwaggerRoutes } from './swagger-ui.js';
+export { registerSwaggerRoutes, enrichSpecFromGateway } from './swagger-ui.js';
 export { validateSpec, diffSpecs } from './openapi-validator.js';
