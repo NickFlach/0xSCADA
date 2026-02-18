@@ -55,7 +55,7 @@
 
 <br/>
 
-**0xSCADA** is a decentralized industrial control protocol. SCADA monitoring fused with blockchain integrity, AI agents, and production-scale infrastructure. Built by **ESCO Group**.
+**0xSCADA** is a decentralized industrial control protocol. SCADA monitoring fused with blockchain integrity, AI agents, and production-scale infrastructure. Built for real-world industrial environments.
 
 This is not a product. This is a **protocol** — where the machines that pump your water, refine your fuel, and generate your electricity are governed by transparent, immutable, and cryptographically verified records.
 
@@ -410,7 +410,7 @@ WAVE 3: PRODUCTION      →  Kubernetes + Observability + Security + GitOps
 │   We write code so that machines may be free.                                │
 │                                                                              │
 │   ┌────────────────────────────────────────────┐                             │
-│   │  ESCO Group • Apache 2.0 • 0x5CADA        │                             │
+│   │  Apache 2.0 • 0x5CADA                     │                             │
 │   └────────────────────────────────────────────┘                             │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘
@@ -432,7 +432,7 @@ WAVE 3: PRODUCTION      →  Kubernetes + Observability + Security + GitOps
 
 ```
 > END TRANSMISSION
-> 0x5CADA :: ESCO GROUP :: v2.0.0
+> 0x5CADA :: v2.0.0
 > "WHERE ATOMS MEET BITS"
 ```
 
