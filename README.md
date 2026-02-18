@@ -377,7 +377,6 @@ WAVE 3: PRODUCTION      →  Kubernetes + Observability + Security + GitOps
 ```
 
 - **14 ADRs** documenting architectural decisions
-- **7 integration issues** open — connecting legacy features to new systems
 - Full production infrastructure stack
 
 <br/>
