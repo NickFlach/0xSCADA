@@ -3,11 +3,37 @@
  *
  * Creates a singleton HealthManager, registers concrete checks for
  * every backend dependency, and exports the Express router.
+ *
+ * Integration: Prometheus metrics are exposed at /healthz/metrics and
+ * health status is reported as Prometheus gauges (closes #253).
  */
 
 import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewayCheck } from './health-manager';
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
+import { registry, metricsHandler } from '../metrics';
+
+// ── Prometheus health gauges ─────────────────────────────────────────────────
+// These gauges let Prometheus scrape health status as numeric metrics.
+
+/** 1 = healthy, 0 = unhealthy */
+export const healthStatusGauge = registry.gauge(
+  'health_status',
+  'Overall system health (1=healthy, 0=unhealthy)',
+);
+
+/** Per-component health: 1 = up, 0 = down */
+export const componentHealthGauge = registry.gauge(
+  'health_component_status',
+  'Per-component health status (1=up, 0=down)',
+  ['component'],
+);
+
+/** Timestamp of the last health check evaluation */
+export const healthCheckTimestamp = registry.gauge(
+  'health_last_check_timestamp_seconds',
+  'Unix timestamp of last health evaluation',
+);
 
 // ── Singleton ────────────────────────────────────────────────────────────────
 export const healthManager = new HealthManager(/* cacheTtlMs */ 10_000);
@@ -60,5 +86,33 @@ healthManager.registerSimple(
   false,
 );
 
+// 6. Redis cache (optional)
+healthManager.registerSimple(
+  'redis',
+  async () => {
+    try {
+      const { isRedisHealthy } = await import('../services/cache');
+      return isRedisHealthy();
+    } catch {
+      return false;
+    }
+  },
+  false,
+);
+
+// ── Sync health → Prometheus after each check cycle ──────────────────────────
+healthManager.onCheckComplete((result) => {
+  healthStatusGauge.set(result.healthy ? 1 : 0);
+  healthCheckTimestamp.setToCurrentTime();
+
+  for (const [name, component] of Object.entries(result.components ?? {})) {
+    const up = (component as any).status === 'up' || (component as any).healthy === true ? 1 : 0;
+    componentHealthGauge.set(up, { component: name });
+  }
+});
+
 // ── Export the pre-built router ──────────────────────────────────────────────
 export const healthRouter = healthManager.createRouter();
+
+// Expose Prometheus metrics alongside health routes so /metrics works
+healthRouter.get('/metrics', metricsHandler);
