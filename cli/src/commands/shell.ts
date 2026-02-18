@@ -18,46 +18,59 @@ interface ShellContext {
 const context: ShellContext = {};
 
 /**
- * Get available commands for tab completion
+ * Get available commands for tab completion.
+ * Dynamically introspects the parent Commander program to include all
+ * registered commands (agents, tags, alarms, gateway, container, db, etc.).
  */
-function getAvailableCommands(): string[] {
-  return [
-    "status",
-    "sites",
-    "sites list",
-    "sites get",
-    "sites create",
-    "assets",
-    "assets list",
-    "assets get",
-    "assets create",
-    "events",
-    "events list",
-    "events anchor",
-    "blockchain",
-    "blockchain info",
-    "blockchain balance",
-    "dev",
-    "dev start",
-    "dev stop",
-    "dev seed",
-    "config",
-    "config show",
-    "config set",
+function getAvailableCommands(program?: Command): string[] {
+  const builtins = [
     "help",
     "exit",
     "quit",
     "clear",
     "history",
     "context",
+    "use site",
   ];
+
+  if (!program) {
+    // Fallback static list when no program reference available
+    return [
+      ...builtins,
+      "status",
+      "sites", "sites list", "sites get", "sites create",
+      "assets", "assets list", "assets get", "assets create",
+      "events", "events list", "events anchor",
+      "blockchain", "blockchain info", "blockchain balance",
+      "dev", "dev start", "dev stop", "dev seed",
+      "config", "config show", "config set",
+      "agents", "agents list", "agents start", "agents stop", "agents outputs", "agents proposals",
+      "tags", "tags read", "tags write", "tags list", "tags watch",
+      "alarms", "alarms list", "alarms acknowledge", "alarms history",
+      "gateway", "gateway list", "gateway status",
+      "container", "container status", "container start", "container stop",
+      "db", "db migrate", "db seed", "db status",
+    ];
+  }
+
+  // Dynamically enumerate commands from the Commander program tree
+  const commands: string[] = [...builtins];
+  for (const cmd of program.commands) {
+    if (cmd.name() === "shell") continue; // don't list shell inside shell
+    commands.push(cmd.name());
+    // Add subcommands
+    for (const sub of cmd.commands) {
+      commands.push(`${cmd.name()} ${sub.name()}`);
+    }
+  }
+  return commands;
 }
 
 /**
  * Get completions for a partial input
  */
-function getCompletions(line: string): string[] {
-  const commands = getAvailableCommands();
+function getCompletions(line: string, program?: Command): string[] {
+  const commands = getAvailableCommands(program);
   const trimmedLine = line.trim().toLowerCase();
 
   if (!trimmedLine) {
@@ -91,6 +104,16 @@ function showShellHelp(): void {
   console.log("  " + chalk.yellow("config show") + "         Display current config");
   console.log("  " + chalk.yellow("dev start") + "           Start dev environment");
   console.log("  " + chalk.yellow("dev seed") + "            Seed test data");
+  console.log("  " + chalk.yellow("agents list") + "         List governance agents");
+  console.log("  " + chalk.yellow("agents outputs") + "      Show agent outputs");
+  console.log("  " + chalk.yellow("agents proposals") + "    Show agent proposals");
+  console.log("  " + chalk.yellow("tags read <id>") + "      Read a SCADA tag value");
+  console.log("  " + chalk.yellow("tags list") + "           List all tags");
+  console.log("  " + chalk.yellow("alarms list") + "         List active alarms");
+  console.log("  " + chalk.yellow("gateway list") + "        List gateway connections");
+  console.log("  " + chalk.yellow("container status") + "    Container status");
+  console.log("  " + chalk.yellow("db migrate") + "          Run database migrations");
+  console.log("  " + chalk.yellow("db seed") + "             Seed database");
   console.log();
   console.log(chalk.bold("Shell Commands:"));
   console.log();
@@ -312,7 +335,7 @@ async function startShell(program: Command): Promise<void> {
     prompt: getPrompt(),
     historySize: 100,
     completer: (line: string) => {
-      const completions = getCompletions(line);
+      const completions = getCompletions(line, program);
       return [completions, line];
     },
   });
