@@ -36,6 +36,7 @@ import { alarmRoutes } from "./routes/alarms";
 import pidRoutes from "./routes/pid";
 import { eventStreamServer } from "./websocket";
 import { tagStreamServer } from "./websocket/tag-stream";
+import { unifiedStreamServer } from "./websocket/unified-stream";
 
 export async function registerRoutes(
   httpServer: Server,
@@ -71,14 +72,22 @@ export async function registerRoutes(
   // ==========================================================================
   eventStreamServer.initialize(httpServer, "/ws/events");
   tagStreamServer.initialize(httpServer, "/ws/tags");
+  unifiedStreamServer.initialize(httpServer, "/ws");  // unified endpoint (#255)
 
   // WebSocket metrics endpoint
   app.get("/api/ws/metrics", (req, res) => {
-    res.json(eventStreamServer.getMetrics());
+    res.json({
+      eventStream: eventStreamServer.getMetrics(),
+      tagStream: tagStreamServer.getMetrics(),
+      unified: unifiedStreamServer.getMetrics(),
+    });
   });
 
   app.get("/api/ws/clients", (req, res) => {
-    res.json(eventStreamServer.getConnectedClients());
+    res.json({
+      eventStream: eventStreamServer.getConnectedClients(),
+      unified: unifiedStreamServer.getConnectedClients(),
+    });
   });
 
   // Tag stream metrics
