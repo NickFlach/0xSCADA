@@ -128,6 +128,65 @@ npx 0xscada tags        # Tag point management
 
 ## ▓▓ ARCHITECTURE
 
+### Dual-Time Control Plane
+
+0xSCADA operates on **two temporal domains** — real-time deterministic control and batch cryptographic anchoring:
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                     DUAL-TIME CONTROL PLANE                                │
+│                                                                             │
+│  REAL-TIME DOMAIN (µs)          │          BATCH DOMAIN (s/min)             │
+│  ┌─────────────────────┐        │        ┌─────────────────────┐           │
+│  │   EVENT KERNEL      │        │        │   MERKLE KERNEL     │           │
+│  │  • Ring buffer      │        │        │  • Proof generation │           │
+│  │  • < 50µs latency   │        │        │  • O(log n) verify  │           │
+│  │  • Lock-free        │        │        │  • HSM integration  │           │
+│  │  • PREEMPT_RT       │        │        │  • Batch aggregation│           │
+│  └─────────────────────┘        │        └─────────────────────┘           │
+│            │                    │                    │                     │
+│            ▼                    │                    ▼                     │
+│    ┌─────────────┐              │              ┌─────────────┐             │
+│    │   CONTROL   │              │              │ANCHOR KERNEL│             │
+│    │   LOGIC     │              │              │ • L2 sync   │             │
+│    │ • Safety    │              │              │ • Finality  │             │
+│    │ • Actuators │              │              │ • Gas opt   │             │
+│    │ • Real-time │              │              │ • Byzantine │             │
+│    └─────────────┘              │              └─────────────┘             │
+│                                 │                    │                     │
+└─────────────────────────────────┼────────────────────┼─────────────────────┘
+                                  │                    ▼
+                                  │          ┌─────────────────┐
+                                  │          │   BLOCKCHAIN    │
+                                  │          │   0x5CADA       │
+                                  │          │ • Immutable     │
+                                  │          │ • Audit trails │
+                                  │          │ • Compliance   │
+                                  │          └─────────────────┘
+```
+
+### Three-Kernel Model
+
+**Event Kernel** — Deterministic real-time event processing  
+```
+Hardware IRQ → Ring Buffer → Control Logic → Actuator Response
+     µs            µs            µs              µs
+```
+
+**Merkle Kernel** — Cryptographic proof generation and verification  
+```
+Event Batch → Merkle Tree → Inclusion Proofs → HSM Signing
+     s            s              s               s
+```
+
+**Anchor Kernel** — L2 blockchain state synchronization  
+```
+Merkle Root → Gas Optimization → L2 Submit → Finality Tracking
+     s              s               s            min
+```
+
+### System Architecture
+
 ```
                     ┌─────────────────────────────┐
                     │     0xSCADA PROTOCOL v2.0    │
@@ -144,6 +203,12 @@ npx 0xscada tags        # Tag point management
           │                 ┌─────▼─────┐           ┌─────▼─────┐
           │                 │ PostgreSQL │           │  Contracts │
           │                 │  + Redis   │           │  Solidity  │
+          │                 └───────────┘           └───────────┘
+          │                        │                        │
+          │                 ┌─────▼─────┐           ┌─────▼─────┐
+          │                 │ FLUX STATE│           │  KERNEL   │
+          │                 │ ENGINE     │           │ PREEMPT_RT │
+          │                 │ (World)    │           │ 6.6 LTS    │
           │                 └───────────┘           └───────────┘
           │
     ┌─────▼──────────────────────────────────────────────────────┐
