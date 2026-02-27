@@ -125,6 +125,10 @@ app.use((req, res, next) => {
       const { fieldSimulator } = await import("./simulator");
       fieldSimulator.start();
 
+      // Start Flux state engine integration (ADR-0015, Issue #260)
+      const { startFluxIntegration } = await import("./services/flux");
+      startFluxIntegration();
+
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);
     },

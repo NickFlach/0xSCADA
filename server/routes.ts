@@ -34,6 +34,7 @@ import artifactRoutes from "./routes/ArtifactRoutes";
 import { assetRoutes } from "./routes/assets";
 import { alarmRoutes } from "./routes/alarms";
 import pidRoutes from "./routes/pid";
+import { fluxRoutes } from "./routes/flux";
 import { eventStreamServer } from "./websocket";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { unifiedStreamServer } from "./websocket/unified-stream";
@@ -56,6 +57,7 @@ export async function registerRoutes(
   app.use("/api/assets", assetRoutes);
   app.use("/api/alarms", alarmRoutes);
   app.use("/api/pid", pidRoutes);
+  app.use("/api/flux", fluxRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {
