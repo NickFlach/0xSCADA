@@ -2,6 +2,7 @@ import { storage } from "./storage";
 import type { InsertSite, InsertAsset, InsertEventAnchor } from "@shared/schema";
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
+import { getFluxPublisher } from "./services/flux";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -177,6 +178,18 @@ class FieldSimulator {
       if (response.ok) {
         log(`📡 [${asset.nameOrTag}] ${eventType} → Anchored`, "simulator");
         
+        // Publish to Flux world state (ADR-0015)
+        getFluxPublisher().publishAsset(asset.nameOrTag.toLowerCase(), {
+          asset_type: asset.assetType,
+          name: asset.nameOrTag,
+          status: asset.status,
+          critical: asset.critical,
+          last_event_type: eventType,
+          last_event_details: details,
+          site_id: asset.siteId,
+          ...(typeof payload === 'object' ? payload : { value: payload }),
+        });
+
         // Broadcast tag update to live dashboard via WebSocket
         tagStreamServer.broadcastTagUpdate({
           tagName: `${asset.nameOrTag}.${eventType}`,

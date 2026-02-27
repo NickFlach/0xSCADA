@@ -1,6 +1,6 @@
 # ADR-0015: Flux State Engine Integration
 
-**Status:** Proposed  
+**Status:** Accepted  
 **Date:** 2026-02-19  
 **Deciders:** 0xSCADA Core Team, Arc (EckmanTechLLC), Kannaka (NickFlach)  
 **References:** [ADR-0014 (Production Scale Architecture)](ADR-0014-production-scale-architecture.md), [Flux GitHub](https://github.com/EckmanTechLLC/flux), [Issue #260](https://github.com/NickFlach/0xSCADA/issues/260)
