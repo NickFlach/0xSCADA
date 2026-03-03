@@ -86,6 +86,52 @@ app.use((req, res, next) => {
   await initializeDefaultAgents();
   await startDefaultAgents();
   
+  // Initialize demo gateway in development mode
+  if (process.env.NODE_ENV === "development") {
+    const { gatewayManager } = await import("./gateway");
+    
+    // Create demo DNP3 TCP driver
+    gatewayManager.addDriver({
+      id: "demo-dnp3-tcp",
+      protocol: {
+        type: "DNP3_TCP",
+        name: "Demo DNP3 TCP Driver",
+        connectionString: "192.168.1.100:20000",
+        enabled: true
+      },
+      status: "connected",
+      lastUpdate: new Date()
+    });
+    
+    // Create demo DNP3 Serial driver
+    gatewayManager.addDriver({
+      id: "demo-dnp3-serial",
+      protocol: {
+        type: "DNP3_SERIAL",
+        name: "Demo DNP3 Serial Driver", 
+        connectionString: "COM1:9600,8,N,1",
+        enabled: true
+      },
+      status: "connected",
+      lastUpdate: new Date()
+    });
+    
+    // Create demo IEC61850 MMS driver
+    gatewayManager.addDriver({
+      id: "demo-iec61850-mms",
+      protocol: {
+        type: "IEC61850_MMS",
+        name: "Demo IEC61850 MMS Driver",
+        connectionString: "192.168.1.200:102",
+        enabled: true
+      },
+      status: "connected", 
+      lastUpdate: new Date()
+    });
+    
+    log("Initialized demo gateway drivers for development mode");
+  }
+  
   await registerRoutes(httpServer, app);
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
