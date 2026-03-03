@@ -4,6 +4,8 @@
  * Handles local data storage during network outages and forwards data
  * when connectivity is restored. Works with the gateway manager to
  * ensure no industrial data is lost during edge deployment scenarios.
+ * 
+ * Issue: #279 — Health manager and edge store-and-forward disconnected
  */
 
 import { EventEmitter } from 'events';
