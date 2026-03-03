@@ -91,10 +91,7 @@ app.use((req, res, next) => {
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");
 
-  // Initialize bridge modules (event-anchor, state-sync)
-  const { initializeBridges } = await import("./bridge");
-  await initializeBridges();
-  log("Bridge modules (event-anchor, state-sync) initialized");
+  // Bridge modules will be initialized in issue #280
 
   // Initialize demo gateway in development mode
   if (process.env.NODE_ENV === "development") {
