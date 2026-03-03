@@ -36,6 +36,9 @@ import { alarmRoutes } from "./routes/alarms";
 import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
+import { intelligenceRoutes } from "./routes/intelligence";
+import { governanceRoutes } from "./routes/governance";
+import { securityRoutes } from "./routes/security";
 import { eventStreamServer } from "./websocket";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { unifiedStreamServer } from "./websocket/unified-stream";
@@ -60,6 +63,11 @@ export async function registerRoutes(
   app.use("/api/pid", pidRoutes);
   app.use("/api/flux", fluxRoutes);
   app.use("/api/gateway", gatewayRoutes);
+  
+  // P1 Wiring: Intelligence, Governance, and Security modules
+  app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/governance", governanceRoutes);
+  app.use("/api/security", securityRoutes);
   
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {
