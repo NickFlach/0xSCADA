@@ -115,6 +115,21 @@ healthManager.registerSimple(
   true, // Required for edge deployments
 );
 
+// 8. Bridge modules (event-anchor, state-sync)
+healthManager.registerSimple(
+  'bridges',
+  async () => {
+    try {
+      const { getBridgeHealthStatus } = await import('../bridge');
+      const status = await getBridgeHealthStatus();
+      return status.eventAnchor.healthy && status.stateSync.healthy;
+    } catch {
+      return false;
+    }
+  },
+  false, // Optional, depends on configuration
+);
+
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
   healthStatusGauge.set(result.healthy ? 1 : 0);
