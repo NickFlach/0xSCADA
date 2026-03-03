@@ -86,6 +86,16 @@ app.use((req, res, next) => {
   await initializeDefaultAgents();
   await startDefaultAgents();
   
+  // Initialize edge store-and-forward service
+  const { storeAndForwardService } = await import("./gateway/store-and-forward");
+  await storeAndForwardService.initialize();
+  log("Edge store-and-forward service initialized");
+
+  // Initialize bridge modules (event-anchor, state-sync)
+  const { initializeBridges } = await import("./bridge");
+  await initializeBridges();
+  log("Bridge modules (event-anchor, state-sync) initialized");
+
   // Initialize demo gateway in development mode
   if (process.env.NODE_ENV === "development") {
     const { gatewayManager } = await import("./gateway");

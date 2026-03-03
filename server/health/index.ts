@@ -100,6 +100,36 @@ healthManager.registerSimple(
   false,
 );
 
+// 7. Edge store-and-forward service (required for edge deployments)
+healthManager.registerSimple(
+  'store-and-forward',
+  async () => {
+    try {
+      const { storeAndForwardService } = await import('../gateway/store-and-forward');
+      const status = await storeAndForwardService.healthCheck();
+      return status.healthy;
+    } catch {
+      return false;
+    }
+  },
+  true, // Required for edge deployments
+);
+
+// 8. Bridge modules (event-anchor, state-sync)
+healthManager.registerSimple(
+  'bridges',
+  async () => {
+    try {
+      const { getBridgeHealthStatus } = await import('../bridge');
+      const status = await getBridgeHealthStatus();
+      return status.eventAnchor.healthy && status.stateSync.healthy;
+    } catch {
+      return false;
+    }
+  },
+  false, // Optional, depends on configuration
+);
+
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
   healthStatusGauge.set(result.healthy ? 1 : 0);
