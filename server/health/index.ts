@@ -100,6 +100,21 @@ healthManager.registerSimple(
   false,
 );
 
+// 7. Edge store-and-forward service (required for edge deployments)
+healthManager.registerSimple(
+  'store-and-forward',
+  async () => {
+    try {
+      const { storeAndForwardService } = await import('../gateway/store-and-forward');
+      const status = await storeAndForwardService.healthCheck();
+      return status.healthy;
+    } catch {
+      return false;
+    }
+  },
+  true, // Required for edge deployments
+);
+
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
   healthStatusGauge.set(result.healthy ? 1 : 0);

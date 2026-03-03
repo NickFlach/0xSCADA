@@ -57,6 +57,19 @@ export class GatewayManager {
   getDriversByProtocol(protocol: ProtocolType): GatewayDriver[] {
     return this.getAllDrivers().filter(driver => driver.protocol.type === protocol);
   }
+  
+  /**
+   * Store data via edge store-and-forward service
+   * This ensures no data is lost during network outages
+   */
+  async storeData(data: any, driverId: string): Promise<void> {
+    try {
+      const { storeAndForwardService } = await import('./store-and-forward');
+      await storeAndForwardService.store(data, driverId);
+    } catch (error) {
+      console.error(`Failed to store data for driver ${driverId}:`, error);
+    }
+  }
 }
 
 export const gatewayManager = new GatewayManager();
