@@ -85,6 +85,11 @@ app.use((req, res, next) => {
   const { initializeDefaultAgents, startDefaultAgents } = await import("./agents");
   await initializeDefaultAgents();
   await startDefaultAgents();
+
+  // Initialize edge store-and-forward service
+  const { storeAndForwardService } = await import("./gateway/store-and-forward");
+  await storeAndForwardService.initialize();
+  log("Edge store-and-forward service initialized");
   
   // Initialize demo gateway in development mode
   if (process.env.NODE_ENV === "development") {
