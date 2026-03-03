@@ -55,6 +55,7 @@ export const CACHE_KEYS = {
 export class CacheService {
   private client: Redis | null = null;
   private fallbackCache: Map<string, CacheEntry<unknown>> = new Map();
+  private fallbackTags: Map<string, Set<string>> = new Map(); // tag -> keys mapping
   private writeBuffer: Map<string, { value: unknown; ttl: number }> = new Map();
   private flushInterval: NodeJS.Timeout | null = null;
 
@@ -178,6 +179,11 @@ export class CacheService {
       } else {
         // Fallback to in-memory cache
         this.fallbackCache.set(key, entry);
+        
+        // Store tags for bulk invalidation in fallback cache
+        if (options.tags?.length) {
+          await this.addToTags(null, key, options.tags, ttl);
+        }
       }
 
       return true;
@@ -255,13 +261,36 @@ export class CacheService {
   async deletePattern(pattern: string): Promise<number> {
     try {
       const client = await this.getClient();
-      if (!client) return 0;
-
-      const keys = await client.keys(pattern);
-      if (keys.length === 0) return 0;
-
-      const deleted = await client.del(...keys);
-      return deleted;
+      
+      if (client) {
+        const keys = await client.keys(pattern);
+        if (keys.length === 0) return 0;
+        const deleted = await client.del(...keys);
+        return deleted;
+      } else {
+        // In-memory fallback: manual pattern matching
+        const regex = new RegExp('^' + pattern.replace(/\*/g, '.*') + '$');
+        const keysToDelete: string[] = [];
+        
+        for (const key of this.fallbackCache.keys()) {
+          if (regex.test(key)) {
+            keysToDelete.push(key);
+          }
+        }
+        
+        keysToDelete.forEach(key => {
+          this.fallbackCache.delete(key);
+          // Also remove from tag associations
+          for (const [tag, tagKeys] of this.fallbackTags) {
+            tagKeys.delete(key);
+            if (tagKeys.size === 0) {
+              this.fallbackTags.delete(tag);
+            }
+          }
+        });
+        
+        return keysToDelete.length;
+      }
     } catch (error) {
       console.error('[Cache] Delete pattern error:', error);
       return 0;
@@ -274,19 +303,46 @@ export class CacheService {
   async invalidateByTag(tag: string): Promise<number> {
     try {
       const client = await this.getClient();
-      if (!client) return 0;
-
-      const tagKey = `tag:${tag}`;
-      const keys = await client.smembers(tagKey);
-
-      if (keys.length === 0) return 0;
-
-      const pipeline = client.pipeline();
-      keys.forEach((key) => pipeline.del(key));
-      pipeline.del(tagKey);
-      await pipeline.exec();
-
-      return keys.length;
+      
+      if (client) {
+        const tagKey = `tag:${tag}`;
+        const keys = await client.smembers(tagKey);
+        
+        if (keys.length === 0) return 0;
+        
+        const pipeline = client.pipeline();
+        keys.forEach((key) => pipeline.del(key));
+        pipeline.del(tagKey);
+        await pipeline.exec();
+        
+        return keys.length;
+      } else {
+        // In-memory fallback: use local tag mapping
+        const tagKeys = this.fallbackTags.get(tag);
+        if (!tagKeys || tagKeys.size === 0) return 0;
+        
+        const keysToDelete = Array.from(tagKeys);
+        
+        // Delete all keys associated with this tag
+        keysToDelete.forEach(key => {
+          this.fallbackCache.delete(key);
+        });
+        
+        // Remove the tag mapping
+        this.fallbackTags.delete(tag);
+        
+        // Clean up other tags that reference these keys
+        for (const [otherTag, otherTagKeys] of this.fallbackTags) {
+          keysToDelete.forEach(key => {
+            otherTagKeys.delete(key);
+          });
+          if (otherTagKeys.size === 0) {
+            this.fallbackTags.delete(otherTag);
+          }
+        }
+        
+        return keysToDelete.length;
+      }
     } catch (error) {
       console.error('[Cache] Tag invalidation error:', error);
       return 0;
@@ -333,29 +389,71 @@ export class CacheService {
    * Add key to tag sets for bulk invalidation
    */
   private async addToTags(
-    client: Redis,
+    client: Redis | null,
     key: string,
     tags: string[],
     ttl: number
   ): Promise<void> {
-    const pipeline = client.pipeline();
+    if (client) {
+      // Redis implementation
+      const pipeline = client.pipeline();
 
-    tags.forEach((tag) => {
-      const tagKey = `tag:${tag}`;
-      pipeline.sadd(tagKey, key);
-      pipeline.expire(tagKey, ttl + 3600); // Tag set expires 1 hour after entries
-    });
+      tags.forEach((tag) => {
+        const tagKey = `tag:${tag}`;
+        pipeline.sadd(tagKey, key);
+        pipeline.expire(tagKey, ttl + 3600); // Tag set expires 1 hour after entries
+      });
 
-    await pipeline.exec();
+      await pipeline.exec();
+    } else {
+      // In-memory fallback implementation
+      tags.forEach((tag) => {
+        if (!this.fallbackTags.has(tag)) {
+          this.fallbackTags.set(tag, new Set());
+        }
+        this.fallbackTags.get(tag)!.add(key);
+      });
+    }
   }
 
   /**
-   * Start periodic flush of write-behind buffer
+   * Start periodic flush of write-behind buffer and cleanup expired entries
    */
   private startWriteBehindFlush(): void {
     this.flushInterval = setInterval(() => {
       this.flushWriteBuffer();
+      this.cleanupExpiredEntries();
     }, 5000); // Flush every 5 seconds
+  }
+
+  /**
+   * Clean up expired entries from in-memory fallback cache
+   */
+  private cleanupExpiredEntries(): void {
+    const now = Date.now();
+    const expiredKeys: string[] = [];
+
+    for (const [key, entry] of this.fallbackCache) {
+      if (entry.expiresAt && entry.expiresAt < now) {
+        expiredKeys.push(key);
+      }
+    }
+
+    expiredKeys.forEach(key => {
+      this.fallbackCache.delete(key);
+      
+      // Also remove from tag associations
+      for (const [tag, tagKeys] of this.fallbackTags) {
+        tagKeys.delete(key);
+        if (tagKeys.size === 0) {
+          this.fallbackTags.delete(tag);
+        }
+      }
+    });
+
+    if (expiredKeys.length > 0) {
+      console.log(`[Cache] Cleaned up ${expiredKeys.length} expired entries from fallback cache`);
+    }
   }
 
   /**
@@ -393,6 +491,7 @@ export class CacheService {
     }
     await this.flushWriteBuffer();
     this.fallbackCache.clear();
+    this.fallbackTags.clear();
   }
 }
 
