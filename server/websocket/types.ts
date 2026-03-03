@@ -6,7 +6,7 @@
  * Message types for real-time event subscription and streaming.
  */
 
-import type { SignedEvent } from "../events";
+""
 
 // =============================================================================
 // CLIENT → SERVER MESSAGES

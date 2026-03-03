@@ -202,7 +202,7 @@ export const PIDEditor: React.FC<PIDEditorProps> = ({
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [dragItem, setDragItem] = useState<PaletteItem | null>(null);
 
-  const selectedSymbol = diagram.symbols.find(s => s.id === selectedId) ?? null;
+  const selectedSymbol = diagram.symbols.find((s: PIDSymbol) => s.id === selectedId) ?? null;
 
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
@@ -215,22 +215,22 @@ export const PIDEditor: React.FC<PIDEditorProps> = ({
     const y = (e.clientY - rect.top);
 
     const symbol = createSymbol(dragItem, { x, y });
-    setDiagram(d => ({ ...d, symbols: [...d.symbols, symbol] }));
+    setDiagram((d: PIDDiagram) => ({ ...d, symbols: [...d.symbols, symbol] }));
     setDragItem(null);
   }, [dragItem]);
 
   const handleUpdateSymbol = useCallback((updated: PIDSymbol) => {
-    setDiagram(d => ({
+    setDiagram((d: PIDDiagram) => ({
       ...d,
-      symbols: d.symbols.map(s => s.id === updated.id ? updated : s),
+      symbols: d.symbols.map((s: PIDSymbol) => s.id === updated.id ? updated : s),
     }));
   }, []);
 
   const handleDeleteSymbol = useCallback((id: string) => {
-    setDiagram(d => ({
+    setDiagram((d: PIDDiagram) => ({
       ...d,
-      symbols: d.symbols.filter(s => s.id !== id),
-      connections: d.connections.filter(c => c.from.symbolId !== id && c.to.symbolId !== id),
+      symbols: d.symbols.filter((s: PIDSymbol) => s.id !== id),
+      connections: d.connections.filter((c: any) => c.from.symbolId !== id && c.to.symbolId !== id),
     }));
     setSelectedId(null);
   }, []);
@@ -275,7 +275,7 @@ export const PIDEditor: React.FC<PIDEditorProps> = ({
             <input
               type="text"
               value={diagram.name}
-              onChange={e => setDiagram(d => ({ ...d, name: e.target.value }))}
+              onChange={(e: React.ChangeEvent<HTMLInputElement>) => setDiagram((d: PIDDiagram) => ({ ...d, name: e.target.value }))}
               style={{ padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4, fontSize: 13 }}
             />
             <button

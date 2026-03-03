@@ -6,7 +6,7 @@
  */
 
 import React, { useRef, useState, useCallback, useEffect } from 'react';
-import type { PIDDiagram, PIDSymbol, PipeConnection, OperationalState } from '@shared/types/pid';
+import type { PIDDiagram, PIDSymbol, PipeConnection, OperationalState, ValveVariant, PumpVariant, TankVariant, JunctionVariant } from '@shared/types/pid';
 import { PIDAnimationStyles } from './PIDAnimations';
 import { usePIDData } from './PIDDataBinding';
 import { Valve, Pump, Tank, Instrument, Motor, HeatExchanger, Pipe, Junction } from './symbols';
@@ -65,7 +65,7 @@ const Grid: React.FC<{ size: number; canvasWidth: number; canvasHeight: number }
 // =============================================================================
 
 function getOperationalState(symbol: PIDSymbol, values: Record<string, any>): OperationalState {
-  const binding = symbol.dataBinding?.tags?.find(t => t.property === 'state');
+  const binding = symbol.dataBinding?.tags?.find((t: any) => t.property === 'state');
   if (binding && values[binding.tagId]) {
     const v = values[binding.tagId];
     if (v.alarmState === 'alarm' || v.alarmState === 'high-high' || v.alarmState === 'low-low') return 'alarm';
@@ -76,7 +76,7 @@ function getOperationalState(symbol: PIDSymbol, values: Record<string, any>): Op
 }
 
 function getDisplayValue(symbol: PIDSymbol, values: Record<string, any>): string | undefined {
-  const binding = symbol.dataBinding?.tags?.find(t => t.property === 'value');
+  const binding = symbol.dataBinding?.tags?.find((t: any) => t.property === 'value');
   if (!binding || !values[binding.tagId]) return undefined;
   const v = values[binding.tagId];
   const num = typeof v.value === 'number' ? v.value.toFixed(1) : String(v.value);
@@ -84,7 +84,7 @@ function getDisplayValue(symbol: PIDSymbol, values: Record<string, any>): string
 }
 
 function getLevelValue(symbol: PIDSymbol, values: Record<string, any>): number | undefined {
-  const binding = symbol.dataBinding?.tags?.find(t => t.property === 'level');
+  const binding = symbol.dataBinding?.tags?.find((t: any) => t.property === 'level');
   if (!binding || !values[binding.tagId]) return undefined;
   return typeof values[binding.tagId].value === 'number' ? values[binding.tagId].value : undefined;
 }
@@ -97,7 +97,7 @@ const SymbolRenderer: React.FC<{
 }> = ({ symbol, selected, onClick, values }) => {
   const state = getOperationalState(symbol, values);
   const displayValue = getDisplayValue(symbol, values);
-  const { position, rotation, scale } = symbol.transform;
+  const { position, rotation, scale } = symbol.transform || { position: { x: 0, y: 0 }, rotation: 0, scale: 1 };
 
   const common = {
     x: position.x,
@@ -113,19 +113,19 @@ const SymbolRenderer: React.FC<{
 
   switch (symbol.type) {
     case 'valve':
-      return <Valve {...common} variant={symbol.variant} size={symbol.size?.width ?? 40} />;
+      return <Valve {...common} variant={symbol.variant as ValveVariant} size={symbol.size?.width ?? 40} />;
     case 'pump':
-      return <Pump {...common} variant={symbol.variant} size={symbol.size?.width ?? 44} />;
+      return <Pump {...common} variant={symbol.variant as PumpVariant} size={symbol.size?.width ?? 44} />;
     case 'tank': {
       const level = getLevelValue(symbol, values);
-      return <Tank {...common} variant={symbol.variant}
+      return <Tank {...common} variant={symbol.variant as TankVariant}
         width={symbol.size?.width ?? 60} height={symbol.size?.height ?? 80}
         level={level} />;
     }
     case 'instrument':
       return <Instrument {...common}
-        functionLetters={symbol.functionLetters}
-        loopNumber={symbol.loopNumber}
+        functionLetters={symbol.functionLetters || ''}
+        loopNumber={symbol.loopNumber || ''}
         connectionType={symbol.connectionType}
         location={symbol.location}
         size={symbol.size?.width ?? 36} />;
@@ -134,10 +134,10 @@ const SymbolRenderer: React.FC<{
     case 'heat-exchanger':
       return <HeatExchanger {...common} exchangerType={symbol.exchangerType} size={symbol.size?.width ?? 50} />;
     case 'pipe':
-      return <Pipe points={symbol.points} showFlow={symbol.showFlow} spec={symbol.spec}
+      return <Pipe points={symbol.points || []} showFlow={symbol.showFlow} spec={symbol.spec}
         state={state} selected={selected} onClick={onClick} />;
     case 'junction':
-      return <Junction {...common} variant={symbol.variant} size={symbol.size?.width ?? 20} />;
+      return <Junction {...common} variant={symbol.variant as JunctionVariant} size={symbol.size?.width ?? 20} />;
     default:
       return null;
   }
@@ -152,15 +152,15 @@ const ConnectionRenderer: React.FC<{
   symbols: PIDSymbol[];
   values: Record<string, any>;
 }> = ({ connection, symbols, values }) => {
-  const fromSymbol = symbols.find(s => s.id === connection.from.symbolId);
-  const toSymbol = symbols.find(s => s.id === connection.to.symbolId);
+  const fromSymbol = symbols.find(s => s.id === connection.from?.symbolId);
+  const toSymbol = symbols.find(s => s.id === connection.to?.symbolId);
   if (!fromSymbol || !toSymbol) return null;
 
   // Build point list from source → waypoints → target
   const points = [
-    fromSymbol.transform.position,
+    fromSymbol.transform?.position || { x: 0, y: 0 },
     ...(connection.waypoints ?? []),
-    toSymbol.transform.position,
+    toSymbol.transform?.position || { x: 0, y: 0 },
   ];
 
   return (
