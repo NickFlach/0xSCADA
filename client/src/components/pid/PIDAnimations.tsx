@@ -17,16 +17,19 @@ const STATE_COLORS: Record<OperationalState, string> = {
   alarm: '#ef4444',      // red
   maintenance: '#f59e0b', // amber
   offline: '#9ca3af',    // light gray
+  fault: '#ef4444',      // red
+  startup: '#3b82f6',    // blue
+  shutdown: '#6b7280',   // gray
 };
 
 const ALARM_COLORS: Record<AlarmState, string> = {
   normal: '#22c55e',
   low: '#f59e0b',
   high: '#f59e0b',
-  'low-low': '#ef4444',
-  'high-high': '#ef4444',
   alarm: '#ef4444',
   warning: '#f59e0b',
+  critical: '#dc2626',
+  acknowledged: '#64748b',
 };
 
 export function getStateColor(state: OperationalState = 'running'): string {
