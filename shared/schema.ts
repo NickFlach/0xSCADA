@@ -31,6 +31,7 @@ import {
   primaryKey,
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
+import { createInsertSchema } from "drizzle-zod";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -76,9 +77,9 @@ export const assets = pgTable("assets", {
   status: assetStatusEnum("status").default("OK").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_assets_site_id").on(table.siteId),
-]);
+}, (table) => ({
+  siteIdIdx: index("idx_assets_site_id").on(table.siteId),
+}));
 
 // ─── RBAC: Roles & Permissions ───────────────────────────────────────────────
 
@@ -89,9 +90,9 @@ export const roles = pgTable("roles", {
   isSystem: boolean("is_system").default(false).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  uniqueIndex("idx_roles_name").on(table.name),
-]);
+}, (table) => ({
+  nameIdx: uniqueIndex("idx_roles_name").on(table.name),
+}));
 
 export const permissions = pgTable("permissions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -99,17 +100,17 @@ export const permissions = pgTable("permissions", {
   action: varchar("action", { length: 100 }).notNull(),
   description: text("description"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  uniqueIndex("idx_permissions_resource_action").on(table.resource, table.action),
-]);
+}, (table) => ({
+  resourceActionIdx: uniqueIndex("idx_permissions_resource_action").on(table.resource, table.action),
+}));
 
 export const rolePermissions = pgTable("role_permissions", {
   roleId: uuid("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
   permissionId: uuid("permission_id").notNull().references(() => permissions.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  primaryKey({ columns: [table.roleId, table.permissionId] }),
-]);
+}, (table) => ({
+  pk: primaryKey({ columns: [table.roleId, table.permissionId] }),
+}));
 
 export const users = pgTable("users", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -122,19 +123,19 @@ export const users = pgTable("users", {
   lastLoginAt: timestamp("last_login_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  uniqueIndex("idx_users_username").on(table.username),
-  uniqueIndex("idx_users_email").on(table.email),
-]);
+}, (table) => ({
+  usernameIdx: uniqueIndex("idx_users_username").on(table.username),
+  emailIdx: uniqueIndex("idx_users_email").on(table.email),
+}));
 
 export const userRoles = pgTable("user_roles", {
   userId: uuid("user_id").notNull().references(() => users.id, { onDelete: "cascade" }),
   roleId: uuid("role_id").notNull().references(() => roles.id, { onDelete: "cascade" }),
   siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  primaryKey({ columns: [table.userId, table.roleId] }),
-]);
+}, (table) => ({
+  pk: primaryKey({ columns: [table.userId, table.roleId] }),
+}));
 
 // ─── Audit Logs ──────────────────────────────────────────────────────────────
 
@@ -149,12 +150,12 @@ export const auditLogs = pgTable("audit_logs", {
   userAgent: text("user_agent"),
   siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_audit_logs_user_id").on(table.userId),
-  index("idx_audit_logs_action").on(table.action),
-  index("idx_audit_logs_resource").on(table.resource, table.resourceId),
-  index("idx_audit_logs_created_at").on(table.createdAt),
-]);
+}, (table) => ({
+  userIdIdx: index("idx_audit_logs_user_id").on(table.userId),
+  actionIdx: index("idx_audit_logs_action").on(table.action),
+  resourceIdx: index("idx_audit_logs_resource").on(table.resource, table.resourceId),
+  createdAtIdx: index("idx_audit_logs_created_at").on(table.createdAt),
+}));
 
 // ─── Recipes ─────────────────────────────────────────────────────────────────
 
@@ -168,9 +169,9 @@ export const recipes = pgTable("recipes", {
   createdBy: uuid("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_recipes_site_id").on(table.siteId),
-]);
+}, (table) => ({
+  siteIdIdx: index("idx_recipes_site_id").on(table.siteId),
+}));
 
 export const recipeVersions = pgTable("recipe_versions", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -183,9 +184,9 @@ export const recipeVersions = pgTable("recipe_versions", {
   comment: text("comment"),
   createdBy: uuid("created_by").references(() => users.id),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  uniqueIndex("idx_recipe_versions_recipe_version").on(table.recipeId, table.version),
-]);
+}, (table) => ({
+  recipeVersionIdx: uniqueIndex("idx_recipe_versions_recipe_version").on(table.recipeId, table.version),
+}));
 
 // ─── Alarms ──────────────────────────────────────────────────────────────────
 
@@ -203,10 +204,10 @@ export const alarms = pgTable("alarms", {
   delay: integer("delay_ms"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_alarms_site_id").on(table.siteId),
-  index("idx_alarms_asset_id").on(table.assetId),
-]);
+}, (table) => ({
+  siteIdIdx: index("idx_alarms_site_id").on(table.siteId),
+  assetIdIdx: index("idx_alarms_asset_id").on(table.assetId),
+}));
 
 export const alarmHistory = pgTable("alarm_history", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -219,11 +220,11 @@ export const alarmHistory = pgTable("alarm_history", {
   clearedAt: timestamp("cleared_at", { withTimezone: true }),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_alarm_history_alarm_id").on(table.alarmId),
-  index("idx_alarm_history_state").on(table.state),
-  index("idx_alarm_history_created_at").on(table.createdAt),
-]);
+}, (table) => ({
+  alarmIdIdx: index("idx_alarm_history_alarm_id").on(table.alarmId),
+  stateIdx: index("idx_alarm_history_state").on(table.state),
+  createdAtIdx: index("idx_alarm_history_created_at").on(table.createdAt),
+}));
 
 // ─── Historian Data ──────────────────────────────────────────────────────────
 
@@ -236,10 +237,10 @@ export const historianData = pgTable("historian_data", {
   quality: integer("quality").default(192),
   timestamp: timestamp("timestamp", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_historian_tag_timestamp").on(table.tagId, table.timestamp),
-  index("idx_historian_site_timestamp").on(table.siteId, table.timestamp),
-]);
+}, (table) => ({
+  tagTimestampIdx: index("idx_historian_tag_timestamp").on(table.tagId, table.timestamp),
+  siteTimestampIdx: index("idx_historian_site_timestamp").on(table.siteId, table.timestamp),
+}));
 
 // ─── Event Anchors ───────────────────────────────────────────────────────────
 
@@ -255,11 +256,11 @@ export const eventAnchors = pgTable("event_anchors", {
   details: text("details"),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_event_anchors_asset_id").on(table.assetId),
-  index("idx_event_anchors_timestamp").on(table.timestamp),
-  index("idx_event_anchors_tx_hash").on(table.txHash),
-]);
+}, (table) => ({
+  assetIdIdx: index("idx_event_anchors_asset_id").on(table.assetId),
+  timestampIdx: index("idx_event_anchors_timestamp").on(table.timestamp),
+  txHashIdx: index("idx_event_anchors_tx_hash").on(table.txHash),
+}));
 
 // ─── Maintenance Records ─────────────────────────────────────────────────────
 
@@ -274,9 +275,9 @@ export const maintenanceRecords = pgTable("maintenance_records", {
   notes: text("notes"),
   attachmentHash: varchar("attachment_hash", { length: 255 }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_maintenance_asset_id").on(table.assetId),
-]);
+}, (table) => ({
+  assetIdIdx: index("idx_maintenance_asset_id").on(table.assetId),
+}));
 
 // ─── Certifications ──────────────────────────────────────────────────────────
 
@@ -303,10 +304,10 @@ export const certifications = pgTable("certifications", {
   mintedAt: timestamp("minted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_certifications_site_id").on(table.siteId),
-  index("idx_certifications_status").on(table.status),
-]);
+}, (table) => ({
+  siteIdIdx: index("idx_certifications_site_id").on(table.siteId),
+  statusIdx: index("idx_certifications_status").on(table.status),
+}));
 
 export const certificationApprovals = pgTable("certification_approvals", {
   id: uuid("id").defaultRandom().primaryKey(),
@@ -318,6 +319,23 @@ export const certificationApprovals = pgTable("certification_approvals", {
   decidedAt: timestamp("decided_at", { withTimezone: true }),
   signature: text("signature"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
-}, (table) => [
-  index("idx_cert_approvals_cert_id").on(table.certificationId),
-]);
+}, (table) => ({
+  certIdIdx: index("idx_cert_approvals_cert_id").on(table.certificationId),
+}));
+
+// ─── Schema Exports ──────────────────────────────────────────────────────────
+
+// Insert schemas for validation
+export const insertSiteSchema = createInsertSchema(sites);
+export const insertAssetSchema = createInsertSchema(assets);
+export const insertEventAnchorSchema = createInsertSchema(eventAnchors);
+export const insertMaintenanceRecordSchema = createInsertSchema(maintenanceRecords);
+
+// Type exports
+export type Site = typeof sites.$inferSelect;
+export type Asset = typeof assets.$inferSelect;
+export type EventAnchor = typeof eventAnchors.$inferSelect;
+export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;
+export type InsertSite = typeof sites.$inferInsert;
+export type InsertAsset = typeof assets.$inferInsert;
+export type InsertEventAnchor = typeof eventAnchors.$inferInsert;
