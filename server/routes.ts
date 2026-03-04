@@ -82,9 +82,9 @@ export async function registerRoutes(
   // ==========================================================================
   // WEBSOCKET EVENT STREAM
   // ==========================================================================
-  (null as any).initialize(httpServer, "/ws/events");
-  tagStreamServer.initialize(httpServer, "/ws/tags");
-  unifiedStreamServer.initialize(httpServer, "/ws");  // unified endpoint (#255)
+  // WebSocket servers initialize if available
+  try { tagStreamServer?.initialize(httpServer, "/ws/tags"); } catch {}
+  try { unifiedStreamServer?.initialize(httpServer, "/ws"); } catch {}  // unified endpoint (#255)
 
   // WebSocket metrics endpoint
   app.get("/api/ws/metrics", (req, res) => {
