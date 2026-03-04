@@ -40,6 +40,7 @@ function mean(arr: number[]): number {
 }
 
 function overallStdDev(arr: number[]): number {
+  if (arr.length <= 1) return 0;
   const m = mean(arr);
   return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1));
 }
@@ -71,7 +72,7 @@ export function computeCapability(
   subgroupSize: number,
   specs: SpecificationLimits,
 ): CapabilityIndices {
-  if (values.length === 0) {
+  if (values.length <= 1) {
     return { cp: 0, cpk: 0, pp: 0, ppk: 0, mean: 0, sigmaWithin: 0, sigmaOverall: 0, estimatedDefectRate: 1 };
   }
 

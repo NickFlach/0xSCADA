@@ -249,9 +249,11 @@ export class ExplainabilityMonitor extends EventEmitter {
       .update(recordContent + this.lastDecisionHash)
       .digest('hex');
 
+    const seq = this.decisionSequence++;
     const record: DecisionRecord = {
       id,
       timestamp: new Date(),
+      sequence: seq,
       source: params.source,
       action: params.action,
       ruleApplied: params.ruleApplied ?? 'unspecified',
@@ -409,9 +411,11 @@ export class ExplainabilityMonitor extends EventEmitter {
       .update(entryContent + this.lastAuditHash)
       .digest('hex');
 
+    const seq = this.auditSequence++;
     const entry: AuditEntry = {
       id,
       timestamp: new Date(),
+      sequence: seq,
       userId: params.userId,
       action: params.action,
       resource: params.resource,
@@ -484,7 +488,7 @@ export class ExplainabilityMonitor extends EventEmitter {
   /** Verify the integrity of the decision record chain */
   verifyDecisionChain(): { valid: boolean; brokenAt?: string; details: string } {
     const sorted = Array.from(this.decisions.values())
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      .sort((a, b) => a.sequence - b.sequence);
 
     let previousHash = '0'.repeat(64);
     for (const record of sorted) {
