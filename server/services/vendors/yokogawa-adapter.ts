@@ -341,7 +341,8 @@ function vnetErrorToString(code: number): string {
 /** Modbus TCP request builder (shared with Emerson, but local to keep adapter self-contained) */
 let modbusTransId = 0;
 function buildModbusTcpRead(unitId: number, fc: number, startAddr: number, count: number): Buffer {
-  const tid = modbusTransId++ & 0xFFFF;
+  const tid = modbusTransId & 0xFFFF;
+  modbusTransId = (modbusTransId + 1) & 0xFFFF;
   const buf = Buffer.alloc(12);
   buf.writeUInt16BE(tid, 0);
   buf.writeUInt16BE(0, 2);

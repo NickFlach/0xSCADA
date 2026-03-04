@@ -576,6 +576,7 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
   private cipConnections: Map<string, CipConnection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
   private tagCache: Map<string, { value: any; timestamp: Date; quality: string; typeCode: number }> = new Map();
+  private static readonly MAX_TAG_CACHE = 50000;
   private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
   private messagesProcessed = 0;
   private errorsCount = 0;
@@ -619,8 +620,8 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
     const connection: CipConnection = {
       sessionHandle: 0, // Will be set from response
       connectionId: 0,
-      serialNumber: Math.floor(Math.random() * 0xFFFF),
-      originatorSerialNumber: Math.floor(Math.random() * 0xFFFFFFFF),
+      serialNumber: Math.floor(Math.random() * 0xFFFF) & 0xFFFF,
+      originatorSerialNumber: Math.floor(Math.random() * 0xFFFFFFFF) >>> 0,
       rpi: ROCKWELL_CONNECTION_PARAMS.rpi * 1000, // Convert to microseconds
       endpoint,
       socket: null, // TCP socket reference

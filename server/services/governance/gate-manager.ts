@@ -23,6 +23,9 @@ import type { VerificationInput, PipelineResult } from '../verification/types';
 
 const logger = pino({ name: 'gate-manager' });
 
+/** Max gate instances to keep in memory before evicting oldest resolved */
+const MAX_GATE_INSTANCES = 10000;
+
 export class GateManager extends EventEmitter implements IGateManager {
   private definitions: Map<string, GateDefinition> = new Map();
   private instances: Map<string, GateInstance> = new Map();
@@ -99,6 +102,7 @@ export class GateManager extends EventEmitter implements IGateManager {
     }
 
     this.instances.set(instanceId, instance);
+    this.evictOldInstances();
     this.emit('gate:created', instance);
     if (instance.state !== 'pending') {
       this.emit(`gate:${instance.state}`, instance);
@@ -240,6 +244,18 @@ export class GateManager extends EventEmitter implements IGateManager {
         return 'cancelled';
       default:
         return 'pending';
+    }
+  }
+
+  private evictOldInstances(): void {
+    if (this.instances.size <= MAX_GATE_INSTANCES) return;
+    // Remove oldest resolved instances first
+    const resolved = Array.from(this.instances.entries())
+      .filter(([, i]) => i.state !== 'pending')
+      .sort((a, b) => (a[1].createdAt < b[1].createdAt ? -1 : 1));
+    const toRemove = resolved.slice(0, this.instances.size - MAX_GATE_INSTANCES);
+    for (const [key] of toRemove) {
+      this.instances.delete(key);
     }
   }
 
