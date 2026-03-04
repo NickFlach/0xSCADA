@@ -9,5 +9,5 @@
 
 export * from './rest';
 export * from './websocket';
-export * from './events';
+export { type EventSubscription, type StreamedEvent } from './events';
 export * from './authentication';

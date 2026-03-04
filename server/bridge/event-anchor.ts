@@ -71,7 +71,7 @@ export class EventAnchorBridge extends EventEmitter {
       this.config.contractAddress = process.env.EVENT_ANCHOR_CONTRACT || 
                                    await this.getDeployedContractAddress();
     } catch (error) {
-      logError('Failed to get EventAnchor contract address', error);
+      logError('Failed to get EventAnchor contract address', error as any);
       this.config.enabled = false;
       return;
     }
@@ -196,7 +196,7 @@ export class EventAnchorBridge extends EventEmitter {
       
     } catch (error) {
       batch.status = 'failed';
-      logError(`Failed to anchor event batch ${batch.id}`, error);
+      logError(`Failed to anchor event batch ${batch.id}`, error as any);
       this.emit('batch-failed', batch, error);
     }
 

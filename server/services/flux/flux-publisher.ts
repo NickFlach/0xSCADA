@@ -124,7 +124,7 @@ export class FluxPublisher {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json() as FluxEntity;
     } catch (error) {
-      logError(`⚡ Flux entity read failed: ${entityId}`, error, "flux");
+      logError(`⚡ Flux entity read failed: ${entityId}`, error as any);
       return null;
     }
   }
@@ -139,7 +139,7 @@ export class FluxPublisher {
       const data = await res.json();
       return (Array.isArray(data) ? data : data.entities || []) as FluxEntity[];
     } catch (error) {
-      logError("⚡ Flux entity list failed", error, "flux");
+      logError("⚡ Flux entity list failed", error as any);
       return [];
     }
   }

@@ -17,7 +17,6 @@ export { complianceService } from './compliance';
 
 // ── Flux Service ─────────────────────────────────────────────────────────────
 export * from './flux';
-export { fluxClient, startFluxIntegration } from './flux';
 
 // ── Geometry Service ─────────────────────────────────────────────────────────
 export * from './geometry';

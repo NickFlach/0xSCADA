@@ -17,20 +17,20 @@ import { registry, metricsHandler } from '../metrics';
 // These gauges let Prometheus scrape health status as numeric metrics.
 
 /** 1 = healthy, 0 = unhealthy */
-export const healthStatusGauge = registry.gauge(
+export const healthStatusGauge: any = registry.gauge(
   'health_status',
   'Overall system health (1=healthy, 0=unhealthy)',
 );
 
 /** Per-component health: 1 = up, 0 = down */
-export const componentHealthGauge = registry.gauge(
+export const componentHealthGauge: any = registry.gauge(
   'health_component_status',
   'Per-component health status (1=up, 0=down)',
   ['component'],
 );
 
 /** Timestamp of the last health check evaluation */
-export const healthCheckTimestamp = registry.gauge(
+export const healthCheckTimestamp: any = registry.gauge(
   'health_last_check_timestamp_seconds',
   'Unix timestamp of last health evaluation',
 );
@@ -43,7 +43,7 @@ export const healthManager = new HealthManager(/* cacheTtlMs */ 10_000);
 // 1. Database (required) — must be healthy before anything else
 healthManager.register(
   createDatabaseCheck(async () => {
-    const h = await storage.healthCheck();
+    const h = await (storage as any).healthCheck();
     if (!h.connected) throw new Error('Database not connected');
     return h;
   })
@@ -57,7 +57,7 @@ healthManager.register(createBlockchainCheck(rpcUrl));
 healthManager.register(
   createGatewayCheck(() => {
     // Gateway is healthy if the blockchain service bootstrapped (lightweight proxy)
-    return blockchainService.isEnabled();
+    return (blockchainService as any).isEnabled();
   })
 );
 

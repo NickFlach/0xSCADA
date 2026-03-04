@@ -143,7 +143,7 @@ export class UbiquityService extends EventEmitter {
           }
         }
       } catch (error) {
-        logError(`Discovery failed for adapter ${adapterName}`, error);
+        logError(`Discovery failed for adapter ${adapterName}`, error as any);
       }
     }
 
@@ -416,7 +416,7 @@ export class UbiquityService extends EventEmitter {
     // Run discovery every 5 minutes
     this.discoveryTimer = setInterval(() => {
       this.discoverDevices().catch(error => {
-        logError('Periodic device discovery failed', error);
+        logError('Periodic device discovery failed', error as any);
       });
     }, 5 * 60 * 1000);
 
