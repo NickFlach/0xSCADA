@@ -22,17 +22,16 @@ const config: HardhatUserConfig = {
   },
   networks: {
     hardhat: {
+      type: "edr-simulated",
       // Enable for local development and testing
       chainId: 31337,
     },
     localhost: {
+      type: "http",
       url: "http://127.0.0.1:8545",
     },
   },
-  // Hardhat fuzzing configuration
-  mocha: {
-    timeout: 300000, // 5 minutes for fuzz tests
-  },
+  // Hardhat 3 — mocha config moved to hardhat-toolbox or test runner config
 };
 
 export default config;
