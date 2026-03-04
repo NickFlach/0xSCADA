@@ -1,5 +1,3 @@
-import { storage } from "./storage";
-import type { InsertSite, InsertAsset, InsertEventAnchor } from "@shared/schema";
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { getFluxPublisher } from "./services/flux";
@@ -9,11 +7,21 @@ interface SimulatorConfig {
   eventIntervalMs: number;
 }
 
+interface SimAsset {
+  id: string;
+  siteId: string;
+  siteName: string;
+  assetType: string;
+  nameOrTag: string;
+  critical: boolean;
+  status: string;
+  metadata: Record<string, any>;
+}
+
 class FieldSimulator {
   private config: SimulatorConfig;
   private intervalId: NodeJS.Timeout | null = null;
-  private siteIds: string[] = [];
-  private assetIds: string[] = [];
+  private assets: SimAsset[] = [];
   private isInitialized = false;
 
   constructor() {
@@ -31,91 +39,23 @@ class FieldSimulator {
 
     log("🏭 Initializing field simulator...", "simulator");
 
-    try {
-      await this.seedData();
-      this.isInitialized = true;
-      log(`✅ Field simulator ready (${this.assetIds.length} assets monitored)`, "simulator");
-      log(`   Event generation interval: ${this.config.eventIntervalMs}ms`, "simulator");
-    } catch (error) {
-      logError("❌ Failed to initialize simulator", error as any);
-    }
-  }
+    // In-memory demo assets — no database required
+    this.assets = [
+      { id: "asset-1", siteId: "site-1", siteName: "Substation Alpha", assetType: "TRANSFORMER", nameOrTag: "TR-MAIN-01", critical: true, status: "OK", metadata: { kVA: 2500, voltage: "13.8kV/480V" } },
+      { id: "asset-2", siteId: "site-1", siteName: "Substation Alpha", assetType: "BREAKER", nameOrTag: "BK-FEEDER-01", critical: true, status: "OK", metadata: { amp: 1200, type: "Vacuum" } },
+      { id: "asset-3", siteId: "site-2", siteName: "Solar Array B", assetType: "INVERTER", nameOrTag: "INV-01", critical: false, status: "WARNING", metadata: { capacity: "500kW" } },
+      { id: "asset-4", siteId: "site-3", siteName: "Hydro Plant C", assetType: "MCC", nameOrTag: "MCC-PUMP-01", critical: true, status: "OK", metadata: { buckets: 12 } },
+      { id: "asset-5", siteId: "site-1", siteName: "Substation Alpha", assetType: "BREAKER", nameOrTag: "BK-FEEDER-02", critical: true, status: "OK", metadata: { amp: 800, type: "SF6" } },
+      { id: "asset-6", siteId: "site-2", siteName: "Solar Array B", assetType: "INVERTER", nameOrTag: "INV-02", critical: false, status: "OK", metadata: { capacity: "500kW" } },
+    ];
 
-  private async seedData() {
-    const existingSites = await (storage as any).getSites();
-    
-    if (existingSites.length === 0) {
-      log("dY?- Seeding initial SCADA infrastructure...", "simulator");
-
-      const sites: any[] = [
-        { id: "site-1", name: "Substation Alpha", location: "Sector 7G", owner: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", status: "ONLINE" },
-        { id: "site-2", name: "Solar Array B", location: "Mojave Sector", owner: "0x3D2c6C6f52b92B2E5f9f4C5d6B8F1E9D2A3B4C5D", status: "ONLINE" },
-        { id: "site-3", name: "Hydro Plant C", location: "River Valley", owner: "0x9F1E8D7C6B5A4F3E2D1C0B9A8F7E6D5C4B3A2E1F", status: "MAINTENANCE" },
-      ];
-
-      for (const siteData of sites) {
-        const site = await (storage as any).createSite(siteData);
-        this.siteIds.push(site.id);
-      }
-
-      const assets: any[] = [
-        { 
-          id: "asset-1",
-          siteId: this.siteIds[0], 
-          assetType: "TRANSFORMER", 
-          nameOrTag: "TR-MAIN-01", 
-          critical: true, 
-          metadata: { kVA: 2500, voltage: "13.8kV/480V" },
-          status: "OK"
-        },
-        { 
-          id: "asset-2",
-          siteId: this.siteIds[0], 
-          assetType: "BREAKER", 
-          nameOrTag: "BK-FEEDER-01", 
-          critical: true, 
-          metadata: { amp: 1200, type: "Vacuum" },
-          status: "OK"
-        },
-        { 
-          id: "asset-3",
-          siteId: this.siteIds[1], 
-          assetType: "INVERTER", 
-          nameOrTag: "INV-01", 
-          critical: false, 
-          metadata: { capacity: "500kW" },
-          status: "WARNING"
-        },
-        { 
-          id: "asset-4",
-          siteId: this.siteIds[2], 
-          assetType: "MCC", 
-          nameOrTag: "MCC-PUMP-01", 
-          critical: true, 
-          metadata: { buckets: 12 },
-          status: "OK"
-        },
-      ];
-
-      for (const assetData of assets) {
-        const asset = await (storage as any).createAsset(assetData);
-        this.assetIds.push(asset.id);
-      }
-
-      log(`   Created ${sites.length} sites and ${assets.length} assets`, "simulator");
-    } else {
-      this.siteIds = existingSites.map((s: any) => s.id);
-      const existingAssets = await (storage as any).getAssets();
-      this.assetIds = existingAssets.map((a: any) => a.id);
-      log(`   Loaded ${this.siteIds.length} existing sites and ${this.assetIds.length} assets`, "simulator");
-    }
+    this.isInitialized = true;
+    log(`✅ Field simulator ready (${this.assets.length} assets monitored)`, "simulator");
+    log(`   Event generation interval: ${this.config.eventIntervalMs}ms`, "simulator");
   }
 
   start() {
-    if (!this.config.enabled || !this.isInitialized) {
-      return;
-    }
-
+    if (!this.config.enabled || !this.isInitialized) return;
     if (this.intervalId) {
       logWarn("Simulator already running", "simulator");
       return;
@@ -125,7 +65,7 @@ class FieldSimulator {
       this.generateEvent();
     }, this.config.eventIntervalMs);
 
-    log("dY?- Field simulator started", "simulator");
+    log("🏭 Field simulator started — publishing to Flux", "simulator");
   }
 
   stop() {
@@ -137,64 +77,33 @@ class FieldSimulator {
   }
 
   private async generateEvent() {
-    if (this.assetIds.length === 0) {
-      return;
-    }
+    if (this.assets.length === 0) return;
 
-    const assetId = this.assetIds[Math.floor(Math.random() * this.assetIds.length)];
-    const asset = await (storage as any).getAssetById(assetId);
-    
-    if (!asset) {
-      return;
-    }
-
+    const asset = this.assets[Math.floor(Math.random() * this.assets.length)];
     const eventTypes = this.getEventTypesForAsset(asset.assetType);
     const eventType = eventTypes[Math.floor(Math.random() * eventTypes.length)];
-    
     const payload = this.generatePayload(asset, eventType);
     const details = this.generateDetails(asset, eventType, payload);
 
-    const eventData: any = {
-      assetId: asset.id,
-      eventType,
-      payloadHash: "",
-      timestamp: new Date(),
-      recordedBy: "0xSimulator_Field",
-      txHash: null,
-      details,
-      fullPayload: payload,
-    };
-
     try {
-      const port = process.env.PORT || "5000";
-      const response = await fetch(`http://localhost:${port}/api/events`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          assetId: eventData.assetId,
-          eventType: eventData.eventType,
-          recordedBy: eventData.recordedBy,
-          details: eventData.details,
-          payload: eventData.fullPayload,
-        }),
+      log(`📡 [${asset.nameOrTag}] ${eventType} → ${details}`, "simulator");
+
+      // Publish to Flux world state
+      getFluxPublisher().publishAsset(asset.nameOrTag.toLowerCase(), {
+        asset_type: asset.assetType,
+        name: asset.nameOrTag,
+        status: asset.status,
+        critical: asset.critical,
+        site: asset.siteName,
+        site_id: asset.siteId,
+        last_event_type: eventType,
+        last_event_details: details,
+        last_event_time: new Date().toISOString(),
+        ...(typeof payload === 'object' ? payload : { value: payload }),
       });
 
-      if (response.ok) {
-        log(`📡 [${asset.nameOrTag}] ${eventType} → Anchored`, "simulator");
-        
-        // Publish to Flux world state (ADR-0015)
-        getFluxPublisher().publishAsset(asset.nameOrTag.toLowerCase(), {
-          asset_type: asset.assetType,
-          name: asset.nameOrTag,
-          status: asset.status,
-          critical: asset.critical,
-          last_event_type: eventType,
-          last_event_details: details,
-          site_id: asset.siteId,
-          ...(typeof payload === 'object' ? payload : { value: payload }),
-        });
-
-        // Broadcast tag update to live dashboard via WebSocket
+      // Broadcast tag update to live dashboard via WebSocket
+      try {
         tagStreamServer.broadcastTagUpdate({
           tagName: `${asset.nameOrTag}.${eventType}`,
           value: typeof payload === 'object' && payload !== null
@@ -203,88 +112,49 @@ class FieldSimulator {
           quality: "good",
           timestamp: new Date().toISOString(),
         });
-      }
+      } catch { /* WebSocket not connected — that's fine */ }
     } catch (error) {
-      logError("❌ Failed to submit event", error as any);
+      logError("❌ Failed to generate event", error as any);
     }
   }
 
   private getEventTypesForAsset(assetType: string): string[] {
     switch (assetType) {
-      case "BREAKER":
-        return ["BREAKER_TRIP", "BREAKER_CLOSE"];
-      case "TRANSFORMER":
-      case "INVERTER":
-        return ["SETPOINT_CHANGE", "MAINTENANCE_PERFORMED"];
-      case "MCC":
-        return ["SETPOINT_CHANGE"];
-      case "FEEDER":
-        return ["BREAKER_TRIP", "BREAKER_CLOSE"];
-      default:
-        return ["SETPOINT_CHANGE"];
+      case "BREAKER": return ["BREAKER_TRIP", "BREAKER_CLOSE"];
+      case "TRANSFORMER": case "INVERTER": return ["SETPOINT_CHANGE", "MAINTENANCE_PERFORMED"];
+      case "MCC": return ["SETPOINT_CHANGE"];
+      default: return ["SETPOINT_CHANGE"];
     }
   }
 
-  private generatePayload(asset: any, eventType: string): any {
-    const base = {
-      assetId: asset.id,
-      assetTag: asset.nameOrTag,
-      timestamp: new Date().toISOString(),
-      eventType,
-    };
+  private generatePayload(asset: SimAsset, eventType: string): any {
+    const base = { assetId: asset.id, assetTag: asset.nameOrTag, timestamp: new Date().toISOString(), eventType };
 
     switch (eventType) {
       case "BREAKER_TRIP":
-        return {
-          ...base,
-          tripReason: this.randomChoice(["Overcurrent", "Ground Fault", "Manual Trip", "System Fault"]),
-          current: Math.floor(Math.random() * 2000) + 800,
-          phase: this.randomChoice(["A", "B", "C", "ABC"]),
-        };
+        return { ...base, tripReason: this.pick(["Overcurrent", "Ground Fault", "Manual Trip", "System Fault"]), current: Math.floor(Math.random() * 2000) + 800, phase: this.pick(["A", "B", "C", "ABC"]) };
       case "BREAKER_CLOSE":
-        return {
-          ...base,
-          operationType: this.randomChoice(["Manual", "Automatic", "Remote"]),
-          preCloseChecks: true,
-        };
+        return { ...base, operationType: this.pick(["Manual", "Automatic", "Remote"]), preCloseChecks: true };
       case "SETPOINT_CHANGE":
-        return {
-          ...base,
-          parameter: this.randomChoice(["Max Power", "Target Voltage", "Frequency Setpoint"]),
-          oldValue: Math.floor(Math.random() * 100),
-          newValue: Math.floor(Math.random() * 100),
-          changedBy: "Operator_" + Math.floor(Math.random() * 10),
-        };
+        return { ...base, parameter: this.pick(["Max Power", "Target Voltage", "Frequency Setpoint"]), oldValue: Math.floor(Math.random() * 100), newValue: Math.floor(Math.random() * 100), changedBy: "Operator_" + Math.floor(Math.random() * 10) };
       case "MAINTENANCE_PERFORMED":
-        return {
-          ...base,
-          maintenanceType: this.randomChoice(["IR Scan", "Visual Inspection", "Oil Analysis"]),
-          findings: this.randomChoice(["Normal", "Minor hotspot detected", "No issues"]),
-        };
+        return { ...base, maintenanceType: this.pick(["IR Scan", "Visual Inspection", "Oil Analysis"]), findings: this.pick(["Normal", "Minor hotspot detected", "No issues"]) };
       default:
         return base;
     }
   }
 
-  private generateDetails(asset: any, eventType: string, payload: any): string {
+  private generateDetails(asset: SimAsset, eventType: string, payload: any): string {
     switch (eventType) {
-      case "BREAKER_TRIP":
-        return `${payload.tripReason} (Phase ${payload.phase}) > ${payload.current}A`;
-      case "BREAKER_CLOSE":
-        return `${payload.operationType} Close Operation`;
-      case "SETPOINT_CHANGE":
-        return `${payload.parameter}: ${payload.oldValue} → ${payload.newValue}`;
-      case "MAINTENANCE_PERFORMED":
-        return `${payload.maintenanceType} - ${payload.findings}`;
-      default:
-        return `Event recorded for ${asset.nameOrTag}`;
+      case "BREAKER_TRIP": return `${payload.tripReason} (Phase ${payload.phase}) > ${payload.current}A`;
+      case "BREAKER_CLOSE": return `${payload.operationType} Close Operation`;
+      case "SETPOINT_CHANGE": return `${payload.parameter}: ${payload.oldValue} → ${payload.newValue}`;
+      case "MAINTENANCE_PERFORMED": return `${payload.maintenanceType} - ${payload.findings}`;
+      default: return `Event recorded for ${asset.nameOrTag}`;
     }
   }
 
-  private randomChoice<T>(array: T[]): T {
-    return array[Math.floor(Math.random() * array.length)];
-  }
+  private pick<T>(arr: T[]): T { return arr[Math.floor(Math.random() * arr.length)]; }
 }
 
 export const fieldSimulator = new FieldSimulator();
-
