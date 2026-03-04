@@ -14,12 +14,14 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@openzeppelin/contracts": "^5.6.1",
     "azure-iot-device": "^1.17.8",
     "azure-iot-device-mqtt": "^1.15.6",
     "dotenv": "^16.4.0",
     "drizzle-kit": "^0.31.9",
     "drizzle-orm": "^0.29.0",
     "drizzle-zod": "^0.5.1",
+    "ethers": "^6.16.0",
     "express": "^4.18.0",
     "hardhat": "^3.1.10",
     "ioredis": "^5.3.0",
