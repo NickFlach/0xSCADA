@@ -6,41 +6,67 @@
  */
 
 import { describe, test, expect, beforeAll, afterAll, vi } from 'vitest';
-import http from 'http';
+import { spawn, type ChildProcess } from 'child_process';
+import { promisify } from 'util';
+
+const sleep = promisify(setTimeout);
 
 describe('App Startup Integration', () => {
-  let server: http.Server;
+  let serverProcess: ChildProcess;
   let baseUrl: string;
   const testPort = 5555; // Different from default to avoid conflicts
   
   beforeAll(async () => {
-    // Set test environment
-    process.env.NODE_ENV = 'test';
-    process.env.PORT = testPort.toString();
-    
-    // Mock console.log to reduce noise during tests
-    vi.spyOn(console, 'log').mockImplementation(() => {});
-    
-    // Import and start the server
-    // We need to import after setting environment variables
-    const serverModule = await import('../../server/index');
-    
-    // Give the server time to start
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
     baseUrl = `http://localhost:${testPort}`;
-  }, 15000); // Increase timeout for server startup
-
-  afterAll(async () => {
-    // Clean shutdown
-    if (server) {
-      await new Promise<void>((resolve) => {
-        server.close(() => resolve());
-      });
+    
+    // Start server as a separate process to properly isolate and control it
+    serverProcess = spawn('npm', ['run', 'dev'], {
+      env: {
+        ...process.env,
+        NODE_ENV: 'test',
+        PORT: testPort.toString(),
+        // Disable some services for faster startup in tests
+        ENABLE_SIMULATOR: 'false',
+        ENABLE_FLUX_INTEGRATION: 'false'
+      },
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
+    
+    // Wait for server to be ready by checking health endpoint
+    let attempts = 0;
+    const maxAttempts = 30; // 30 seconds max
+    
+    while (attempts < maxAttempts) {
+      try {
+        const response = await fetch(`${baseUrl}/api/health`);
+        if (response.ok) {
+          break;
+        }
+      } catch {
+        // Server not ready yet
+      }
+      
+      attempts++;
+      await sleep(1000);
     }
     
-    // Restore console.log
-    vi.restoreAllMocks();
+    if (attempts >= maxAttempts) {
+      throw new Error('Server failed to start within 30 seconds');
+    }
+  }, 35000); // Allow 35 seconds for full startup
+
+  afterAll(async () => {
+    // Clean shutdown of server process
+    if (serverProcess && !serverProcess.killed) {
+      serverProcess.kill('SIGTERM');
+      
+      // Give it 5 seconds to shut down gracefully
+      await sleep(5000);
+      
+      if (!serverProcess.killed) {
+        serverProcess.kill('SIGKILL');
+      }
+    }
   });
 
   test('server starts without crashing', async () => {
