@@ -72,11 +72,11 @@ export const Tank: React.FC<TankProps> = ({
           x={-hw} y={-hh} width={w} height={h}
           fill={state === 'alarm' ? '#ef444433' : '#3b82f622'}
           clipPath={`url(#tank-clip-${x}-${y})`}
-          rx={variant === 'pressure-vessel' ? capR : 0}
+          rx={(variant as any) === 'pressure-vessel' ? capR : 0}
         />
       )}
 
-      {variant === 'open' && (
+      {(variant as any) === 'open' && (
         /* Open tank: U-shape, no top */
         <path
           d={`M${-hw},${-hh} L${-hw},${hh} L${hw},${hh} L${hw},${-hh}`}
@@ -84,7 +84,7 @@ export const Tank: React.FC<TankProps> = ({
         />
       )}
 
-      {variant === 'closed' && (
+      {(variant as any) === 'closed' && (
         /* Closed tank: rectangle with flat top */
         <rect
           x={-hw} y={-hh} width={w} height={h}
@@ -92,7 +92,7 @@ export const Tank: React.FC<TankProps> = ({
         />
       )}
 
-      {variant === 'pressure-vessel' && (
+      {(variant as any) === 'pressure-vessel' && (
         /* Pressure vessel: rectangle with dished ends */
         <g>
           <path

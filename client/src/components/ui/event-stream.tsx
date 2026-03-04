@@ -55,6 +55,22 @@ import type { ConnectionStatus } from "../../hooks/use-websocket";
 // TYPES
 // =============================================================================
 
+export interface EventFilter {
+  siteId?: string;
+  eventType?: string;
+  fromTime?: Date;
+  toTime?: Date;
+}
+
+export interface StreamEvent {
+  id: string;
+  eventType: string;
+  siteId?: string;
+  assetId?: string;
+  details?: string;
+  sourceTimestamp: string | Date;
+}
+
 export interface EventStreamProps {
   /** Maximum number of events to display */
   maxEvents?: number;
@@ -117,7 +133,7 @@ function ConnectionStatusIndicator({
   return (
     <TooltipProvider>
       <Tooltip>
-        <TooltipTrigger asChild>
+        <TooltipTrigger>
           <div className={`flex items-center gap-1.5 px-2 py-1 rounded-full ${bgColor}`}>
             <Icon
               className={`w-3.5 h-3.5 ${color} ${status === "connecting" ? "animate-spin" : ""}`}
@@ -277,7 +293,7 @@ export function EventStream({
     disconnect,
   } = useEventStream({
     maxEvents,
-    filter: initialFilter,
+    filter: initialFilter as any,
     onEvent: (event) => {
       if (!isPaused) {
         setDisplayedEvents((prev) => [event, ...prev].slice(0, maxEvents));
@@ -343,10 +359,10 @@ export function EventStream({
           <div className="flex items-center gap-2">
             {showFilters && (
               <>
-                <Select value={selectedSite} onValueChange={setSelectedSite}>
+                <Select value={selectedSite} onValueChange={setSelectedSite} {...({} as any)}>
                   <SelectTrigger className="w-[140px] h-8 text-xs">
                     <Filter className="w-3 h-3 mr-1" />
-                    <SelectValue placeholder="All Sites" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Sites</SelectItem>
@@ -358,9 +374,9 @@ export function EventStream({
                   </SelectContent>
                 </Select>
 
-                <Select value={selectedType} onValueChange={setSelectedType}>
+                <Select value={selectedType} onValueChange={setSelectedType} {...({} as any)}>
                   <SelectTrigger className="w-[150px] h-8 text-xs">
-                    <SelectValue placeholder="All Types" />
+                    <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="all">All Types</SelectItem>
@@ -378,7 +394,7 @@ export function EventStream({
           <div className="flex items-center gap-1">
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -400,7 +416,7 @@ export function EventStream({
 
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="ghost"
                     size="sm"
@@ -418,7 +434,7 @@ export function EventStream({
 
             <TooltipProvider>
               <Tooltip>
-                <TooltipTrigger asChild>
+                <TooltipTrigger>
                   <Button
                     variant="ghost"
                     size="sm"

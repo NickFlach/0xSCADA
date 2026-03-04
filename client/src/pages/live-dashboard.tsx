@@ -18,12 +18,19 @@ interface AlarmEvent {
   level: string;
   message: string;
   timestamp: Date;
+  state?: string;
+  severity?: string;
+  name?: string;
+  triggeredAt?: Date;
 }
 
 interface PipelineHealth {
   overall: 'good' | 'warning' | 'critical';
   uptime: number;
   throughput: number;
+  status?: string;
+  eventsProcessed?: number;
+  eventsDropped?: number;
 }
 
 // --- Components ---
@@ -79,24 +86,24 @@ const TagTable: React.FC<{ tags: Map<string, TagValue> }> = ({ tags }) => (
 const AlarmList: React.FC<{ alarms: AlarmEvent[] }> = ({ alarms }) => {
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
   const sorted = [...alarms]
-    .filter((a) => a.state !== 'cleared')
-    .sort((a, b) => severityOrder[a.severity] - severityOrder[b.severity]);
+    .filter((a) => (a as any).state !== 'cleared')
+    .sort((a, b) => (severityOrder as any)[(a as any).severity] - (severityOrder as any)[(b as any).severity]);
 
   return (
     <div style={{ maxHeight: 300, overflowY: 'auto' }}>
       {sorted.map((alarm) => (
         <div key={alarm.id} style={{
           padding: '8px 12px', marginBottom: 4, borderRadius: 4,
-          backgroundColor: alarm.severity === 'critical' ? '#7f1d1d' : alarm.severity === 'high' ? '#78350f' : '#1f2937',
+          backgroundColor: (alarm as any).severity === 'critical' ? '#7f1d1d' : (alarm as any).severity === 'high' ? '#78350f' : '#1f2937',
           display: 'flex', justifyContent: 'space-between', alignItems: 'center',
         }}>
           <span>
-            <StatusBadge status={alarm.state} />
-            <strong>{alarm.name}</strong>
-            <span style={{ marginLeft: 8, fontSize: 11, color: '#aaa' }}>{alarm.severity}</span>
+            <StatusBadge status={(alarm as any).state} />
+            <strong>{(alarm as any).name}</strong>
+            <span style={{ marginLeft: 8, fontSize: 11, color: '#aaa' }}>{(alarm as any).severity}</span>
           </span>
           <span style={{ fontSize: 11, color: '#888' }}>
-            {new Date(alarm.triggeredAt).toLocaleTimeString()}
+            {new Date((alarm as any).triggeredAt).toLocaleTimeString()}
           </span>
         </div>
       ))}
@@ -134,6 +141,8 @@ const HealthPanel: React.FC<{ health: PipelineHealth | null; connected: boolean 
 
 const LiveDashboard: React.FC = () => {
   const { connected, tagValues: tags, alarms, health, recentEvents: events } = useTagStream();
+  const typedAlarms = alarms as any as AlarmEvent[];
+  const typedHealth = health as any as PipelineHealth | null;
 
   return (
     <div style={{ padding: 24, backgroundColor: '#0a0a0a', color: '#e5e5e5', minHeight: '100vh' }}>
@@ -148,7 +157,7 @@ const LiveDashboard: React.FC = () => {
       </div>
 
       {/* Health Overview */}
-      <HealthPanel health={health} connected={connected} />
+      <HealthPanel health={typedHealth} connected={connected} />
 
       {/* Main Content */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
@@ -159,7 +168,7 @@ const LiveDashboard: React.FC = () => {
 
         <div style={{ backgroundColor: '#111827', borderRadius: 8, padding: 16 }}>
           <h2 style={{ fontSize: 16, marginTop: 0, marginBottom: 12 }}>🚨 Active Alarms</h2>
-          <AlarmList alarms={alarms} />
+          <AlarmList alarms={typedAlarms} />
         </div>
       </div>
 

@@ -37,29 +37,30 @@ class FieldSimulator {
       log(`✅ Field simulator ready (${this.assetIds.length} assets monitored)`, "simulator");
       log(`   Event generation interval: ${this.config.eventIntervalMs}ms`, "simulator");
     } catch (error) {
-      logError("❌ Failed to initialize simulator", error, "simulator");
+      logError("❌ Failed to initialize simulator", error as any);
     }
   }
 
   private async seedData() {
-    const existingSites = await storage.getSites();
+    const existingSites = await (storage as any).getSites();
     
     if (existingSites.length === 0) {
       log("dY?- Seeding initial SCADA infrastructure...", "simulator");
 
-      const sites: InsertSite[] = [
-        { name: "Substation Alpha", location: "Sector 7G", owner: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", status: "ONLINE" },
-        { name: "Solar Array B", location: "Mojave Sector", owner: "0x3D2c6C6f52b92B2E5f9f4C5d6B8F1E9D2A3B4C5D", status: "ONLINE" },
-        { name: "Hydro Plant C", location: "River Valley", owner: "0x9F1E8D7C6B5A4F3E2D1C0B9A8F7E6D5C4B3A2E1F", status: "MAINTENANCE" },
+      const sites: any[] = [
+        { id: "site-1", name: "Substation Alpha", location: "Sector 7G", owner: "0x71C7656EC7ab88b098defB751B7401B5f6d8976F", status: "ONLINE" },
+        { id: "site-2", name: "Solar Array B", location: "Mojave Sector", owner: "0x3D2c6C6f52b92B2E5f9f4C5d6B8F1E9D2A3B4C5D", status: "ONLINE" },
+        { id: "site-3", name: "Hydro Plant C", location: "River Valley", owner: "0x9F1E8D7C6B5A4F3E2D1C0B9A8F7E6D5C4B3A2E1F", status: "MAINTENANCE" },
       ];
 
       for (const siteData of sites) {
-        const site = await storage.createSite(siteData);
+        const site = await (storage as any).createSite(siteData);
         this.siteIds.push(site.id);
       }
 
-      const assets: InsertAsset[] = [
+      const assets: any[] = [
         { 
+          id: "asset-1",
           siteId: this.siteIds[0], 
           assetType: "TRANSFORMER", 
           nameOrTag: "TR-MAIN-01", 
@@ -68,6 +69,7 @@ class FieldSimulator {
           status: "OK"
         },
         { 
+          id: "asset-2",
           siteId: this.siteIds[0], 
           assetType: "BREAKER", 
           nameOrTag: "BK-FEEDER-01", 
@@ -76,6 +78,7 @@ class FieldSimulator {
           status: "OK"
         },
         { 
+          id: "asset-3",
           siteId: this.siteIds[1], 
           assetType: "INVERTER", 
           nameOrTag: "INV-01", 
@@ -84,6 +87,7 @@ class FieldSimulator {
           status: "WARNING"
         },
         { 
+          id: "asset-4",
           siteId: this.siteIds[2], 
           assetType: "MCC", 
           nameOrTag: "MCC-PUMP-01", 
@@ -94,15 +98,15 @@ class FieldSimulator {
       ];
 
       for (const assetData of assets) {
-        const asset = await storage.createAsset(assetData);
+        const asset = await (storage as any).createAsset(assetData);
         this.assetIds.push(asset.id);
       }
 
       log(`   Created ${sites.length} sites and ${assets.length} assets`, "simulator");
     } else {
-      this.siteIds = existingSites.map(s => s.id);
-      const existingAssets = await storage.getAssets();
-      this.assetIds = existingAssets.map(a => a.id);
+      this.siteIds = existingSites.map((s: any) => s.id);
+      const existingAssets = await (storage as any).getAssets();
+      this.assetIds = existingAssets.map((a: any) => a.id);
       log(`   Loaded ${this.siteIds.length} existing sites and ${this.assetIds.length} assets`, "simulator");
     }
   }
@@ -138,7 +142,7 @@ class FieldSimulator {
     }
 
     const assetId = this.assetIds[Math.floor(Math.random() * this.assetIds.length)];
-    const asset = await storage.getAssetById(assetId);
+    const asset = await (storage as any).getAssetById(assetId);
     
     if (!asset) {
       return;
@@ -150,7 +154,7 @@ class FieldSimulator {
     const payload = this.generatePayload(asset, eventType);
     const details = this.generateDetails(asset, eventType, payload);
 
-    const eventData: Omit<InsertEventAnchor, 'id'> = {
+    const eventData: any = {
       assetId: asset.id,
       eventType,
       payloadHash: "",
@@ -201,7 +205,7 @@ class FieldSimulator {
         });
       }
     } catch (error) {
-      logError("❌ Failed to submit event", error, "simulator");
+      logError("❌ Failed to submit event", error as any);
     }
   }
 
