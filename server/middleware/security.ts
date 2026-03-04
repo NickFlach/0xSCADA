@@ -9,7 +9,12 @@ export const securityHeaders = (req: Request, res: Response, next: NextFunction)
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-XSS-Protection', '1; mode=block');
   res.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
-  res.setHeader('Content-Security-Policy', "default-src 'self'");
+  // Relaxed CSP in dev for Vite HMR + inline scripts/styles
+  if (process.env.NODE_ENV === 'development') {
+    res.setHeader('Content-Security-Policy', "default-src 'self' 'unsafe-inline' 'unsafe-eval'; connect-src 'self' ws://localhost:* wss://localhost:*");
+  } else {
+    res.setHeader('Content-Security-Policy', "default-src 'self'");
+  }
   next();
 };
 
