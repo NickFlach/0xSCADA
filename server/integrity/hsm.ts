@@ -195,7 +195,7 @@ export class SoftwareSigner extends BaseSigner {
       },
     });
 
-    this.keyPairs.set(keyId, keyPair);
+    this.keyPairs.set(keyId, keyPair as any);
     
     // Persist key to disk
     await this.saveKey(keyId, keyPair);

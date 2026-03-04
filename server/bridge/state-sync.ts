@@ -308,7 +308,7 @@ export class StateSyncBridge extends EventEmitter {
     } catch (error) {
       // Re-queue failed changes
       this.pendingChanges.unshift(...changesToSync);
-      logError('State sync batch failed', error);
+      logError('State sync batch failed', error as any);
       this.emit('sync-failed', error);
     } finally {
       this.syncInProgress = false;
@@ -340,7 +340,7 @@ export class StateSyncBridge extends EventEmitter {
       
     } catch (error) {
       target.healthStatus = 'failed';
-      logError(`Sync to target ${target.name} failed`, error);
+      logError(`Sync to target ${target.name} failed`, error as any);
       throw error;
     }
   }

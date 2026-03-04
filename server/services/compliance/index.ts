@@ -105,7 +105,7 @@ export class ComplianceService extends EventEmitter {
           await this.recordViolation(rule);
         }
       } catch (error) {
-        logError(`Failed to check compliance rule ${rule.id}`, error);
+        logError(`Failed to check compliance rule ${rule.id}`, error as any);
         rule.status = 'unknown';
       }
     }
@@ -269,7 +269,7 @@ export class ComplianceService extends EventEmitter {
     // Check compliance every hour
     this.checkTimer = setInterval(() => {
       this.checkCompliance().catch(error => {
-        logError('Periodic compliance check failed', error);
+        logError('Periodic compliance check failed', error as any);
       });
     }, 60 * 60 * 1000);
 

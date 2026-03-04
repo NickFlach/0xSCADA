@@ -223,7 +223,7 @@ export class EventPipeline extends EventEmitter {
 
       return success;
 
-    } catch (error) {
+    } catch (error: any) {
       this.metrics.events_dropped++;
       this.logger.error("Event processing error", { 
         error: error.message,

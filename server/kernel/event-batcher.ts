@@ -171,7 +171,7 @@ export class EventBatcher extends EventEmitter {
       });
 
       return true;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("Failed to ingest event", { error: error.message });
       return false;
     }
@@ -274,7 +274,7 @@ export class EventBatcher extends EventEmitter {
       this.emit("batch", batch);
 
       return batch;
-    } catch (error) {
+    } catch (error: any) {
       this.logger.error("Failed to create batch", { error: error.message, trigger });
       // Re-queue events on failure
       this.eventQueue.unshift(...events);

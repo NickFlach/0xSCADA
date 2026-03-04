@@ -154,7 +154,7 @@ export class StoreAndForwardService extends EventEmitter {
       
       return this.isConnected;
     } catch (error) {
-      logError('Store-and-forward connectivity check failed', error);
+      logError('Store-and-forward connectivity check failed', error as any);
       this.isConnected = false;
       this.emit('connectivity-changed', false);
       return false;
@@ -181,7 +181,7 @@ export class StoreAndForwardService extends EventEmitter {
         this.lastSuccessfulForward = new Date();
         
       } catch (error) {
-        logError(`Failed to forward record ${record.id}`, error);
+        logError(`Failed to forward record ${record.id}`, error as any);
         record.attempts++;
         
         // Remove records that have failed too many times
