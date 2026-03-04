@@ -64,7 +64,7 @@ function createSymbol(item: PaletteItem, position: Point): PIDSymbol {
     case 'tank':
       return { ...base, type: 'tank', variant: (item.variant ?? 'closed') as TankVariant, size: { width: 60, height: 80 } };
     case 'instrument':
-      return { ...base, type: 'instrument', functionLetters: 'FIC', loopNumber: '100', connectionType: 'electric', location: 'field' };
+      return { ...base, type: 'instrument', functionLetters: 'FIC', loopNumber: '100', connectionType: 'electrical', location: 'field' };
     case 'motor':
       return { ...base, type: 'motor' };
     case 'heat-exchanger':
@@ -185,14 +185,14 @@ interface PIDEditorProps {
   onSave?: (diagram: PIDDiagram) => void;
 }
 
-const DEFAULT_DIAGRAM: PIDDiagram = {
+const DEFAULT_DIAGRAM = {
   id: 'new',
   name: 'Untitled P&ID',
   canvasSize: { width: 1200, height: 800 },
   gridSize: 20,
   symbols: [],
   connections: [],
-};
+} as PIDDiagram;
 
 export const PIDEditor: React.FC<PIDEditorProps> = ({
   initialDiagram,
