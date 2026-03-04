@@ -205,7 +205,7 @@ export class L2RollupService extends EventEmitter {
       return batch.l1TransactionHash;
     } catch (error) {
       batch.status = 'failed';
-      logError(`Failed to submit batch ${batch.id} to L1`, error);
+      logError(`Failed to submit batch ${batch.id} to L1`, error as any);
       throw error;
     }
   }
@@ -238,7 +238,7 @@ export class L2RollupService extends EventEmitter {
 
       return proof;
     } catch (error) {
-      logError(`Failed to generate proof for block ${blockNumber}`, error);
+      logError(`Failed to generate proof for block ${blockNumber}`, error as any);
       throw error;
     }
   }
@@ -481,7 +481,7 @@ export class L2RollupService extends EventEmitter {
       await this.submitBatch(batch.id);
     } catch (error) {
       // Non-fatal - will retry on next interval
-      logError('Auto batch submission failed', error);
+      logError('Auto batch submission failed', error as any);
     }
   }
 
