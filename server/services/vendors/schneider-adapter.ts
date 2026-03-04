@@ -233,7 +233,8 @@ let mbapTransactionId = 0;
 
 /** Encode a Modbus TCP (MBAP) request frame */
 function encodeModbusTcpRequest(unitId: number, functionCode: number, payload: Buffer): Buffer {
-  const transId = mbapTransactionId++ & 0xFFFF;
+  const transId = mbapTransactionId & 0xFFFF;
+  mbapTransactionId = (mbapTransactionId + 1) & 0xFFFF;
   const mbapHeader = Buffer.alloc(7);
   mbapHeader.writeUInt16BE(transId, 0);        // Transaction ID
   mbapHeader.writeUInt16BE(0x0000, 2);         // Protocol ID (Modbus = 0)
@@ -785,7 +786,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
     // Step 3: Send General Interrogation
     const giAsdu = buildIec104InterrogationAsdu(commonAddress);
-    const giPacket = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, giAsdu);
+    const giPacket = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, giAsdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
 
@@ -943,7 +944,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       readAsdu.writeUInt8((ioa >> 8) & 0xFF, pos); pos += 1;
       readAsdu.writeUInt8((ioa >> 16) & 0xFF, pos);
 
-      const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, readAsdu);
+      const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, readAsdu);
       conn.unconfirmedSent++;
       this.messagesProcessed++;
     }
@@ -1006,7 +1007,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       asdu = buildIec104SingleCommandAsdu(conn.commonAddress, ioa, !!tag.value);
     }
 
-    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
   }
@@ -1087,7 +1088,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     if (!conn) return;
 
     const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
-    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
   }
@@ -1098,7 +1099,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     if (!conn) return;
 
     const asdu = buildIec104InterrogationAsdu(conn.commonAddress);
-    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
   }

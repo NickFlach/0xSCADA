@@ -217,7 +217,7 @@ interface HartAddress {
 /** Encode a HART short-frame request */
 function encodeHartShortFrame(pollingAddress: number, command: number, data: Buffer = Buffer.alloc(0), isPrimary: boolean = true): Buffer {
   const preambleCount = EMERSON_CONNECTION_PARAMS.hart.preambleBytes;
-  const frameLen = preambleCount + 1 + 1 + 1 + data.length + 1; // preamble + delimiter + addr + command + data + checksum
+  const frameLen = preambleCount + 1 + 1 + 1 + 1 + data.length + 1; // preamble + delimiter + addr + command + byteCount + data + checksum
   const buf = Buffer.alloc(frameLen);
   let pos = 0;
 
@@ -408,7 +408,8 @@ let modbusTransactionId = 0;
 
 /** Build Modbus TCP request (MBAP header + PDU) */
 function buildModbusTcpRequest(unitId: number, functionCode: number, startAddr: number, quantity: number): Buffer {
-  const transId = modbusTransactionId++ & 0xFFFF;
+  const transId = modbusTransactionId & 0xFFFF;
+  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
   const buf = Buffer.alloc(12);
   buf.writeUInt16BE(transId, 0);    // Transaction ID
   buf.writeUInt16BE(0, 2);          // Protocol ID (Modbus)
@@ -422,7 +423,8 @@ function buildModbusTcpRequest(unitId: number, functionCode: number, startAddr: 
 
 /** Build Modbus TCP write single register */
 function buildModbusWriteSingleRegister(unitId: number, address: number, value: number): Buffer {
-  const transId = modbusTransactionId++ & 0xFFFF;
+  const transId = modbusTransactionId & 0xFFFF;
+  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
   const buf = Buffer.alloc(12);
   buf.writeUInt16BE(transId, 0);
   buf.writeUInt16BE(0, 2);
@@ -436,13 +438,14 @@ function buildModbusWriteSingleRegister(unitId: number, address: number, value: 
 
 /** Build Modbus TCP write multiple registers */
 function buildModbusWriteMultipleRegisters(unitId: number, startAddr: number, values: number[]): Buffer {
-  const transId = modbusTransactionId++ & 0xFFFF;
+  const transId = modbusTransactionId & 0xFFFF;
+  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
   const byteCount = values.length * 2;
   const buf = Buffer.alloc(13 + byteCount);
   buf.writeUInt16BE(transId, 0);
   buf.writeUInt16BE(0, 2);
   buf.writeUInt16BE(7 + byteCount, 4);
-  buf.writeUInt8(EMERSON_CONNECTION_PARAMS.modbus.unitId, 6);
+  buf.writeUInt8(unitId, 6);
   buf.writeUInt8(MODBUS_FC.WRITE_MULTIPLE_REGISTERS, 7);
   buf.writeUInt16BE(startAddr, 8);
   buf.writeUInt16BE(values.length, 10);

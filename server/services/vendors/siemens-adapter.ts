@@ -363,8 +363,8 @@ function buildS7WriteVar(pduRef: number, items: Array<S7Address & { value: Buffe
 
 /** Build S7 Userdata request for SZL read */
 function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000): Buffer {
-  // Userdata header
-  const buf = Buffer.alloc(24);
+  // Userdata header + parameter (8 bytes) + data (8 bytes: return code + transport size + length + SZL ID + SZL Index)
+  const buf = Buffer.alloc(28);
   let pos = 0;
   
   // S7 header
@@ -373,7 +373,7 @@ function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000
   buf.writeUInt16BE(0, pos); pos += 2;
   buf.writeUInt16BE(pduRef, pos); pos += 2;
   buf.writeUInt16BE(8, pos); pos += 2;               // Parameter length
-  buf.writeUInt16BE(4, pos); pos += 2;               // Data length
+  buf.writeUInt16BE(8, pos); pos += 2;               // Data length (return code + transport size + length + SZL ID + SZL Index)
   
   // Userdata parameter
   buf.writeUInt8(0x00, pos); pos += 1;               // Parameter head (3 bytes)
@@ -385,9 +385,12 @@ function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000
   buf.writeUInt8(0x01, pos); pos += 1;               // Subfunction: Read SZL
   buf.writeUInt8(0x00, pos); pos += 1;               // Sequence number
   
-  // Data: SZL ID + index
-  // Return code + transport size + length + szl data
-  // Handled in the data section
+  // Data section: SZL ID + Index
+  buf.writeUInt8(0xFF, pos); pos += 1;               // Return code: success
+  buf.writeUInt8(0x09, pos); pos += 1;               // Transport size: octet string
+  buf.writeUInt16BE(4, pos); pos += 2;               // Data length (4 bytes: SZL ID + Index)
+  buf.writeUInt16BE(szlId, pos); pos += 2;           // SZL ID
+  buf.writeUInt16BE(szlIndex, pos); pos += 2;        // SZL Index
   
   return buf;
 }
@@ -588,6 +591,7 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   private s7Connections: Map<string, S7Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
   private tagCache: Map<string, { value: any; timestamp: Date; transport: number }> = new Map();
+  private static readonly MAX_TAG_CACHE = 50000;
   private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
   private messagesProcessed = 0;
   private errorsCount = 0;
@@ -701,7 +705,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     for (let i = 0; i < parsed.length; i += maxItemsPerRead) {
       const batch = parsed.slice(i, i + maxItemsPerRead);
       const conn = this.getFirstConnection();
-      const pduRef = conn ? ++conn.pduRef : 0;
+      if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+      const pduRef = conn ? conn.pduRef : 0;
 
       const readRequest = buildS7ReadVar(pduRef, batch.map(b => b.s7));
       const packet = buildCotpDT(readRequest);
@@ -736,7 +741,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     });
 
     const conn = this.getFirstConnection();
-    const pduRef = conn ? ++conn.pduRef : 0;
+    if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+    const pduRef = conn ? conn.pduRef : 0;
     const writeRequest = buildS7WriteVar(pduRef, items);
     const packet = buildCotpDT(writeRequest);
     this.messagesProcessed++;
@@ -749,6 +755,10 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
         timestamp: new Date(),
         transport: s7Addr.transportSize,
       });
+    }
+    if (this.tagCache.size > SiemensVendorAdapter.MAX_TAG_CACHE) {
+      const keys = Array.from(this.tagCache.keys());
+      for (let i = 0; i < keys.length - SiemensVendorAdapter.MAX_TAG_CACHE; i++) this.tagCache.delete(keys[i]);
     }
   }
 
@@ -767,7 +777,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   async getDeviceInfo(deviceId: string): Promise<any> {
     // Read SZL 0x0011 (Module Identification) and 0x001C (Component ID)
     const conn = this.getFirstConnection();
-    const pduRef = conn ? ++conn.pduRef : 0;
+    if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+    const pduRef = conn ? conn.pduRef : 0;
     const szlRequest = buildS7SzlRead(pduRef, SZL_IDS.MODULE_ID);
     this.messagesProcessed++;
     
@@ -780,7 +791,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
     // Read diagnostic buffer (SZL 0x00A0)
     if (conn) {
-      const ref1 = ++conn.pduRef;
+      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+      const ref1 = conn.pduRef;
       buildS7SzlRead(ref1, SZL_IDS.DIAGNOSTIC_BUFFER);
       this.messagesProcessed++;
       results.diagnosticBuffer = [];
@@ -788,7 +800,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
     // Read LED status (SZL 0x0019)
     if (conn) {
-      const ref2 = ++conn.pduRef;
+      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+      const ref2 = conn.pduRef;
       buildS7SzlRead(ref2, SZL_IDS.LED_STATUS);
       this.messagesProcessed++;
       results.ledStatus = {};
@@ -796,7 +809,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
     // Read scan cycle time (SZL 0x0131)
     if (conn) {
-      const ref3 = ++conn.pduRef;
+      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+      const ref3 = conn.pduRef;
       buildS7SzlRead(ref3, SZL_IDS.SCAN_CYCLE_TIME);
       this.messagesProcessed++;
       results.scanCycleTime = {};
@@ -809,7 +823,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   async readDiagnosticBuffer(deviceId: string): Promise<any[]> {
     const conn = this.getFirstConnection();
     if (!conn) return [];
-    const ref = ++conn.pduRef;
+    conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
+    const ref = conn.pduRef;
     buildS7SzlRead(ref, SZL_IDS.DIAGNOSTIC_BUFFER);
     this.messagesProcessed++;
     return [];

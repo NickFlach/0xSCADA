@@ -47,6 +47,8 @@ export interface DecisionRecord {
   verificationLayers: VerificationLayerResult[];
   /** Electronic signature if required */
   signature?: ElectronicSignature;
+  /** Monotonic sequence number for deterministic ordering */
+  sequence: number;
   /** SHA-256 hash of this record for tamper detection */
   recordHash: string;
   /** Hash of previous record for chain integrity */
@@ -82,6 +84,8 @@ export interface AuditEntry {
   newValue?: any;
   reason?: string;
   ipAddress?: string;
+  /** Monotonic sequence number for deterministic ordering */
+  sequence: number;
   /** Immutable hash chain */
   entryHash: string;
   previousHash: string;
@@ -193,6 +197,8 @@ export class ExplainabilityMonitor extends EventEmitter {
   private auditTrail: AuditEntry[] = [];
   private lastDecisionHash = '0'.repeat(64);
   private lastAuditHash = '0'.repeat(64);
+  private decisionSequence = 0;
+  private auditSequence = 0;
   private complianceChecks: ComplianceCheck[] = [];
   private governanceGates: Map<string, GovernanceGate> = new Map();
   private verificationHooks: VerificationHook[] = [];
@@ -420,6 +426,10 @@ export class ExplainabilityMonitor extends EventEmitter {
 
     this.auditTrail.push(entry);
     this.lastAuditHash = entryHash;
+    // Cap audit trail to prevent unbounded growth
+    if (this.auditTrail.length > this.config.maxInMemoryRecords) {
+      this.auditTrail = this.auditTrail.slice(-this.config.maxInMemoryRecords);
+    }
     this.emit('audit', entry);
 
     return entry;

@@ -245,6 +245,7 @@ export class ParadoxResolver extends EventEmitter {
   private resolutions: Map<string, Resolution> = new Map();
   private resolvedEvents: Map<string, ResolvedEvent> = new Map();
   private rollbackPlans: Map<string, RollbackPlan> = new Map();
+  private static readonly MAX_MAP_SIZE = 10000;
   private processAreaRules: Map<string, ProcessAreaRules> = new Map();
   private globalPhysicsConstraints: PhysicsConstraint[] = [];
   private logicalClock = 0;
@@ -470,10 +471,13 @@ export class ParadoxResolver extends EventEmitter {
     }
 
     this.resolutions.set(conflict.conflictId, resolution);
+    this.enforceMapLimit(this.conflicts, ParadoxResolver.MAX_MAP_SIZE);
+    this.enforceMapLimit(this.resolutions, ParadoxResolver.MAX_MAP_SIZE);
 
     // Emit resolved event with confidence score
     const resolved = this.emitResolvedEvent(conflict, resolution);
     this.resolvedEvents.set(resolved.id, resolved);
+    this.enforceMapLimit(this.resolvedEvents, ParadoxResolver.MAX_MAP_SIZE);
 
     this.emit('resolved', resolution);
     this.emit('resolved_event', resolved);
@@ -857,6 +861,14 @@ export class ParadoxResolver extends EventEmitter {
       if (latest) snapshot[tag] = latest.value;
     }
     return snapshot;
+  }
+
+  private enforceMapLimit<T>(map: Map<string, T>, maxSize: number): void {
+    if (map.size > maxSize) {
+      const keys = Array.from(map.keys());
+      const toRemove = keys.slice(0, keys.length - maxSize);
+      for (const key of toRemove) map.delete(key);
+    }
   }
 
   private enforceHistoryLimit(): void {
