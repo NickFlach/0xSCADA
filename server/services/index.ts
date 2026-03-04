@@ -18,6 +18,12 @@ export { complianceService } from './compliance';
 // ── Flux Service ─────────────────────────────────────────────────────────────
 export * from './flux';
 
+// ── SingularisPrime Integration ──────────────────────────────────────────────
+export * from './singularis-prime';
+
+// ── GR::LISTEN Alert Filtering ───────────────────────────────────────────────
+export * from './gr-listen';
+
 // ── Geometry Service ─────────────────────────────────────────────────────────
 export * from './geometry';
 export { geometryService } from './geometry';
