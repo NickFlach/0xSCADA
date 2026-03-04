@@ -51,7 +51,7 @@ export function useTagValue(tagId: string | undefined): PIDTagValue | undefined 
  */
 export function useTagAlarm(tagId: string | undefined): AlarmState {
   const tag = useTagValue(tagId);
-  return tag?.alarmState ?? 'normal';
+  return (tag as any)?.alarmState ?? 'normal';
 }
 
 // =============================================================================
@@ -104,8 +104,8 @@ export const PIDDataProvider: React.FC<PIDDataProviderProps> = ({
         const msg = JSON.parse(event.data);
         if (msg.type === 'tag-values' || msg.type === 'tag-update') {
           const snapshot = msg.data as PIDDataSnapshot;
-          setValues(prev => ({ ...prev, ...snapshot.values }));
-          setLastUpdate(snapshot.timestamp);
+          setValues(prev => ({ ...prev, ...(snapshot as any).values }));
+          setLastUpdate(snapshot.timestamp.toISOString());
         }
       } catch {
         // ignore parse errors

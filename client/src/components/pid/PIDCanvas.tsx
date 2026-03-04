@@ -166,9 +166,9 @@ const ConnectionRenderer: React.FC<{
   return (
     <Pipe
       points={points}
-      showFlow={connection.showFlow}
-      spec={connection.spec}
-      lineStyle={connection.lineStyle}
+      showFlow={(connection as any).showFlow}
+      spec={(connection as any).spec}
+      lineStyle={(connection as any).lineStyle}
       state="running"
     />
   );
@@ -202,7 +202,7 @@ export const PIDCanvas: React.FC<PIDCanvasProps> = ({
       s.dataBinding?.tags?.forEach(t => tagIds.add(t.tagId));
     });
     diagram.connections.forEach(c => {
-      c.dataBinding?.tags?.forEach(t => tagIds.add(t.tagId));
+      (c as any).dataBinding?.tags?.forEach((t: any) => tagIds.add(t.tagId));
     });
     const tags = Array.from(tagIds);
     if (tags.length > 0) subscribe(tags);
@@ -256,21 +256,21 @@ export const PIDCanvas: React.FC<PIDCanvasProps> = ({
   const fitToView = useCallback(() => {
     if (!svgRef.current) return;
     const rect = svgRef.current.getBoundingClientRect();
-    const scaleX = rect.width / diagram.canvasSize.width;
-    const scaleY = rect.height / diagram.canvasSize.height;
+    const scaleX = rect.width / (diagram as any).canvasSize.width;
+    const scaleY = rect.height / (diagram as any).canvasSize.height;
     const scale = Math.min(scaleX, scaleY) * 0.9;
     setView({
-      x: (rect.width - diagram.canvasSize.width * scale) / 2,
-      y: (rect.height - diagram.canvasSize.height * scale) / 2,
+      x: (rect.width - (diagram as any).canvasSize.width * scale) / 2,
+      y: (rect.height - (diagram as any).canvasSize.height * scale) / 2,
       scale,
     });
-  }, [diagram.canvasSize]);
+  }, [(diagram as any).canvasSize]);
 
   // Fit on first render
   useEffect(() => { fitToView(); }, [fitToView]);
 
   // Sort symbols by zIndex
-  const sortedSymbols = [...diagram.symbols].sort((a, b) => (a.zIndex ?? 0) - (b.zIndex ?? 0));
+  const sortedSymbols = [...diagram.symbols].sort((a, b) => ((a as any).zIndex ?? 0) - ((b as any).zIndex ?? 0));
 
   return (
     <svg
@@ -295,9 +295,9 @@ export const PIDCanvas: React.FC<PIDCanvasProps> = ({
         {/* Grid */}
         {showGrid && (
           <Grid
-            size={diagram.gridSize ?? 20}
-            canvasWidth={diagram.canvasSize.width}
-            canvasHeight={diagram.canvasSize.height}
+            size={(diagram as any).gridSize ?? 20}
+            canvasWidth={(diagram as any).canvasSize.width}
+            canvasHeight={(diagram as any).canvasSize.height}
           />
         )}
 
