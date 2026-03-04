@@ -59,7 +59,7 @@ export class FluxCommander {
       try {
         await this.pollEntity(entitySuffix);
       } catch (error) {
-        logError(`⚡ Flux command poll failed: ${entitySuffix}`, error, "flux");
+        logError(`⚡ Flux command poll failed: ${entitySuffix}`, error as any);
       }
     }
   }
@@ -97,7 +97,7 @@ export class FluxCommander {
         ack = await handler(entitySuffix, props as unknown as FluxCommand);
       } catch (error) {
         ack = { cmd_ack: cmdId, cmd_status: "failed", error: String(error) };
-        logError(`⚡ Command handler failed: ${command}`, error, "flux");
+        logError(`⚡ Command handler failed: ${command}`, error as any);
       }
     }
 
@@ -122,7 +122,7 @@ export class FluxCommander {
       });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
     } catch (error) {
-      logError(`⚡ Failed to publish command ack`, error, "flux");
+      logError(`⚡ Failed to publish command ack`, error as any);
     }
   }
 

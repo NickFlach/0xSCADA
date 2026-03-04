@@ -195,7 +195,7 @@ export type IndustrialEventType =
   | 'maintenance-required' | 'recipe-executed' | 'operator-action'
   | 'system-startup' | 'system-shutdown' | 'communication-loss';
 
-export interface IndustrialEvent extends BaseEvent {
+export interface IndustrialEvent {
   type: IndustrialEventType;
   assetId?: EntityId;
   tagId?: string;
@@ -301,11 +301,11 @@ export interface TrendData {
 export type PIDElementType = AssetType | 'junction' | 'pipe';
 export type PIDConnectionType = 'process' | 'signal' | 'pneumatic' | 'electric';
 
-export { 
-  // Re-export specific P&ID types that are useful in industrial context
-  type PIDPoint as IndustrialPoint,
-  type PIDSize as IndustrialSize
-} from '../pid';
+// export { 
+//   // Re-export specific P&ID types that are useful in industrial context
+//   type PIDPoint as IndustrialPoint,
+//   type PIDSize as IndustrialSize
+// } from '../pid';
 
 // ─── Type Guards ────────────────────────────────────────────────────────────
 

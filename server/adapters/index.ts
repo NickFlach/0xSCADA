@@ -148,7 +148,7 @@ export class AdapterRegistry {
       try {
         await adapter.initialize(context);
       } catch (error) {
-        logError(`Failed to initialize adapter ${adapter.manifest.id}:`, error);
+        logError(`Failed to initialize adapter ${adapter.manifest.id}:`, error as any);
       }
     });
     
@@ -165,7 +165,7 @@ export class AdapterRegistry {
       try {
         await adapter.connect();
       } catch (error) {
-        logError(`Failed to connect adapter ${adapter.manifest.id}:`, error);
+        logError(`Failed to connect adapter ${adapter.manifest.id}:`, error as any);
       }
     });
     
@@ -182,7 +182,7 @@ export class AdapterRegistry {
       try {
         await adapter.disconnect();
       } catch (error) {
-        logError(`Failed to disconnect adapter ${adapter.manifest.id}:`, error);
+        logError(`Failed to disconnect adapter ${adapter.manifest.id}:`, error as any);
       }
     });
     

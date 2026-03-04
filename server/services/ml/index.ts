@@ -136,7 +136,7 @@ export class MLService extends EventEmitter {
 
       return prediction;
     } catch (error) {
-      logError(`Prediction failed for model ${modelId}`, error);
+      logError(`Prediction failed for model ${modelId}`, error as any);
       return null;
     }
   }
@@ -172,7 +172,7 @@ export class MLService extends EventEmitter {
       return true;
     } catch (error) {
       model.status = 'failed';
-      logError(`Model training failed for ${modelId}`, error);
+      logError(`Model training failed for ${modelId}`, error as any);
       this.emit('model-training-failed', model, error);
       return false;
     }
@@ -352,7 +352,7 @@ export class MLService extends EventEmitter {
         prediction.output = { optimized_setpoint: input['setpoint'] * (0.95 + Math.random() * 0.1) };
         break;
       default:
-        prediction.output = { classification: Math.random() > 0.5 ? 'normal' : 'abnormal' };
+        prediction.output = { classification: Math.random() > 0.5 ? 'normal' : 'abnormal' } as any;
     }
 
     return prediction;
