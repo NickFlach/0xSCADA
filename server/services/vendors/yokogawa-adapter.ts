@@ -13,7 +13,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -22,6 +21,7 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
 
 // ─── Vnet/IP Protocol Constants ──────────────────────────────────────
 
@@ -358,7 +358,7 @@ function buildModbusTcpRead(unitId: number, fc: number, startAddr: number, count
 
 type YokogawaProtocol = 'vnet' | 'modbus' | 'prosafe';
 
-export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class YokogawaVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'yokogawa-vendor',
     name: 'Yokogawa Vendor Adapter',
@@ -372,13 +372,8 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
   readonly protocols = ['vnet-ip', 'fl-net', 'modbus', 'foundation-fieldbus'];
 
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; quality: string }> = new Map();
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
   private fcsStations: Map<string, VnetStation> = new Map();
   private localStation: VnetStation = { domain: 0, station: 63, slot: 0 }; // SCADA station
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Yokogawa vendor adapter — Vnet/IP + Modbus');
@@ -471,7 +466,7 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
       name: `${parsed.blockInstance}.${parsed.parameter}`,
       dataType: this.inferCentumVpDataType(parsed.parameter),
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -491,7 +486,7 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
       name: `SIF${parsed.sifNumber}.${parsed.parameter}`,
       dataType: parsed.parameter === 'STATUS' ? 'number' : 'object',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -508,7 +503,7 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
       address,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -547,7 +542,7 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   // ─── Discovery ─────────────────────────────────────────────────────
 
-  async discoverDevices(): Promise<any[]> {
+  async discoverDevices(): Promise<Record<string, unknown>[]> {
     this.context?.logger.info('Discovering Yokogawa devices via Vnet/IP station enumeration');
     const discoveryFrame = encodeVnetDiscovery(this.localStation);
     this.messagesProcessed++;
@@ -557,11 +552,11 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     return { deviceId, vendor: 'Yokogawa', models: YOKOGAWA_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     // Read FCS system status
     const statusFrame = encodeVnetReadRequest(this.localStation, { domain: 0, station: 1, slot: 0 }, 'SYS.STATUS');
     this.messagesProcessed++;
@@ -595,7 +590,7 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
   }
 
   /** Read SOE (Sequence of Events) log */
-  async readSoeLog(stationName: string, count: number = 100): Promise<any[]> {
+  async readSoeLog(stationName: string, count: number = 100): Promise<Record<string, unknown>[]> {
     const targetStation = this.fcsStations.get(stationName) ?? { domain: 0, station: 1, slot: 0 };
     const frame = encodeVnetReadRequest(this.localStation, targetStation, 'SYS.SOE_LOG');
     this.messagesProcessed++;
@@ -604,25 +599,8 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof YOKOGAWA_POLLING, callback: (tags: AdapterTag[]) => void): string {
-    const interval = YOKOGAWA_POLLING[tier];
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`Yokogawa polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
-  }
-
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) { clearInterval(timer); this.pollingTimers.delete(key); }
+  startPollingByTier(addresses: string[], tier: keyof typeof YOKOGAWA_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    return this.startPolling(addresses, YOKOGAWA_POLLING[tier], callback, tier);
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────
@@ -651,19 +629,16 @@ export class YokogawaVendorAdapter extends BaseAdapter<'protocol'> implements Pr
     };
   }
 
-  protected async getMetrics() {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.connections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
       fcsStations: this.fcsStations.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: YOKOGAWA_REGISTER_MAP,
       connectionParams: YOKOGAWA_CONNECTION_PARAMS,

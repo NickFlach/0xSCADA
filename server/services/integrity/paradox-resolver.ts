@@ -31,7 +31,7 @@ export interface ScadaEvent {
   id: string;
   deviceId: string;
   tag: string;
-  value: any;
+  value: unknown;
   timestamp: Date;
   quality: 'good' | 'bad' | 'uncertain';
   source: 'sensor' | 'command' | 'alarm' | 'system';
@@ -78,7 +78,7 @@ export interface Resolution {
   conflictId: string;
   method: ResolutionMethod;
   winner?: ScadaEvent;
-  mergedValue?: any;
+  mergedValue?: unknown;
   rollbackTarget?: string;
   confidence: number;
   reasoning: string;
@@ -89,7 +89,7 @@ export interface ResolvedEvent {
   id: string;
   originalConflictId: string;
   tag: string;
-  resolvedValue: any;
+  resolvedValue: unknown;
   confidence: number;
   method: ResolutionMethod;
   reasoning: string;
@@ -565,7 +565,7 @@ export class ParadoxResolver extends EventEmitter {
     const confidence = bestCount / totalVotes;
 
     // For numeric values, use weighted average of the winning group
-    let finalValue: any;
+    let finalValue: unknown;
     if (winnerBucket.events.every(e => typeof e.value === 'number')) {
       const weights = winnerBucket.events.map(e => e.sensorConfidence ?? this.qualityScore(e));
       const totalWeight = weights.reduce((a, b) => a + b, 0);

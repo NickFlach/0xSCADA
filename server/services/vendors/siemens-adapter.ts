@@ -10,7 +10,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -19,6 +18,7 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
 
 // ─── S7 Protocol Constants ────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ interface S7Address {
 /** S7 connection state */
 interface S7Connection {
   endpoint: ProtocolEndpoint;
-  socket: any;
+  socket: import('net').Socket | null;
   negotiatedPdu: number;
   srcRef: number;
   dstRef: number;
@@ -546,7 +546,7 @@ function s7ErrorToString(code: number): string {
 }
 
 /** Unmarshal S7 value bytes based on transport size */
-function unmarshalS7Value(transport: number, data: Buffer): any {
+function unmarshalS7Value(transport: number, data: Buffer): unknown {
   switch (transport) {
     case S7_TRANSPORT_SIZE.BIT: return data.readUInt8(0) !== 0;
     case S7_TRANSPORT_SIZE.BYTE: return data.readUInt8(0);
@@ -560,7 +560,7 @@ function unmarshalS7Value(transport: number, data: Buffer): any {
 }
 
 /** Marshal JS value to S7 bytes */
-function marshalS7Value(transport: number, value: any): Buffer {
+function marshalS7Value(transport: number, value: unknown): Buffer {
   switch (transport) {
     case S7_TRANSPORT_SIZE.BIT: { const b = Buffer.alloc(1); b.writeUInt8(value ? 1 : 0, 0); return b; }
     case S7_TRANSPORT_SIZE.BYTE: { const b = Buffer.alloc(1); b.writeUInt8(Number(value), 0); return b; }
@@ -575,7 +575,7 @@ function marshalS7Value(transport: number, value: any): Buffer {
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'siemens-vendor',
     name: 'Siemens S7 Vendor Adapter',
@@ -590,12 +590,6 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   private s7Connections: Map<string, S7Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; transport: number }> = new Map();
-  private static readonly MAX_TAG_CACHE = 50000;
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Siemens S7 vendor adapter — ISO-on-TCP + COTP + S7comm');
@@ -753,12 +747,13 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
       this.tagCache.set(tag.address, {
         value: tag.value,
         timestamp: new Date(),
+        quality: 'good',
         transport: s7Addr.transportSize,
       });
     }
-    if (this.tagCache.size > SiemensVendorAdapter.MAX_TAG_CACHE) {
+    if (this.tagCache.size > this.maxTagCache) {
       const keys = Array.from(this.tagCache.keys());
-      for (let i = 0; i < keys.length - SiemensVendorAdapter.MAX_TAG_CACHE; i++) this.tagCache.delete(keys[i]);
+      for (let i = 0; i < keys.length - this.maxTagCache; i++) this.tagCache.delete(keys[i]);
     }
   }
 
@@ -774,7 +769,7 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     // Read SZL 0x0011 (Module Identification) and 0x001C (Component ID)
     const conn = this.getFirstConnection();
     if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
@@ -785,9 +780,9 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     return { deviceId, vendor: 'Siemens AG', models: SIEMENS_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     const conn = this.getFirstConnection();
-    const results: any = { deviceId };
+    const results: Record<string, unknown> = { deviceId };
 
     // Read diagnostic buffer (SZL 0x00A0)
     if (conn) {
@@ -840,28 +835,8 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof SIEMENS_POLLING, callback: (tags: AdapterTag[]) => void): string {
-    const interval = SIEMENS_POLLING[tier];
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`S7 polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
-  }
-
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) {
-      clearInterval(timer);
-      this.pollingTimers.delete(key);
-    }
+  startPollingByTier(addresses: string[], tier: keyof typeof SIEMENS_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    return this.startPolling(addresses, SIEMENS_POLLING[tier], callback, tier);
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────
@@ -881,18 +856,15 @@ export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     return this.transportToAdapterType(parsed.transportSize);
   }
 
-  protected async getMetrics() {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.s7Connections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: SIEMENS_REGISTER_MAP,
       connectionParams: SIEMENS_CONNECTION_PARAMS,

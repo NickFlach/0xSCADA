@@ -29,7 +29,9 @@ function requireAuth(req: Request, res: Response, next: NextFunction): void {
     return;
   }
   // Session-based auth
-  if ((req as any).session?.userId || (req as any).user) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- session types vary by auth middleware
+  const r = req as Request & { session?: { userId?: string }; user?: unknown };
+  if (r.session?.userId || r.user) {
     next();
     return;
   }
