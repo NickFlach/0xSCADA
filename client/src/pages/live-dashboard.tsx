@@ -9,8 +9,22 @@
  */
 
 import React from 'react';
-import { useTagStream } from '@/hooks/use-tag-stream';
-import type { TagValue, AlarmEvent, PipelineHealth } from '@/hooks/use-tag-stream';
+import { useTagStream } from '../hooks/use-tag-stream';
+import type { TagValue } from '../hooks/use-tag-stream';
+
+interface AlarmEvent {
+  id: string;
+  tag: string;
+  level: string;
+  message: string;
+  timestamp: Date;
+}
+
+interface PipelineHealth {
+  overall: 'good' | 'warning' | 'critical';
+  uptime: number;
+  throughput: number;
+}
 
 // --- Components ---
 

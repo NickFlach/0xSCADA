@@ -12,23 +12,23 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { ScrollArea } from "@/components/ui/scroll-area";
+import { Card, CardContent, CardHeader, CardTitle } from "./card";
+import { Badge } from "./badge";
+import { Button } from "./button";
+import { ScrollArea } from "./scroll-area";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from "./select";
 import {
   Tooltip,
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-} from "@/components/ui/tooltip";
+} from "./tooltip";
 import {
   Radio,
   Wifi,
@@ -48,8 +48,8 @@ import {
   Upload,
   Settings,
 } from "lucide-react";
-import { useEventStream, type StreamEvent, type EventFilter } from "@/hooks/use-event-stream";
-import type { ConnectionStatus } from "@/hooks/use-websocket";
+import { useEventStream } from "../../hooks/use-event-stream";
+import type { ConnectionStatus } from "../../hooks/use-websocket";
 
 // =============================================================================
 // TYPES
