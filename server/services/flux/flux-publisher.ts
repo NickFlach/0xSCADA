@@ -8,6 +8,17 @@
 
 import { log, logError, logWarn } from "../../logger";
 import type { FluxConfig, FluxEvent, FluxEntity } from "./types";
+import { classifyEntity } from "../geometry/classifier";
+import { computePhi, type PhiReport } from "../geometry/phi";
+import type { ScadaCoordinates } from "../geometry/types";
+
+/** Tracked entity with SGA coordinates (#331) */
+export interface TrackedEntity {
+  id: string;
+  coords: ScadaCoordinates;
+  linkCount: number;
+  lastSeen: number;
+}
 
 export class FluxPublisher {
   private config: FluxConfig;
@@ -17,6 +28,11 @@ export class FluxPublisher {
   private consecutiveFailures = 0;
   private readonly MAX_BATCH_SIZE = 50;
   private readonly MAX_RETRY_BACKOFF_MS = 60_000;
+
+  /** SGA-classified entities (#331) */
+  private classifiedEntities: Map<string, TrackedEntity> = new Map();
+  /** Entity links for Phi computation */
+  private entityLinks: { sourceId: string; targetId: string }[] = [];
 
   constructor(config: FluxConfig) {
     this.config = config;
@@ -61,11 +77,31 @@ export class FluxPublisher {
       return; // Skip — too soon since last update for this entity
     }
 
+    // SGA classification (#331) — classify and attach geometry to properties
+    const coords = classifyEntity(entityId, properties);
+    const sgaProps = {
+      ...properties,
+      sga_class: coords.classIndex,
+      sga_quadrant: ["sensor", "control", "alarm", "maintenance"][coords.h2],
+      sga_triality: ["site", "asset", "event"][coords.d],
+      sga_slot: coords.l,
+      sga_amplitude: coords.amplitude,
+    };
+
+    // Track classified entity
+    const existing = this.classifiedEntities.get(entityId);
+    this.classifiedEntities.set(entityId, {
+      id: entityId,
+      coords,
+      linkCount: existing?.linkCount ?? 0,
+      lastSeen: now,
+    });
+
     this.pendingEvents.push({
       stream: this.config.stream,
       source: this.config.source,
       timestamp: now,
-      payload: { entity_id: entityId, properties },
+      payload: { entity_id: entityId, properties: sgaProps },
     });
 
     this.lastPublishByEntity.set(entityId, now);
@@ -142,6 +178,30 @@ export class FluxPublisher {
       logError("⚡ Flux entity list failed", error as any);
       return [];
     }
+  }
+
+  /** Compute Phi for all classified entities (#331) */
+  computePhi(): PhiReport {
+    const entities = Array.from(this.classifiedEntities.values()).map((e) => ({
+      id: e.id,
+      coords: e.coords,
+    }));
+    return computePhi(entities, this.entityLinks);
+  }
+
+  /** Get all classified entities (#331) */
+  getClassifiedEntities(): TrackedEntity[] {
+    return Array.from(this.classifiedEntities.values());
+  }
+
+  /** Add a link between two entities (used for Phi computation) */
+  addEntityLink(sourceId: string, targetId: string): void {
+    this.entityLinks.push({ sourceId, targetId });
+    // Update link counts
+    const src = this.classifiedEntities.get(sourceId);
+    if (src) src.linkCount++;
+    const tgt = this.classifiedEntities.get(targetId);
+    if (tgt) tgt.linkCount++;
   }
 
   /** Get publisher status */
