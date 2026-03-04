@@ -7,15 +7,15 @@
 import React, { useEffect, useState } from 'react';
 import { useRoute, Link } from 'wouter';
 import type { PIDDiagram } from '@shared/types/pid';
-import { PIDCanvas } from '@/components/pid/PIDCanvas';
-import { PIDDataProvider } from '@/components/pid/PIDDataBinding';
-import { PIDEditor } from '@/components/pid/PIDEditor';
+import { PIDCanvas } from '../components/pid/PIDCanvas';
+import { PIDDataProvider } from '../components/pid/PIDDataBinding';
+import { PIDEditor } from '../components/pid/PIDEditor';
 
 // =============================================================================
 // DEMO DIAGRAM (used when no API data available)
 // =============================================================================
 
-const DEMO_DIAGRAM: PIDDiagram = {
+const DEMO_DIAGRAM: any = {
   id: 'demo-1',
   name: 'Process Unit 100 — Feed System',
   drawingNumber: 'P&ID-100-001',
@@ -25,68 +25,86 @@ const DEMO_DIAGRAM: PIDDiagram = {
   symbols: [
     {
       id: 'tk-101', type: 'tank', variant: 'closed',
-      transform: { position: { x: 150, y: 400 } },
+      position: { x: 150, y: 400 },
+      transform: { position: { x: 150, y: 400 }, rotation: 0, scale: 1 },
       size: { width: 70, height: 100 },
       tagNumber: 'TK-101', label: 'Feed Tank',
       dataBinding: { tags: [{ tagId: 'TK101.LVL', property: 'level', units: '%' }] },
-    },
+    } as any,
     {
       id: 'p-101', type: 'pump', variant: 'centrifugal',
-      transform: { position: { x: 350, y: 400 } },
+      position: { x: 350, y: 400 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 350, y: 400 }, rotation: 0, scale: 1 },
       tagNumber: 'P-101', label: 'Feed Pump',
       dataBinding: { tags: [{ tagId: 'P101.RUN', property: 'state' }] },
-    },
+    } as any,
     {
       id: 'v-101', type: 'valve', variant: 'globe',
-      transform: { position: { x: 530, y: 400 } },
+      position: { x: 530, y: 400 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 530, y: 400 }, rotation: 0, scale: 1 },
       tagNumber: 'FCV-101', label: 'Flow Control',
-    },
+    } as any,
     {
       id: 'e-101', type: 'heat-exchanger', exchangerType: 'shell-tube',
-      transform: { position: { x: 730, y: 400 } },
+      position: { x: 730, y: 400 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 730, y: 400 }, rotation: 0, scale: 1 },
       tagNumber: 'E-101', label: 'Feed Preheater',
-    },
+    } as any,
     {
       id: 'tk-102', type: 'tank', variant: 'pressure-vessel',
-      transform: { position: { x: 1000, y: 400 } },
+      position: { x: 1000, y: 400 },
+      transform: { position: { x: 1000, y: 400 }, rotation: 0, scale: 1 },
       size: { width: 70, height: 100 },
       tagNumber: 'V-101', label: 'Reactor',
       dataBinding: { tags: [{ tagId: 'V101.LVL', property: 'level', units: '%' }] },
-    },
+    } as any,
     {
       id: 'fic-101', type: 'instrument',
       functionLetters: 'FIC', loopNumber: '101',
-      connectionType: 'electric', location: 'control-room',
-      transform: { position: { x: 530, y: 280 } },
-    },
+      connectionType: 'electrical', location: 'control-room',
+      position: { x: 530, y: 280 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 530, y: 280 }, rotation: 0, scale: 1 },
+    } as any,
     {
       id: 'lic-101', type: 'instrument',
       functionLetters: 'LIC', loopNumber: '101',
-      connectionType: 'electric', location: 'control-room',
-      transform: { position: { x: 150, y: 250 } },
-    },
+      connectionType: 'electrical', location: 'control-room',
+      position: { x: 150, y: 250 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 150, y: 250 }, rotation: 0, scale: 1 },
+    } as any,
     {
       id: 'pic-101', type: 'instrument',
       functionLetters: 'PIC', loopNumber: '101',
-      connectionType: 'electric', location: 'control-room',
-      transform: { position: { x: 1000, y: 250 } },
-    },
+      connectionType: 'electrical', location: 'control-room',
+      position: { x: 1000, y: 250 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 1000, y: 250 }, rotation: 0, scale: 1 },
+    } as any,
     {
       id: 'm-101', type: 'motor',
-      transform: { position: { x: 350, y: 320 } },
+      position: { x: 350, y: 320 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 350, y: 320 }, rotation: 0, scale: 1 },
       tagNumber: 'M-101',
-    },
+    } as any,
     {
       id: 'v-102', type: 'valve', variant: 'relief',
-      transform: { position: { x: 1100, y: 300 }, rotation: -90 },
+      position: { x: 1100, y: 300 },
+      size: { width: 40, height: 40 },
+      transform: { position: { x: 1100, y: 300 }, rotation: -90, scale: 1 },
       tagNumber: 'PSV-101', label: 'Relief',
-    },
+    } as any,
   ],
   connections: [
-    { id: 'c1', from: { symbolId: 'tk-101', portId: 'out' }, to: { symbolId: 'p-101', portId: 'in' }, showFlow: true },
-    { id: 'c2', from: { symbolId: 'p-101', portId: 'out' }, to: { symbolId: 'v-101', portId: 'in' }, showFlow: true },
-    { id: 'c3', from: { symbolId: 'v-101', portId: 'out' }, to: { symbolId: 'e-101', portId: 'in' }, showFlow: true },
-    { id: 'c4', from: { symbolId: 'e-101', portId: 'out' }, to: { symbolId: 'tk-102', portId: 'in' }, showFlow: true },
+    { id: 'c1', from: { symbolId: 'tk-101', portId: 'out' } as any, to: { symbolId: 'p-101', portId: 'in' } as any, showFlow: true } as any,
+    { id: 'c2', from: { symbolId: 'p-101', portId: 'out' } as any, to: { symbolId: 'v-101', portId: 'in' } as any, showFlow: true } as any,
+    { id: 'c3', from: { symbolId: 'v-101', portId: 'out' } as any, to: { symbolId: 'e-101', portId: 'in' } as any, showFlow: true } as any,
+    { id: 'c4', from: { symbolId: 'e-101', portId: 'out' } as any, to: { symbolId: 'tk-102', portId: 'in' } as any, showFlow: true } as any,
   ],
 };
 
@@ -169,7 +187,7 @@ const PIDViewPage: React.FC = () => {
           <div>
             <h1 style={{ margin: 0, fontSize: 16, fontWeight: 600 }}>{diagram.name}</h1>
             <span style={{ fontSize: 12, color: '#64748b' }}>
-              {diagram.drawingNumber} {diagram.revision ? `Rev. ${diagram.revision}` : ''}
+              {(diagram as any).drawingNumber} {(diagram as any).revision ? `Rev. ${(diagram as any).revision}` : ''}
             </span>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>

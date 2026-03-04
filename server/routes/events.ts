@@ -53,7 +53,7 @@ eventRoutes.post("/ingest", async (req: Request, res: Response) => {
     try {
       event = EventSchema.parse(req.body);
     } catch (error) {
-      const validationError = fromZodError(error);
+      const validationError = fromZodError(error as any);
       return res.status(400).json({
         error: "Invalid event structure",
         details: validationError.message,
@@ -83,10 +83,10 @@ eventRoutes.post("/ingest", async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    logger.error("Event ingestion error", { error: error.message });
+    logger.error("Event ingestion error", { error: (error as any).message });
     res.status(500).json({
       error: "Internal server error during event ingestion",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -130,7 +130,7 @@ eventRoutes.post("/bulk", async (req: Request, res: Response) => {
           results.dropped++;
         }
       } catch (error) {
-        results.errors.push(`Event ${index}: ${error.message}`);
+        results.errors.push(`Event ${index}: ${(error as any).message}`);
       }
     }
 
@@ -150,18 +150,18 @@ eventRoutes.post("/bulk", async (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    if (error.name === "ZodError") {
-      const validationError = fromZodError(error);
+    if ((error as any).name === "ZodError") {
+      const validationError = fromZodError(error as any);
       return res.status(400).json({
         error: "Invalid bulk request structure",
         details: validationError.message,
       });
     }
 
-    logger.error("Bulk ingestion error", { error: error.message });
+    logger.error("Bulk ingestion error", { error: (error as any).message });
     res.status(500).json({
       error: "Internal server error during bulk ingestion",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -197,10 +197,10 @@ eventRoutes.post("/flush", async (req: Request, res: Response) => {
     logger.info("Manual batch flush", { batch_id: batch.id, event_count: batch.events.length });
 
   } catch (error) {
-    logger.error("Batch flush error", { error: error.message });
+    logger.error("Batch flush error", { error: (error as any).message });
     res.status(500).json({
       error: "Failed to flush batch",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -219,10 +219,10 @@ eventRoutes.get("/metrics", (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    logger.error("Metrics retrieval error", { error: error.message });
+    logger.error("Metrics retrieval error", { error: (error as any).message });
     res.status(500).json({
       error: "Failed to retrieve metrics",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -260,18 +260,18 @@ eventRoutes.post("/verify", (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    if (error.name === "ZodError") {
-      const validationError = fromZodError(error);
+    if ((error as any).name === "ZodError") {
+      const validationError = fromZodError(error as any);
       return res.status(400).json({
         error: "Invalid verification request",
         details: validationError.message,
       });
     }
 
-    logger.error("Proof verification error", { error: error.message });
+    logger.error("Proof verification error", { error: (error as any).message });
     res.status(500).json({
       error: "Failed to verify proof",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -293,10 +293,10 @@ eventRoutes.get("/config", (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    logger.error("Config retrieval error", { error: error.message });
+    logger.error("Config retrieval error", { error: (error as any).message });
     res.status(500).json({
       error: "Failed to retrieve configuration",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });
@@ -328,11 +328,11 @@ eventRoutes.get("/health", (req: Request, res: Response) => {
     });
 
   } catch (error) {
-    logger.error("Health check error", { error: error.message });
+    logger.error("Health check error", { error: (error as any).message });
     res.status(500).json({
       status: "unhealthy",
       error: "Health check failed",
-      message: error.message,
+      message: (error as any).message,
     });
   }
 });

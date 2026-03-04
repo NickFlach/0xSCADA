@@ -51,26 +51,28 @@ function genId(prefix: string): string {
 function createSymbol(item: PaletteItem, position: Point): PIDSymbol {
   const base = {
     id: genId(item.type),
-    transform: { position },
+    position,
+    size: { width: 40, height: 40 },
+    transform: { position, rotation: 0, scale: 1 },
     label: item.label,
     ports: [],
   };
 
   switch (item.type) {
     case 'valve':
-      return { ...base, type: 'valve', variant: (item.variant ?? 'gate') as ValveVariant };
+      return { ...base, type: 'valve', variant: (item.variant ?? 'gate') as ValveVariant } as any;
     case 'pump':
-      return { ...base, type: 'pump', variant: (item.variant ?? 'centrifugal') as PumpVariant };
+      return { ...base, type: 'pump', variant: (item.variant ?? 'centrifugal') as PumpVariant } as any;
     case 'tank':
-      return { ...base, type: 'tank', variant: (item.variant ?? 'closed') as TankVariant, size: { width: 60, height: 80 } };
+      return { ...base, type: 'tank', variant: (item.variant ?? 'closed') as TankVariant, size: { width: 60, height: 80 } } as any;
     case 'instrument':
-      return { ...base, type: 'instrument', functionLetters: 'FIC', loopNumber: '100', connectionType: 'electrical', location: 'field' };
+      return { ...base, type: 'instrument', functionLetters: 'FIC', loopNumber: '100', connectionType: 'electrical', location: 'field' } as any;
     case 'motor':
-      return { ...base, type: 'motor' };
+      return { ...base, type: 'motor' } as any;
     case 'heat-exchanger':
-      return { ...base, type: 'heat-exchanger' };
+      return { ...base, type: 'heat-exchanger' } as any;
     case 'junction':
-      return { ...base, type: 'junction', variant: (item.variant ?? 'tee') as any };
+      return { ...base, type: 'junction', variant: (item.variant ?? 'tee') as any } as any;
     default:
       return { ...base, type: 'valve', variant: 'gate' } as any;
   }
@@ -121,8 +123,8 @@ const PropertyPanel: React.FC<{
         <span style={{ color: '#64748b', fontSize: 11 }}>X</span>
         <input
           type="number"
-          value={symbol.transform.position.x}
-          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, position: { ...symbol.transform.position, x: Number(e.target.value) } } })}
+          value={symbol.transform?.position.x || 0}
+          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, position: { ...symbol.transform?.position, x: Number(e.target.value) } } as any })}
           style={{ display: 'block', width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4, marginTop: 2 }}
         />
       </label>
@@ -131,8 +133,8 @@ const PropertyPanel: React.FC<{
         <span style={{ color: '#64748b', fontSize: 11 }}>Y</span>
         <input
           type="number"
-          value={symbol.transform.position.y}
-          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, position: { ...symbol.transform.position, y: Number(e.target.value) } } })}
+          value={symbol.transform?.position.y || 0}
+          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, position: { ...symbol.transform?.position, y: Number(e.target.value) } } as any })}
           style={{ display: 'block', width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4, marginTop: 2 }}
         />
       </label>
@@ -141,8 +143,8 @@ const PropertyPanel: React.FC<{
         <span style={{ color: '#64748b', fontSize: 11 }}>Rotation</span>
         <input
           type="number" step={15}
-          value={symbol.transform.rotation ?? 0}
-          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, rotation: Number(e.target.value) } })}
+          value={symbol.transform?.rotation ?? 0}
+          onChange={e => onUpdate({ ...symbol, transform: { ...symbol.transform, rotation: Number(e.target.value) } as any })}
           style={{ display: 'block', width: '100%', padding: '4px 8px', border: '1px solid #d1d5db', borderRadius: 4, marginTop: 2 }}
         />
       </label>

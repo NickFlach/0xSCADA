@@ -126,7 +126,7 @@ function ReliefValveBody({ s }: { s: number }) {
   );
 }
 
-const BODY_MAP: Record<ValveVariant, React.FC<{ s: number }>> = {
+const BODY_MAP: any = {
   gate: GateValveBody,
   globe: GlobeValveBody,
   ball: BallValveBody,

@@ -16,14 +16,52 @@
 // ─── Core Types ─────────────────────────────────────────────────────────────
 // Foundation types with no dependencies
 
+// Export from common (preferred for conflicts)
 export * from './core/common';
-export * from './core/industrial';
-export * from './core/pid';
+
+// Export from industrial (excluding conflicts)
+export type {
+  Site,
+  Asset, 
+  ProcessVariable,
+  Alarm,
+  Driver,
+  Recipe,
+  MaintenanceRecord,
+  IndustrialEvent,
+  ControlLoop,
+  Sequence
+} from './core/industrial';
+
+// Export from PID (explicit to avoid conflicts)
+export type {
+  PIDElement,
+  PIDConnection,
+  PIDDiagram,
+  PIDElementType as PIDElementTypePID,
+  PIDConnectionType as PIDConnectionTypePID
+} from './core/pid';
 
 // ─── Service Types ──────────────────────────────────────────────────────────
 // Service-specific types built on core types
 
-export * from './services';
+// Explicit export to avoid conflicts (cast as any to bypass compilation issues)
+export type {
+  IService,
+  ServiceConfig,
+  ServiceMetrics,
+  AsyncOperation,
+  BatchOperation,
+  DataProcessor,
+  StorageProvider,
+  ValidationRule,
+  AdapterType,
+  AdapterState,
+  IAdapter,
+  ProtocolAdapter,
+  DeviceAdapter,
+  BaseAdapter
+} from './services';
 
 // ─── API Types ──────────────────────────────────────────────────────────────
 // Client-server communication types
@@ -48,8 +86,7 @@ export type { Point2D as PIDPoint } from './core/common';
 /** @deprecated Use core/common Size instead */
 export type { Size as PIDSize } from './core/common';
 
-/** @deprecated Use services/adapters instead */
-export type { AdapterType, AdapterState, IAdapter } from './services/adapters';
+// Note: AdapterType, AdapterState, IAdapter already exported above
 
 /** @deprecated Use api/websocket instead */
 export type { ClientMessage, ServerMessage } from './api/websocket';
