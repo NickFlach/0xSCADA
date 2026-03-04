@@ -14,7 +14,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -23,43 +22,32 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
+import {
+  MODBUS_FC,
+  MODBUS_EXCEPTION,
+  encodeModbusTcpRequest,
+  buildModbusReadRequest,
+  buildModbusWriteSingleRegister,
+  buildModbusWriteSingleCoil,
+  buildModbusWriteMultipleRegisters,
+  buildModbusWriteMultipleCoils,
+} from './modbus-utils';
 
-// ─── Modbus Protocol Constants ───────────────────────────────────────
+// Modbus constants imported from shared modbus-utils.ts
+// Re-export base constants and add Schneider-extended function codes
+export { MODBUS_FC, MODBUS_EXCEPTION } from './modbus-utils';
 
-/** Modbus function codes */
-export const MODBUS_FC = {
-  READ_COILS: 0x01,
-  READ_DISCRETE_INPUTS: 0x02,
-  READ_HOLDING_REGISTERS: 0x03,
-  READ_INPUT_REGISTERS: 0x04,
-  WRITE_SINGLE_COIL: 0x05,
-  WRITE_SINGLE_REGISTER: 0x06,
-  READ_EXCEPTION_STATUS: 0x07,
-  DIAGNOSTICS: 0x08,
+/** Schneider-extended Modbus function codes beyond the standard set */
+export const SCHNEIDER_EXTENDED_FC = {
   GET_COMM_EVENT_COUNTER: 0x0B,
   GET_COMM_EVENT_LOG: 0x0C,
-  WRITE_MULTIPLE_COILS: 0x0F,
-  WRITE_MULTIPLE_REGISTERS: 0x10,
   REPORT_SERVER_ID: 0x11,
   READ_FILE_RECORD: 0x14,
   WRITE_FILE_RECORD: 0x15,
   MASK_WRITE_REGISTER: 0x16,
   READ_WRITE_MULTIPLE_REGISTERS: 0x17,
   READ_DEVICE_IDENTIFICATION: 0x2B,
-} as const;
-
-/** Modbus exception codes */
-export const MODBUS_EXCEPTION = {
-  ILLEGAL_FUNCTION: 0x01,
-  ILLEGAL_DATA_ADDRESS: 0x02,
-  ILLEGAL_DATA_VALUE: 0x03,
-  SLAVE_DEVICE_FAILURE: 0x04,
-  ACKNOWLEDGE: 0x05,
-  SLAVE_DEVICE_BUSY: 0x06,
-  NEGATIVE_ACKNOWLEDGE: 0x07,
-  MEMORY_PARITY_ERROR: 0x08,
-  GATEWAY_PATH_UNAVAILABLE: 0x0A,
-  GATEWAY_TARGET_FAILED: 0x0B,
 } as const;
 
 /** Modbus diagnostic sub-function codes (FC 0x08) */
@@ -228,79 +216,8 @@ export const SCHNEIDER_MODELS = {
 } as const;
 
 // ─── Modbus TCP Frame Encoding/Decoding ──────────────────────────────
-
-let mbapTransactionId = 0;
-
-/** Encode a Modbus TCP (MBAP) request frame */
-function encodeModbusTcpRequest(unitId: number, functionCode: number, payload: Buffer): Buffer {
-  const transId = mbapTransactionId & 0xFFFF;
-  mbapTransactionId = (mbapTransactionId + 1) & 0xFFFF;
-  const mbapHeader = Buffer.alloc(7);
-  mbapHeader.writeUInt16BE(transId, 0);        // Transaction ID
-  mbapHeader.writeUInt16BE(0x0000, 2);         // Protocol ID (Modbus = 0)
-  mbapHeader.writeUInt16BE(1 + payload.length, 4); // Length (Unit ID + PDU)
-  mbapHeader.writeUInt8(unitId, 6);            // Unit Identifier
-  
-  const pdu = Buffer.alloc(1 + payload.length);
-  pdu.writeUInt8(functionCode, 0);
-  payload.copy(pdu, 1);
-  
-  return Buffer.concat([mbapHeader, pdu]);
-}
-
-/** Build Modbus read request (FC01/02/03/04) */
-function buildModbusReadRequest(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(quantity, 2);
-  return encodeModbusTcpRequest(unitId, fc, payload);
-}
-
-/** Build Modbus write single register (FC06) */
-function buildModbusWriteSingleRegister(unitId: number, address: number, value: number): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(address, 0);
-  payload.writeUInt16BE(value & 0xFFFF, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_REGISTER, payload);
-}
-
-/** Build Modbus write single coil (FC05) */
-function buildModbusWriteSingleCoil(unitId: number, address: number, value: boolean): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(address, 0);
-  payload.writeUInt16BE(value ? 0xFF00 : 0x0000, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_COIL, payload);
-}
-
-/** Build Modbus write multiple registers (FC16) */
-function buildModbusWriteMultipleRegisters(unitId: number, startAddress: number, values: number[]): Buffer {
-  const byteCount = values.length * 2;
-  const payload = Buffer.alloc(5 + byteCount);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(values.length, 2);
-  payload.writeUInt8(byteCount, 4);
-  for (let i = 0; i < values.length; i++) {
-    payload.writeUInt16BE(values[i] & 0xFFFF, 5 + i * 2);
-  }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_REGISTERS, payload);
-}
-
-/** Build Modbus write multiple coils (FC15) */
-function buildModbusWriteMultipleCoils(unitId: number, startAddress: number, values: boolean[]): Buffer {
-  const byteCount = Math.ceil(values.length / 8);
-  const payload = Buffer.alloc(5 + byteCount);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(values.length, 2);
-  payload.writeUInt8(byteCount, 4);
-  for (let i = 0; i < values.length; i++) {
-    if (values[i]) {
-      const byteIdx = Math.floor(i / 8);
-      const bitIdx = i % 8;
-      payload[5 + byteIdx] |= (1 << bitIdx);
-    }
-  }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_COILS, payload);
-}
+// Core frame builders imported from shared modbus-utils.ts
+// Schneider-specific builders below:
 
 /** Build Modbus diagnostics request (FC08) */
 function buildModbusDiagnostics(unitId: number, subFunction: number, data: number = 0): Buffer {
@@ -681,7 +598,7 @@ function parseSchneiderAddress(address: string): {
 
 interface Iec104Connection {
   endpoint: ProtocolEndpoint;
-  socket: any;
+  socket: import('net').Socket | null;
   sendSeq: number;
   receiveSeq: number;
   isStarted: boolean;
@@ -695,7 +612,7 @@ interface Iec104Connection {
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'schneider-vendor',
     name: 'Schneider Electric Vendor Adapter',
@@ -711,12 +628,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
   private modbusConnections: Map<string, ProtocolConnection> = new Map();
   private iec104Connections: Map<string, Iec104Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; quality: string }> = new Map();
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
-  private iec104SpontaneousBuffer: Map<number, { value: any; timestamp: Date; typeId: number }> = new Map();
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
+  private iec104SpontaneousBuffer: Map<number, { value: unknown; timestamp: Date; typeId: number }> = new Map();
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Schneider Electric vendor adapter — Modbus TCP/RTU + IEC 104');
@@ -903,7 +815,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
             address: regs[i].address,
             dataType: regs[i].isBool ? 'boolean' : 'number',
             value: cached?.value ?? null,
-            quality: (cached?.quality as any) ?? 'uncertain',
+            quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
             timestamp: cached?.timestamp ?? new Date(),
           });
         }
@@ -954,7 +866,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       address,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -1014,9 +926,9 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
   // ─── Discovery ─────────────────────────────────────────────────────
 
-  async discoverDevices(): Promise<any[]> {
+  async discoverDevices(): Promise<Record<string, unknown>[]> {
     this.context?.logger.info('Discovering Schneider devices via Modbus device identification');
-    const devices: any[] = [];
+    const devices: Record<string, unknown>[] = [];
 
     // Scan unit IDs 1-10 with Read Device Identification
     for (let unitId = 1; unitId <= 10; unitId++) {
@@ -1029,7 +941,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
     const request = buildModbusReadDeviceId(unitId);
     this.messagesProcessed++;
@@ -1037,7 +949,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     return { deviceId, vendor: 'Schneider Electric', models: SCHNEIDER_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
 
     // Read M580 system bits (%S)
@@ -1071,7 +983,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
   }
 
   /** Read SCADAPack system registers */
-  async readScadapackSystemRegisters(unitId: number): Promise<any> {
+  async readScadapackSystemRegisters(unitId: number): Promise<Record<string, unknown>> {
     const request = buildModbusReadRequest(
       unitId,
       MODBUS_FC.READ_HOLDING_REGISTERS,
@@ -1106,31 +1018,14 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
+  startPollingByTier(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
     const interval = SCHNEIDER_POLLING[tier];
     if (interval === 0) {
       // IEC 104 spontaneous — no polling, event-driven
       this.context?.logger.info('IEC 104 spontaneous mode — no active polling');
       return 'iec104-spontaneous';
     }
-
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`Schneider polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
-  }
-
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) { clearInterval(timer); this.pollingTimers.delete(key); }
+    return this.startPolling(addresses, interval, callback, tier);
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────
@@ -1139,21 +1034,18 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     return this.iec104Connections.values().next().value as Iec104Connection | undefined;
   }
 
-  protected async getMetrics() {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.connections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
       modbusConnections: this.modbusConnections.size,
       iec104Connections: this.iec104Connections.size,
       iec104SpontaneousItems: this.iec104SpontaneousBuffer.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: SCHNEIDER_REGISTER_MAP,
       connectionParams: SCHNEIDER_CONNECTION_PARAMS,

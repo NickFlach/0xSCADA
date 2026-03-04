@@ -118,6 +118,38 @@ function FanoMini({ populatedPoints }: { populatedPoints: Set<number> }) {
   );
 }
 
+/**
+ * Derive populated Fano plane points from partition data.
+ * The 7 points of PG(2,2) map to: 3 quadrant axes (1-3), 3 triality axes (4-6),
+ * and the central classIndex point (7). Points are populated when the corresponding
+ * partition class count meets threshold (>0 for axes, >0 for center).
+ */
+function deriveFanoPoints(data: PhiData): Set<number> {
+  const points = new Set<number>();
+  const q = data.partitions?.quadrant;
+  const t = data.partitions?.triality;
+  const c = data.partitions?.classIndex;
+
+  // Quadrant partition populates points 1, 2, 3 (one per class present, up to 4 classes → 3 outer points)
+  if (q) {
+    if (q.classes >= 1) points.add(1);
+    if (q.classes >= 2) points.add(2);
+    if (q.classes >= 3) points.add(4); // Point 4 (0-indexed 3) — Fano collinear with 1,2
+  }
+  // Triality partition populates points 3, 5, 6
+  if (t) {
+    if (t.classes >= 1) points.add(3);
+    if (t.classes >= 2) points.add(5);
+    if (t.classes >= 3) points.add(6);
+  }
+  // ClassIndex populates center point 7
+  if (c && c.classes > 0) {
+    points.add(7);
+  }
+
+  return points;
+}
+
 export function PhiGauge({ refreshMs = 10000 }: { refreshMs?: number }) {
   const [data, setData] = useState<PhiData | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -155,7 +187,7 @@ export function PhiGauge({ refreshMs = 10000 }: { refreshMs?: number }) {
     <div style={{ padding: 12, background: "#0f172a", borderRadius: 8, border: "1px solid #1e293b", minWidth: 200 }}>
       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
         <GaugeArc value={data.phi} />
-        <FanoMini populatedPoints={new Set([1, 2, 3, 4, 5, 6, 7].filter((_, i) => i < (data.partitions?.classIndex?.classes || 0)))} />
+        <FanoMini populatedPoints={deriveFanoPoints(data)} />
       </div>
       <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 8 }}>
         <div>Level: <strong style={{ color: phiColor(data.phi) }}>{data.level}</strong></div>

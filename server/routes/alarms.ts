@@ -5,7 +5,7 @@ import { getFluxPublisher } from "../services/flux";
 const router = Router();
 
 // Auth middleware placeholder — same pattern as other protected routes
-function requireAuth(req: any, res: any, next: any) {
+function requireAuth(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
   // TODO: implement real auth check (JWT / session validation)
   // For now, allow all requests through (placeholder)
   next();
