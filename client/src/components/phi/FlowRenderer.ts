@@ -73,6 +73,9 @@ export class FlowRenderer {
           lineIndex: li, segment: Math.random() > 0.5 ? 1 : 0,
           t: Math.random(), speed: 0.3 + Math.random() * 0.4,
         });
+      } else if (current > desired) {
+        const idx = this.particles.findIndex(p => p.lineIndex === li);
+        if (idx >= 0) this.particles.splice(idx, 1);
       }
     }
   }
