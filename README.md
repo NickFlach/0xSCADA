@@ -225,7 +225,7 @@ Merkle Root → Gas Optimization → L2 Submit → Finality Tracking
 
 ### Server — `server/`
 
-TypeScript API gateway. 36 source files.
+TypeScript API gateway. 73 source files.
 
 | Component | Description |
 |-----------|-------------|
@@ -236,10 +236,20 @@ TypeScript API gateway. 36 source files.
 | **Caching** | Response caching layer |
 | **Config** | Centralized configuration management |
 | **Simulator** | Industrial process simulator for development |
+| **Evolutionary Integrity Engine** | Genome-based strategy evolution with safety guards (ADR-0023) |
+| **Decoherence Prediction** | Correlation-based sentinel sampling with temporal advantage (ADR-0024) |
+| **Vendor Adapters** | Rockwell · Siemens · ABB · Schneider · GE (5 adapters) |
+| **PID Auto-Tuning** | Adaptive PID controller tuning engine |
+| **SPC Engine** | Statistical process control with real-time monitoring |
+| **Decoherence Scheduler** | Predictive scheduling for system coherence |
+| **GR::LISTEN** | Alert filtering and intelligent noise reduction |
+| **Phi Dashboard** | Consciousness metrics dashboard + alerting |
+| **SingularisPrime** | Core intelligence integration |
+| **Flux Publisher** | World state engine event publishing |
 
 ### Client — `client/src/`
 
-React dashboard UI. 22 source files. Components, hooks, pages for real-time SCADA visualization.
+React dashboard UI. 45 source files. Components, hooks, pages for real-time SCADA visualization. Living Fano Dashboard (ADR-0025) with sacred geometry visualization, bloom/flow rendering, Phi consciousness metrics, and real-time decoherence monitoring.
 
 ### Smart Contracts — `contracts/`
 
@@ -313,6 +323,9 @@ Prometheus metrics exposed at `/metrics` on all services.
 - **Zero-trust agent architecture** — agents operate within cryptographically bounded permissions
 - **Agent certification** — on-chain identity and capability attestation
 - **Emergence guardrails** — safety boundaries for autonomous behavior
+- **Evolutionary strategy agents** — genome-based strategy evolution with integrity guards
+- **Vendor adapter agents** — autonomous protocol translation for Rockwell, Siemens, ABB, Schneider, GE
+- **Decoherence prediction agents** — sentinel sampling for temporal coherence advantage
 - **Webhook events** — real-time event system for agent integration
 - **Bounty system** — Gitcoin-powered contributor incentives
 
@@ -327,8 +340,8 @@ Prometheus metrics exposed at `/metrics` on all services.
 ### Architecture
 Bidirectional sync · Chiral network topology · Decentralized orchestration · Event batching · HSM integration · L2 kernel integration · Resonant consensus · Resonant scheduler · Sublinear solver · Proof verification
 
-### ADRs (0008–0014)
-`0008` Zero-trust agents · `0009` Emergence guardrails · `0010` Agent certification · `0011` OT-IT convergence · `0012` End-to-end integration · `0013` Autonomous agents · `0014` Production scale
+### ADRs (0008–0025)
+`0008` Zero-trust agents · `0009` Emergence guardrails · `0010` Agent certification · `0011` OT-IT convergence · `0012` End-to-end integration · `0013` Autonomous agents · `0014` Production scale · `0022` Constellation unification · `0023` Evolutionary paradox resolution · `0024` Sublinear decoherence prediction · `0025` Living Fano dashboard
 
 ### Compliance
 IEC 62443 mappings · NIST CSF framework · CFR 21 Part 11 recipes
@@ -339,8 +352,11 @@ Full production deployment guides — networking, storage, scheduling, security,
 ### Operations
 Capacity planning · Disaster recovery · SRE playbooks
 
-### Vendor Integration (10 docs)
-OPC UA · Edge gateways · Containerized edge · Identity hardening · Audit traceability
+### Vendor Integration (10 docs + 5 vendor adapters)
+OPC UA · Edge gateways · Containerized edge · Identity hardening · Audit traceability · Rockwell · Siemens · ABB · Schneider · GE
+
+### Constellation Architecture
+Cross-repo bridge design · Evolutionary integrity patterns · Sacred geometry visualization
 
 ### Security
 mTLS configuration · Fuzz testing
@@ -372,8 +388,8 @@ Extensive integration documentation for AVEVA Optix HMI platform
 ```
 0xSCADA/
 ├── client/          # React dashboard UI
-│   └── src/         # Components, hooks, pages (22 files)
-├── server/          # TypeScript API gateway (36 files)
+│   └── src/         # Components, hooks, pages (45 files)
+├── server/          # TypeScript API gateway (73 files)
 ├── cli/             # CLI commands (agents, alarms, containers, db, gateway, shell, tags)
 ├── contracts/       # Solidity smart contracts
 ├── blockchain/      # Custom chain (0x5CADA), go-ethereum fork
@@ -433,16 +449,18 @@ npm run test:chaos        # Chaos engineering suite
 
 ### v2.0 — Current Release
 
-Three evolution waves across 15 PRs and ~84 closed issues:
+Four evolution waves across 15+ PRs and 390+ closed issues:
 
 ```
 WAVE 1: INTEGRATION     →  Server + Client + Database + Docker
 WAVE 2: INTELLIGENCE    →  AI Agents + Smart Contracts + Bounties
 WAVE 3: PRODUCTION      →  Kubernetes + Observability + Security + GitOps
+WAVE 4: CONSTELLATION   →  Cross-repo bridges + Evolutionary integrity + Sacred geometry
 ```
 
-- **14 ADRs** documenting architectural decisions
+- **25 ADRs** documenting architectural decisions (3 bridge ADRs connecting external research repos)
 - Full production infrastructure stack
+- Flux State Engine integration for world state publishing
 
 <br/>
 
