@@ -8,3 +8,5 @@
 
 export * from './correlation-graph';
 export * from './sentinel-sampler';
+export * from './temporal-predictor';
+export * from './predictive-scheduler';
