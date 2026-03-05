@@ -145,6 +145,31 @@ export class FitnessEvaluator {
     return this.records.get(genomeId) ?? [];
   }
 
+  /** Remove records for a retired genome to prevent unbounded memory growth (#399) */
+  removeGenome(genomeId: string): boolean {
+    return this.records.delete(genomeId);
+  }
+
+  /**
+   * Prune records for genomes not in the provided set of active IDs.
+   * Call after each generation to clean up dead genomes.
+   */
+  pruneInactive(activeGenomeIds: Set<string>): number {
+    let pruned = 0;
+    for (const id of this.records.keys()) {
+      if (!activeGenomeIds.has(id)) {
+        this.records.delete(id);
+        pruned++;
+      }
+    }
+    return pruned;
+  }
+
+  /** Current number of tracked genomes */
+  get trackedGenomeCount(): number {
+    return this.records.size;
+  }
+
   // ─── Internal ───────────────────────────────────────────────────────────
 
   private pushRecord(genomeId: string, record: FitnessRecord): void {

@@ -7,7 +7,7 @@
  * ADR-0025 Wave 1: closes #389, closes #390
  */
 
-import { useEffect, useRef, useCallback } from 'react';
+import { useEffect, useRef } from 'react';
 import { computeFanoLayout, FanoPoint } from './FanoGeometry';
 import { BloomParams, DEFAULT_BLOOM, renderBloom } from './BloomRenderer';
 import { FlowRenderer } from './FlowRenderer';
@@ -51,63 +51,81 @@ export function LivingFano({
   const rotationRef = useRef(0);
   const points = useRef<FanoPoint[]>(computeFanoLayout());
 
-  const render = useCallback((timestamp: number) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+  // Refs for override props so render loop reads current values without re-creation (#401)
+  const overridePhiRef = useRef(overridePhi);
+  const overrideAlarmRef = useRef(overrideAlarm);
+  const overrideBloomsRef = useRef(overrideBlooms);
+  overridePhiRef.current = overridePhi;
+  overrideAlarmRef.current = overrideAlarm;
+  overrideBloomsRef.current = overrideBlooms;
 
-    const dt = Math.min(lastTimeRef.current ? (timestamp - lastTimeRef.current) / 1000 : 1 / 60, 0.1);
-    lastTimeRef.current = timestamp;
-    const time = timestamp / 1000;
+  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
 
-    const vs = stateRef.current ?? bridgeRef.current.getState();
-    const currentPhi = overridePhi ?? vs.phi;
-    const currentBlooms = overrideBlooms ?? vs.blooms;
-    const hasAlarm = overrideAlarm ?? vs.hasAlarm;
-
-    breathRef.current.setPhi(currentPhi);
-    const breathFactor = breathRef.current.update(dt);
-
-    rotationRef.current += (hasAlarm ? 0 : 0.05 + currentPhi * 0.1) * dt;
-
-    flowRef.current.setAllFlows(vs.flows);
-    flowRef.current.update(dt);
-
-    const w = canvas.width, h = canvas.height;
-    ctx.clearRect(0, 0, w, h);
-    ctx.fillStyle = '#0a0f1a';
-    ctx.fillRect(0, 0, w, h);
-
-    drawFlowerOfLife(ctx, w, h, vs.backgroundBrightness);
-
-    ctx.save();
-    ctx.translate(w / 2, h / 2);
-    ctx.rotate(rotationRef.current);
-    ctx.translate(-w / 2, -h / 2);
-
-    flowRef.current.render(ctx, points.current, w, h, time);
-
-    const pts = points.current;
-    for (let i = 0; i < 7; i++) {
-      renderBloom(ctx, pts[i].x * w, pts[i].y * h, currentBlooms[i] ?? DEFAULT_BLOOM, time, breathFactor);
-    }
-
-    ctx.restore();
-    animRef.current = requestAnimationFrame(render);
-  }, [overridePhi, overrideAlarm, overrideBlooms]);
-
+  // Effect 1: Bridge lifecycle — only depends on pollIntervalMs (#401)
   useEffect(() => {
     bridgeRef.current.start(pollIntervalMs, (state) => { stateRef.current = state; });
+    return () => {
+      bridgeRef.current.stop();
+    };
+  }, [pollIntervalMs]);
+
+  // Effect 2: Animation frame loop — reads override props from refs (#401)
+  useEffect(() => {
+    const render = (timestamp: number) => {
+      const canvas = canvasRef.current;
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+
+      const dt = Math.min(lastTimeRef.current ? (timestamp - lastTimeRef.current) / 1000 : 1 / 60, 0.1);
+      lastTimeRef.current = timestamp;
+      const time = timestamp / 1000;
+
+      const vs = stateRef.current ?? bridgeRef.current.getState();
+      const currentPhi = overridePhiRef.current ?? vs.phi;
+      const currentBlooms = overrideBloomsRef.current ?? vs.blooms;
+      const hasAlarm = overrideAlarmRef.current ?? vs.hasAlarm;
+
+      breathRef.current.setPhi(currentPhi);
+      const breathFactor = breathRef.current.update(dt);
+
+      rotationRef.current += (hasAlarm ? 0 : 0.05 + currentPhi * 0.1) * dt;
+
+      flowRef.current.setAllFlows(vs.flows);
+      flowRef.current.update(dt);
+
+      // Use CSS-pixel dimensions with DPR scaling via ctx.setTransform (#396)
+      const w = width, h = height;
+      ctx.save();
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, w, h);
+      ctx.fillStyle = '#0a0f1a';
+      ctx.fillRect(0, 0, w, h);
+
+      drawFlowerOfLife(ctx, w, h, vs.backgroundBrightness);
+
+      ctx.translate(w / 2, h / 2);
+      ctx.rotate(rotationRef.current);
+      ctx.translate(-w / 2, -h / 2);
+
+      flowRef.current.render(ctx, points.current, w, h, time);
+
+      const pts = points.current;
+      for (let i = 0; i < 7; i++) {
+        renderBloom(ctx, pts[i].x * w, pts[i].y * h, currentBlooms[i] ?? DEFAULT_BLOOM, time, breathFactor);
+      }
+
+      ctx.restore();
+      animRef.current = requestAnimationFrame(render);
+    };
+
     animRef.current = requestAnimationFrame(render);
     return () => {
       cancelAnimationFrame(animRef.current);
-      bridgeRef.current.stop();
       breathRef.current.reset();
     };
-  }, [render, pollIntervalMs]);
-
-  const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dpr, width, height]);
 
   return (
     <canvas

@@ -114,10 +114,18 @@ export const vote: ResolutionPrimitive = {
     if (events.length < 2) {
       return { score: 0.5, weight: 0.8, reasoning: 'Insufficient events for voting' };
     }
-    // Group by rounded value
+    // Group by bucketed value; bucket width adapts to value range (#403)
+    const numericVals = events
+      .map(e => e.value)
+      .filter((v): v is number => typeof v === 'number');
+    const bucketWidth = numericVals.length >= 2
+      ? Math.max(1, (Math.max(...numericVals) - Math.min(...numericVals)) / Math.max(3, numericVals.length))
+      : 1;
     const buckets = new Map<string, ScadaEvent[]>();
     for (const e of events) {
-      const key = typeof e.value === 'number' ? Math.round(e.value).toString() : String(e.value);
+      const key = typeof e.value === 'number'
+        ? (Math.round(e.value / bucketWidth) * bucketWidth).toFixed(4)
+        : String(e.value);
       const arr = buckets.get(key) ?? [];
       arr.push(e);
       buckets.set(key, arr);
@@ -235,6 +243,9 @@ export const neighbor_correlation: ResolutionPrimitive = {
       return { score: 0.5, weight: 0.6, reasoning: 'Non-numeric neighbors' };
     }
     const neighborAvg = neighborNums.reduce((a, b) => a + b, 0) / neighborNums.length;
+    const neighborStddev = Math.sqrt(
+      neighborNums.reduce((s, v) => s + (v - neighborAvg) ** 2, 0) / neighborNums.length,
+    );
 
     const events = ctx.conflict.events.filter(e => typeof e.value === 'number');
     if (events.length === 0) {
@@ -249,7 +260,8 @@ export const neighbor_correlation: ResolutionPrimitive = {
         bestEvent = e;
       }
     }
-    const score = Math.exp(-bestDist / Math.max(Math.abs(neighborAvg), 1));
+    // Normalize by stddev (or fallback to 1) instead of mean (#404)
+    const score = Math.exp(-bestDist / Math.max(neighborStddev, 1));
     return {
       score,
       weight: 0.8,
@@ -280,20 +292,43 @@ export const rate_filter: ResolutionPrimitive = {
       return { score: 0.5, weight: 0.8, reasoning: 'No numeric conflict events' };
     }
 
+    // Configurable rate threshold (units/sec considered suspicious)
+    const rateThreshold = (ctx as ConflictContext & { rateThreshold?: number }).rateThreshold ?? 100;
+
     // Compute rate of change for each event relative to last reading
     let bestEvent = events[0];
     let bestScore = 0;
+    let anyScored = false;
     for (const e of events) {
       const dt = Math.abs(e.timestamp.getTime() - lastReading.timestamp.getTime()) / 1000; // seconds
       if (dt === 0) continue;
+      anyScored = true;
       const rate = Math.abs((e.value as number) - (lastReading.value as number)) / dt;
-      // Assume rates > 100 units/sec are suspicious; score decays exponentially
-      const s = Math.exp(-rate / 100);
+      const s = Math.exp(-rate / rateThreshold);
       if (s > bestScore) {
         bestScore = s;
         bestEvent = e;
       }
     }
+
+    // All events have dt=0 (simultaneous with last reading) — pick closest value (#402)
+    if (!anyScored) {
+      let closestDist = Infinity;
+      for (const e of events) {
+        const dist = Math.abs((e.value as number) - (lastReading.value as number));
+        if (dist < closestDist) {
+          closestDist = dist;
+          bestEvent = e;
+        }
+      }
+      return {
+        score: 0.5,
+        weight: 0.8,
+        favoredEventId: bestEvent.id,
+        reasoning: `Rate filter: all dt=0, picked closest value (${bestEvent.deviceId})`,
+      };
+    }
+
     return {
       score: bestScore || 0.5,
       weight: 0.8,
