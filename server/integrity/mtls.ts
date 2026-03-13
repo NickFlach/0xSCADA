@@ -91,7 +91,7 @@ class DevCertificateAuthority {
   /**
    * Generate CA certificate and key
    */
-  private async generateCA(): Promise<void> {
+  async generateCA(): Promise<void> {
     const caKeyPath = join(this.config.certsDir, this.config.ca.key);
     const caCertPath = join(this.config.certsDir, this.config.ca.cert);
 
@@ -106,7 +106,7 @@ class DevCertificateAuthority {
   /**
    * Generate server certificate signed by CA
    */
-  private async generateServerCert(): Promise<void> {
+  async generateServerCert(): Promise<void> {
     const serverKeyPath = join(this.config.certsDir, this.config.server.key);
     const serverCertPath = join(this.config.certsDir, this.config.server.cert);
     const serverCsrPath = join(this.config.certsDir, 'server.csr');
@@ -130,7 +130,7 @@ class DevCertificateAuthority {
   /**
    * Generate client certificate signed by CA
    */
-  private async generateClientCert(): Promise<void> {
+  async generateClientCert(): Promise<void> {
     const clientKeyPath = join(this.config.certsDir, this.config.client.key);
     const clientCertPath = join(this.config.certsDir, this.config.client.cert);
     const clientCsrPath = join(this.config.certsDir, 'client.csr');
