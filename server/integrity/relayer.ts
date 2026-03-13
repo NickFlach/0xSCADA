@@ -75,9 +75,9 @@ export interface RelayerStats {
  */
 export class AnchorRelayerService extends EventEmitter {
   private config: RelayerConfig;
-  private provider: ethers.JsonRpcProvider;
-  private wallet: ethers.Wallet;
-  private contract: ethers.Contract;
+  private provider!: ethers.JsonRpcProvider;
+  private wallet!: ethers.Wallet;
+  private contract!: ethers.Contract;
   private queue: AnchorRequest[] = [];
   private processing = false;
   private stats: RelayerStats;
