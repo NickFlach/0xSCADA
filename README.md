@@ -375,7 +375,7 @@ Extensive integration documentation for AVEVA Optix HMI platform
 - **Testing:** Chaos engineering framework
 - **Tooling:** Foundry + Hardhat smart contract toolchain
 - **Charter:** Agentic Engineering organizational charter
-- **GhostOS:** Propagation model documentation
+- **ghostmagicOS (gmOS):** Propagation model documentation
 
 <br/>
 
