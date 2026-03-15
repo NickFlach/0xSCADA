@@ -1,10 +1,10 @@
 /**
  * Schneider Electric Vendor Adapter
- * 
+ *
  * Extends 0xSCADA BaseAdapter for Schneider Electric PLC/HMI/RTU systems.
  * Protocols: Modbus TCP/RTU, EtherNet/IP, IEC 60870-5-104
  * Models: Modicon M580, M340, Quantum, SCADAPack, Easergy
- * 
+ *
  * Implements:
  *   - Modbus TCP (MBAP) frame encoding/decoding with full function code support
  *   - Modbus RTU with CRC-16 calculation
@@ -83,7 +83,7 @@ export const IEC104_U_FUNCTION = {
   TESTFR_CON: 0x83,    // Test Frame Confirmation
 } as const;
 
-/** IEC 104 Type Identification (TI) — Information Object types */
+/** IEC 104 Type Identification (TI) - Information Object types */
 export const IEC104_TYPE_ID = {
   // Monitor direction (from controlled station)
   M_SP_NA_1: 1,    // Single-point information
@@ -139,7 +139,142 @@ export const IEC104_COT = {
 export const IEC104_PARAMS = {
   T0: 30,    // Connection establishment timeout (s)
   T1: 15,    // Send or test APDU timeout (s)
-  T2: 10,    // Ack timeout for S-format (s) — must be < T1
+  T2: 10,    // Ack timeout for S-format (s) - must be < T1
+  T3: 20,    // Test frame timeout (s)
+  K: 12,     // Max unconfirmed I-format APDUs sent
+  W: 8,      // Max unconfirmed I-format APDUs received before ack
+} as const;
+
+// ─── Schneider-Specific Register Maps ────────────────────────────────
+
+// ─── Modbus Protocol Constants ───────────────────────────────────────
+
+/** Modbus function codes */
+export const MODBUS_FC = {
+  READ_COILS: 0x01,
+  READ_DISCRETE_INPUTS: 0x02,
+  READ_HOLDING_REGISTERS: 0x03,
+  READ_INPUT_REGISTERS: 0x04,
+  WRITE_SINGLE_COIL: 0x05,
+  WRITE_SINGLE_REGISTER: 0x06,
+  READ_EXCEPTION_STATUS: 0x07,
+  DIAGNOSTICS: 0x08,
+  GET_COMM_EVENT_COUNTER: 0x0B,
+  GET_COMM_EVENT_LOG: 0x0C,
+  WRITE_MULTIPLE_COILS: 0x0F,
+  WRITE_MULTIPLE_REGISTERS: 0x10,
+  REPORT_SERVER_ID: 0x11,
+  READ_FILE_RECORD: 0x14,
+  WRITE_FILE_RECORD: 0x15,
+  MASK_WRITE_REGISTER: 0x16,
+  READ_WRITE_MULTIPLE_REGISTERS: 0x17,
+  READ_DEVICE_IDENTIFICATION: 0x2B,
+} as const;
+
+/** Modbus exception codes */
+export const MODBUS_EXCEPTION = {
+  ILLEGAL_FUNCTION: 0x01,
+  ILLEGAL_DATA_ADDRESS: 0x02,
+  ILLEGAL_DATA_VALUE: 0x03,
+  SLAVE_DEVICE_FAILURE: 0x04,
+  ACKNOWLEDGE: 0x05,
+  SLAVE_DEVICE_BUSY: 0x06,
+  NEGATIVE_ACKNOWLEDGE: 0x07,
+  MEMORY_PARITY_ERROR: 0x08,
+  GATEWAY_PATH_UNAVAILABLE: 0x0A,
+  GATEWAY_TARGET_FAILED: 0x0B,
+} as const;
+
+/** Modbus diagnostic sub-function codes (FC 0x08) */
+export const MODBUS_DIAG_SUB = {
+  RETURN_QUERY_DATA: 0x0000,
+  RESTART_COMMUNICATIONS: 0x0001,
+  RETURN_DIAGNOSTIC_REGISTER: 0x0002,
+  FORCE_LISTEN_ONLY: 0x0004,
+  CLEAR_COUNTERS: 0x000A,
+  RETURN_BUS_MESSAGE_COUNT: 0x000B,
+  RETURN_BUS_COMM_ERROR_COUNT: 0x000C,
+  RETURN_BUS_EXCEPTION_ERROR_COUNT: 0x000D,
+  RETURN_SERVER_MESSAGE_COUNT: 0x000E,
+  RETURN_SERVER_NO_RESPONSE_COUNT: 0x000F,
+} as const;
+
+// ─── IEC 60870-5-104 Constants ───────────────────────────────────────
+
+/** IEC 104 APCI frame types */
+export const IEC104_FRAME_TYPE = {
+  I_FORMAT: 0x00,   // Information transfer
+  S_FORMAT: 0x01,   // Supervisory
+  U_FORMAT: 0x03,   // Unnumbered control
+} as const;
+
+/** IEC 104 U-format function codes */
+export const IEC104_U_FUNCTION = {
+  STARTDT_ACT: 0x07,   // Start Data Transfer Activation
+  STARTDT_CON: 0x0B,   // Start Data Transfer Confirmation
+  STOPDT_ACT: 0x13,    // Stop Data Transfer Activation
+  STOPDT_CON: 0x23,    // Stop Data Transfer Confirmation
+  TESTFR_ACT: 0x43,    // Test Frame Activation
+  TESTFR_CON: 0x83,    // Test Frame Confirmation
+} as const;
+
+/** IEC 104 Type Identification (TI) - Information Object types */
+export const IEC104_TYPE_ID = {
+  // Monitor direction (from controlled station)
+  M_SP_NA_1: 1,    // Single-point information
+  M_SP_TA_1: 2,    // Single-point with time tag
+  M_DP_NA_1: 3,    // Double-point information
+  M_DP_TA_1: 4,    // Double-point with time tag
+  M_ST_NA_1: 5,    // Step position information
+  M_BO_NA_1: 7,    // Bitstring of 32 bit
+  M_ME_NA_1: 9,    // Measured value, normalized
+  M_ME_NB_1: 11,   // Measured value, scaled
+  M_ME_NC_1: 13,   // Measured value, short floating point
+  M_IT_NA_1: 15,   // Integrated totals
+  M_SP_TB_1: 30,   // Single-point with CP56Time2a
+  M_DP_TB_1: 31,   // Double-point with CP56Time2a
+  M_ME_TD_1: 34,   // Measured normalized with CP56Time2a
+  M_ME_TE_1: 35,   // Measured scaled with CP56Time2a
+  M_ME_TF_1: 36,   // Measured float with CP56Time2a
+  // Control direction (from controlling station)
+  C_SC_NA_1: 45,   // Single command
+  C_DC_NA_1: 46,   // Double command
+  C_RC_NA_1: 47,   // Regulating step command
+  C_SE_NA_1: 48,   // Set-point, normalized
+  C_SE_NB_1: 49,   // Set-point, scaled
+  C_SE_NC_1: 50,   // Set-point, short floating point
+  C_BO_NA_1: 51,   // Bitstring of 32 bit
+  // System information
+  C_IC_NA_1: 100,  // Interrogation command
+  C_CI_NA_1: 101,  // Counter interrogation
+  C_RD_NA_1: 102,  // Read command
+  C_CS_NA_1: 103,  // Clock synchronization
+  C_RP_NA_1: 105,  // Reset process command
+} as const;
+
+/** IEC 104 Cause of Transmission (COT) */
+export const IEC104_COT = {
+  PERIODIC: 1,
+  BACKGROUND: 2,
+  SPONTANEOUS: 3,
+  INITIALIZED: 4,
+  REQUEST: 5,
+  ACTIVATION: 6,
+  ACTIVATION_CON: 7,
+  DEACTIVATION: 8,
+  DEACTIVATION_CON: 9,
+  ACTIVATION_TERM: 10,
+  RETURN_REMOTE: 11,
+  RETURN_LOCAL: 12,
+  INTERROGATED_STATION: 20,
+  INTERROGATED_GROUP_1: 21,
+} as const;
+
+/** IEC 104 connection parameters (T0..T3, k, w) */
+export const IEC104_PARAMS = {
+  T0: 30,    // Connection establishment timeout (s)
+  T1: 15,    // Send or test APDU timeout (s)
+  T2: 10,    // Ack timeout for S-format (s) - must be < T1
   T3: 20,    // Test frame timeout (s)
   K: 12,     // Max unconfirmed I-format APDUs sent
   W: 8,      // Max unconfirmed I-format APDUs received before ack
@@ -348,7 +483,7 @@ function buildIec104UFormat(controlField: number): Buffer {
   return buf;
 }
 
-/** Build IEC 104 S-format frame (supervisory — ack received I-frames) */
+/** Build IEC 104 S-format frame (supervisory - ack received I-frames) */
 function buildIec104SFormat(receiveSeq: number): Buffer {
   const buf = Buffer.alloc(6);
   buf.writeUInt8(0x68, 0);
@@ -631,7 +766,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
   private iec104SpontaneousBuffer: Map<number, { value: unknown; timestamp: Date; typeId: number }> = new Map();
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
-    context.logger.info('Initializing Schneider Electric vendor adapter — Modbus TCP/RTU + IEC 104');
+    context.logger.info('Initializing Schneider Electric vendor adapter - Modbus TCP/RTU + IEC 104');
     this.startTime = Date.now();
   }
 
@@ -766,12 +901,12 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       }
     }
 
-    // Modbus reads — group by function code for batch reads
+    // Modbus reads - group by function code for batch reads
     if (modbusAddrs.length > 0) {
       tags.push(...await this.readModbusTags(modbusAddrs));
     }
 
-    // IEC 104 reads — use spontaneous buffer or send read command
+    // IEC 104 reads - use spontaneous buffer or send read command
     for (const { address, parsed } of iec104Addrs) {
       tags.push(await this.readIec104Tag(address, parsed));
     }
@@ -1000,6 +1135,48 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     if (!conn) return;
 
     const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
+    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    conn.unconfirmedSent++;
+    this.messagesProcessed++;
+  }
+
+  /** Re-interrogate IEC 104 station */
+  async interrogateIec104Station(): Promise<void> {
+    const conn = this.getFirstIec104Connection();
+    if (!conn) return;
+
+    const asdu = buildIec104InterrogationAsdu(conn.commonAddress);
+    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    conn.unconfirmedSent++;
+    this.messagesProcessed++;
+  }
+
+  // ─── Polling ───────────────────────────────────────────────────────
+
+  startPollingByTier(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    const interval = SCHNEIDER_POLLING[tier];
+    if (interval === 0) {
+      // IEC 104 spontaneous - no polling, event-driven
+      this.context?.logger.info('IEC 104 spontaneous mode - no active polling');
+      return 'iec104-spontaneous';
+    }
+    return this.startPolling(addresses, interval, callback, tier);
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────
+
+  private getFirstIec104Connection(): Iec104Connection | undefined {
+    return this.iec104Connections.values().next().value as Iec104Connection | undefined;
+  }
+
+  }
+
+  /** Send IEC 104 clock synchronization */
+  async syncIec104Clock(time?: Date): Promise<void> {
+    const conn = this.getFirstIec104Connection();
+    if (!conn) return;
+
+    const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
     const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
@@ -1021,8 +1198,8 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
   startPollingByTier(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
     const interval = SCHNEIDER_POLLING[tier];
     if (interval === 0) {
-      // IEC 104 spontaneous — no polling, event-driven
-      this.context?.logger.info('IEC 104 spontaneous mode — no active polling');
+      // IEC 104 spontaneous - no polling, event-driven
+      this.context?.logger.info('IEC 104 spontaneous mode - no active polling');
       return 'iec104-spontaneous';
     }
     return this.startPolling(addresses, interval, callback, tier);

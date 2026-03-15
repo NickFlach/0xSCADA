@@ -7,6 +7,7 @@
 
 import { BloomParams, BloomStyle, DEFAULT_BLOOM } from './BloomRenderer';
 import { FlowParams, DEFAULT_FLOW } from './FlowRenderer';
+import { FANO_LINES } from './FanoGeometry';
 
 export interface PhiApiResponse {
   phi: number;
@@ -114,13 +115,13 @@ export class FanoDataBridge {
       state.hasAlarm = hasAlarm;
       if (hasAlarm) state.rotationSpeed = 0;
       for (let li = 0; li < 7; li++) {
-        const b1 = state.blooms[li % 7];
-        const b2 = state.blooms[(li + 1) % 7];
+        const [a, b, c] = FANO_LINES[li].points;
+        const ba = state.blooms[a], bb = state.blooms[b], bc = state.blooms[c];
         state.flows[li] = {
-          flowRate: (b1.size + b2.size) / 2,
-          mutualInfo: (b1.health + b2.health) / 2,
+          flowRate: (ba.size + bb.size + bc.size) / 3,
+          mutualInfo: (ba.health + bb.health + bc.health) / 3,
           direction: 1,
-          coherent: Math.abs(b1.health - b2.health) < 0.3,
+          coherent: Math.abs(ba.health - bb.health) < 0.3 && Math.abs(bb.health - bc.health) < 0.3,
         };
       }
     }

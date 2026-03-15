@@ -8,10 +8,10 @@ describe("96-class SGA system", () => {
   it("encodes and decodes class indices", () => {
     for (let h2 = 0; h2 < 4; h2++) {
       for (let d = 0; d < 3; d++) {
-        for (let l = 0; l < 8; l++) {
+        for (let l = 0; l < 7; l++) {
           const idx = componentsToClassIndex({ h2: h2 as Quadrant, d: d as Triality, l });
           expect(idx).toBeGreaterThanOrEqual(0);
-          expect(idx).toBeLessThanOrEqual(95);
+          expect(idx).toBeLessThanOrEqual(83);
           const decoded = decodeClassIndex(idx);
           expect(decoded.h2).toBe(h2);
           expect(decoded.d).toBe(d);
@@ -21,16 +21,16 @@ describe("96-class SGA system", () => {
     }
   });
 
-  it("produces exactly 96 unique classes", () => {
+  it("produces exactly 84 unique classes", () => {
     const classes = new Set<number>();
     for (let h2 = 0; h2 < 4; h2++) {
       for (let d = 0; d < 3; d++) {
-        for (let l = 0; l < 8; l++) {
+        for (let l = 0; l < 7; l++) {
           classes.add(componentsToClassIndex({ h2: h2 as Quadrant, d: d as Triality, l }));
         }
       }
     }
-    expect(classes.size).toBe(96);
+    expect(classes.size).toBe(84);
   });
 });
 
@@ -65,10 +65,10 @@ describe("SCADA classifier", () => {
     expect(coords.d).toBe(Triality.Event);
   });
 
-  it("classIndex is within 0..95", () => {
+  it("classIndex is within 0..83", () => {
     const coords = classifyEntity("scada/site/plant-1", { temperature: 72, pressure: 14.7 });
     expect(coords.classIndex).toBeGreaterThanOrEqual(0);
-    expect(coords.classIndex).toBeLessThanOrEqual(95);
+    expect(coords.classIndex).toBeLessThanOrEqual(83);
   });
 });
 

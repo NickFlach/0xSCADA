@@ -10,6 +10,7 @@
  */
 
 import {
+  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -18,7 +19,6 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
-import { VendorBaseAdapter } from './vendor-base';
 
 // ─── S7 Protocol Constants ────────────────────────────────────────────
 
@@ -188,7 +188,7 @@ interface S7Address {
 /** S7 connection state */
 interface S7Connection {
   endpoint: ProtocolEndpoint;
-  socket: import('net').Socket | null;
+  socket: any;
   negotiatedPdu: number;
   srcRef: number;
   dstRef: number;
@@ -363,8 +363,8 @@ function buildS7WriteVar(pduRef: number, items: Array<S7Address & { value: Buffe
 
 /** Build S7 Userdata request for SZL read */
 function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000): Buffer {
-  // Userdata header + parameter (8 bytes) + data (8 bytes: return code + transport size + length + SZL ID + SZL Index)
-  const buf = Buffer.alloc(28);
+  // Userdata header
+  const buf = Buffer.alloc(24);
   let pos = 0;
   
   // S7 header
@@ -373,7 +373,7 @@ function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000
   buf.writeUInt16BE(0, pos); pos += 2;
   buf.writeUInt16BE(pduRef, pos); pos += 2;
   buf.writeUInt16BE(8, pos); pos += 2;               // Parameter length
-  buf.writeUInt16BE(8, pos); pos += 2;               // Data length (return code + transport size + length + SZL ID + SZL Index)
+  buf.writeUInt16BE(4, pos); pos += 2;               // Data length
   
   // Userdata parameter
   buf.writeUInt8(0x00, pos); pos += 1;               // Parameter head (3 bytes)
@@ -385,12 +385,9 @@ function buildS7SzlRead(pduRef: number, szlId: number, szlIndex: number = 0x0000
   buf.writeUInt8(0x01, pos); pos += 1;               // Subfunction: Read SZL
   buf.writeUInt8(0x00, pos); pos += 1;               // Sequence number
   
-  // Data section: SZL ID + Index
-  buf.writeUInt8(0xFF, pos); pos += 1;               // Return code: success
-  buf.writeUInt8(0x09, pos); pos += 1;               // Transport size: octet string
-  buf.writeUInt16BE(4, pos); pos += 2;               // Data length (4 bytes: SZL ID + Index)
-  buf.writeUInt16BE(szlId, pos); pos += 2;           // SZL ID
-  buf.writeUInt16BE(szlIndex, pos); pos += 2;        // SZL Index
+  // Data: SZL ID + index
+  // Return code + transport size + length + szl data
+  // Handled in the data section
   
   return buf;
 }
@@ -546,7 +543,7 @@ function s7ErrorToString(code: number): string {
 }
 
 /** Unmarshal S7 value bytes based on transport size */
-function unmarshalS7Value(transport: number, data: Buffer): unknown {
+function unmarshalS7Value(transport: number, data: Buffer): any {
   switch (transport) {
     case S7_TRANSPORT_SIZE.BIT: return data.readUInt8(0) !== 0;
     case S7_TRANSPORT_SIZE.BYTE: return data.readUInt8(0);
@@ -560,7 +557,7 @@ function unmarshalS7Value(transport: number, data: Buffer): unknown {
 }
 
 /** Marshal JS value to S7 bytes */
-function marshalS7Value(transport: number, value: unknown): Buffer {
+function marshalS7Value(transport: number, value: any): Buffer {
   switch (transport) {
     case S7_TRANSPORT_SIZE.BIT: { const b = Buffer.alloc(1); b.writeUInt8(value ? 1 : 0, 0); return b; }
     case S7_TRANSPORT_SIZE.BYTE: { const b = Buffer.alloc(1); b.writeUInt8(Number(value), 0); return b; }
@@ -575,7 +572,7 @@ function marshalS7Value(transport: number, value: unknown): Buffer {
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
+export class SiemensVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'siemens-vendor',
     name: 'Siemens S7 Vendor Adapter',
@@ -590,6 +587,11 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
   private s7Connections: Map<string, S7Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
+  private tagCache: Map<string, { value: any; timestamp: Date; transport: number }> = new Map();
+  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
+  private messagesProcessed = 0;
+  private errorsCount = 0;
+  private startTime = 0;
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Siemens S7 vendor adapter — ISO-on-TCP + COTP + S7comm');
@@ -699,8 +701,7 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
     for (let i = 0; i < parsed.length; i += maxItemsPerRead) {
       const batch = parsed.slice(i, i + maxItemsPerRead);
       const conn = this.getFirstConnection();
-      if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-      const pduRef = conn ? conn.pduRef : 0;
+      const pduRef = conn ? ++conn.pduRef : 0;
 
       const readRequest = buildS7ReadVar(pduRef, batch.map(b => b.s7));
       const packet = buildCotpDT(readRequest);
@@ -735,8 +736,7 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
     });
 
     const conn = this.getFirstConnection();
-    if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-    const pduRef = conn ? conn.pduRef : 0;
+    const pduRef = conn ? ++conn.pduRef : 0;
     const writeRequest = buildS7WriteVar(pduRef, items);
     const packet = buildCotpDT(writeRequest);
     this.messagesProcessed++;
@@ -747,13 +747,8 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
       this.tagCache.set(tag.address, {
         value: tag.value,
         timestamp: new Date(),
-        quality: 'good',
         transport: s7Addr.transportSize,
       });
-    }
-    if (this.tagCache.size > this.maxTagCache) {
-      const keys = Array.from(this.tagCache.keys());
-      for (let i = 0; i < keys.length - this.maxTagCache; i++) this.tagCache.delete(keys[i]);
     }
   }
 
@@ -769,25 +764,23 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
+  async getDeviceInfo(deviceId: string): Promise<any> {
     // Read SZL 0x0011 (Module Identification) and 0x001C (Component ID)
     const conn = this.getFirstConnection();
-    if (conn) conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-    const pduRef = conn ? conn.pduRef : 0;
+    const pduRef = conn ? ++conn.pduRef : 0;
     const szlRequest = buildS7SzlRead(pduRef, SZL_IDS.MODULE_ID);
     this.messagesProcessed++;
     
     return { deviceId, vendor: 'Siemens AG', models: SIEMENS_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
+  async getDeviceDiagnostics(deviceId: string): Promise<any> {
     const conn = this.getFirstConnection();
-    const results: Record<string, unknown> = { deviceId };
+    const results: any = { deviceId };
 
     // Read diagnostic buffer (SZL 0x00A0)
     if (conn) {
-      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-      const ref1 = conn.pduRef;
+      const ref1 = ++conn.pduRef;
       buildS7SzlRead(ref1, SZL_IDS.DIAGNOSTIC_BUFFER);
       this.messagesProcessed++;
       results.diagnosticBuffer = [];
@@ -795,8 +788,7 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
     // Read LED status (SZL 0x0019)
     if (conn) {
-      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-      const ref2 = conn.pduRef;
+      const ref2 = ++conn.pduRef;
       buildS7SzlRead(ref2, SZL_IDS.LED_STATUS);
       this.messagesProcessed++;
       results.ledStatus = {};
@@ -804,8 +796,7 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
     // Read scan cycle time (SZL 0x0131)
     if (conn) {
-      conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-      const ref3 = conn.pduRef;
+      const ref3 = ++conn.pduRef;
       buildS7SzlRead(ref3, SZL_IDS.SCAN_CYCLE_TIME);
       this.messagesProcessed++;
       results.scanCycleTime = {};
@@ -818,8 +809,7 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
   async readDiagnosticBuffer(deviceId: string): Promise<any[]> {
     const conn = this.getFirstConnection();
     if (!conn) return [];
-    conn.pduRef = (conn.pduRef + 1) & 0xFFFF;
-    const ref = conn.pduRef;
+    const ref = ++conn.pduRef;
     buildS7SzlRead(ref, SZL_IDS.DIAGNOSTIC_BUFFER);
     this.messagesProcessed++;
     return [];
@@ -835,8 +825,28 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPollingByTier(addresses: string[], tier: keyof typeof SIEMENS_POLLING, callback: (tags: AdapterTag[]) => void): string {
-    return this.startPolling(addresses, SIEMENS_POLLING[tier], callback, tier);
+  startPolling(addresses: string[], tier: keyof typeof SIEMENS_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    const interval = SIEMENS_POLLING[tier];
+    const key = `poll_${tier}_${Date.now()}`;
+    const timer = setInterval(async () => {
+      try {
+        const tags = await this.readTags(addresses);
+        callback(tags);
+      } catch (err) {
+        this.context?.logger.error(`S7 polling error (${tier}):`, err);
+        this.errorsCount++;
+      }
+    }, interval);
+    this.pollingTimers.set(key, timer);
+    return key;
+  }
+
+  stopPolling(key: string): void {
+    const timer = this.pollingTimers.get(key);
+    if (timer) {
+      clearInterval(timer);
+      this.pollingTimers.delete(key);
+    }
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────
@@ -856,15 +866,18 @@ export class SiemensVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
     return this.transportToAdapterType(parsed.transportSize);
   }
 
-  protected async getMetrics(): Promise<Record<string, unknown>> {
-    const base = await super.getMetrics();
+  protected async getMetrics() {
     return {
-      ...base,
       connectionsActive: this.s7Connections.size,
+      messagesProcessed: this.messagesProcessed,
+      errorsCount: this.errorsCount,
+      uptime: Date.now() - this.startTime,
+      cachedTags: this.tagCache.size,
+      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics(): Promise<Record<string, unknown>> {
+  protected async getDiagnostics() {
     return {
       registerMap: SIEMENS_REGISTER_MAP,
       connectionParams: SIEMENS_CONNECTION_PARAMS,

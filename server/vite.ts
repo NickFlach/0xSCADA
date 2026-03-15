@@ -6,6 +6,7 @@ import type { Server } from "http";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
+import { rateLimitMiddleware } from "./middleware/api-gateway";
 
 export async function setupVite(httpServer: Server, app: Application) {
   const vite = await createViteServer({
@@ -22,8 +23,11 @@ export async function setupVite(httpServer: Server, app: Application) {
   // Use Vite's connect instance as middleware
   app.use(vite.middlewares);
 
+  // Rate limit for SPA fallback file system access
+  const spaRateLimit = rateLimitMiddleware({ windowMs: 60_000, maxRequests: 200 });
+
   // Serve index.html for all non-API routes (SPA fallback)
-  app.use("*", async (req, res, next) => {
+  app.use("*", spaRateLimit, async (req, res, next) => {
     const url = req.originalUrl;
 
     // Skip API routes
