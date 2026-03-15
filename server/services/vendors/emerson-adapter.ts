@@ -523,17 +523,11 @@ export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
   }
 
   protected async doDisconnect(): Promise<void> {
-    for (const timer of this.pollingTimers.values()) {
-      clearInterval(timer);
-    }
-    this.pollingTimers.clear();
     this.connections.clear();
-    this.tagCache.clear();
   }
 
   protected async doDestroy(): Promise<void> {
     this.connections.clear();
-    this.tagCache.clear();
     this.hartDevices.clear();
   }
 

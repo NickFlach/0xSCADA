@@ -28,7 +28,7 @@ Sensor Data → Event Pipeline → Intelligence Layer → Agent Decision → Act
                             └────────┼────────┘
                                      │
                               Agent Orchestrator
-                              (GhostOS Bridge)
+                              (ghostmagicOS (gmOS) Bridge)
                                      │
                             ┌────────┼────────┐
                             │        │        │
@@ -56,14 +56,14 @@ Sensor Data → Event Pipeline → Intelligence Layer → Agent Decision → Act
 | PID Auto-Tuner | Optimize controller parameters | Process response data | Tuning recommendations (human-approved) |
 | NL Query Engine | Natural language process queries | User questions | Structured answers from tag data |
 | Agent Marketplace | Plugin system for agents | Agent manifests | Installed, sandboxed agent instances |
-| GhostOS Bridge | Multi-agent coordination | Agent states | Synchronized agent behavior (Kuramoto) |
+| ghostmagicOS (gmOS) Bridge | Multi-agent coordination | Agent states | Synchronized agent behavior (Kuramoto) |
 | Reporting Engine | Automated report generation | Historical data | Shift reports, compliance summaries |
 
 ### Agent Marketplace & Extensibility
 
 A plugin system allows third-party and internal agents to be registered, installed, and run in sandboxed contexts. Each plugin declares its required capabilities, and the zero-trust system grants only what's needed.
 
-### GhostOS Integration
+### ghostmagicOS (gmOS) Integration
 
 The consciousness stack concepts map to practical implementations:
 - **Signal** → Raw sensor data and events

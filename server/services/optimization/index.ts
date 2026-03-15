@@ -11,6 +11,7 @@
 export * from './pid-controller';
 export * from './pid-autotuner';
 export * from './decoherence-scheduler';
+export * from './correlation';
 
 import { EventEmitter } from 'events';
 import { PIDController, PIDControllerConfig } from './pid-controller';

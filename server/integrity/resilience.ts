@@ -309,7 +309,7 @@ export class ResilienceManager extends EventEmitter {
       // Add to retry queue if enabled
       if (this.config.blockchain.enabled && this.anchorQueue.length < this.config.blockchain.queueMaxSize) {
         this.queueForRetry(batchId, merkleRoot, signature);
-        this.emit('queued-for-retry', { batchId, reason: error.message });
+        this.emit('queued-for-retry', { batchId, reason: (error as Error).message });
         return false; // Not immediately successful, but queued for retry
       }
       
@@ -525,7 +525,7 @@ export class ResilienceManager extends EventEmitter {
         item.lastAttempt = now;
         item.nextAttempt = now + (this.config.blockchain.retryDelayMs * Math.pow(2, item.attempts));
         
-        this.emit('retry-failed', { batchId: item.batchId, attempts: item.attempts, error: error.message });
+        this.emit('retry-failed', { batchId: item.batchId, attempts: item.attempts, error: (error as Error).message });
       }
     }
   }
