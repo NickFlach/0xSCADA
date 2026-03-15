@@ -119,22 +119,20 @@ export class SentinelSampler {
     const clusters = this.graph.getCluster(this.clusterThreshold);
     const now = Date.now();
 
-    // Get previous sentinel sets for deprioritization
-    const prevSentinelSets = new Map<number, Set<string>>();
-    for (let i = 0; i < this.selections.length; i++) {
-      prevSentinelSets.set(i, new Set(this.selections[i].sentinels));
+    // Build a map from sorted cluster key → previous sentinel set for O(1) lookup (#400)
+    const prevSentinelsByKey = new Map<string, Set<string>>();
+    for (const sel of this.selections) {
+      const key = [...sel.cluster].sort().join(',');
+      prevSentinelsByKey.set(key, new Set(sel.sentinels));
     }
 
-    this.selections = clusters.map((cluster, _i) => {
+    this.selections = clusters.map((cluster) => {
       const n = Math.max(this.minSentinelsPerCluster, Math.ceil(Math.sqrt(cluster.length)));
       const actual = Math.min(n, cluster.length);
 
-      // Rank by centrality, but apply a penalty to sensors that were sentinels
-      // in the previous round to encourage rotation
-      const prevSentinels = this.selections.find(s =>
-        s.cluster.length === cluster.length && s.cluster.every(id => cluster.includes(id))
-      );
-      const prevSet = prevSentinels ? new Set(prevSentinels.sentinels) : new Set<string>();
+      // Look up previous sentinels by sorted cluster identity (#400)
+      const clusterKey = [...cluster].sort().join(',');
+      const prevSet = prevSentinelsByKey.get(clusterKey) ?? new Set<string>();
 
       const ranked = cluster
         .map(id => {

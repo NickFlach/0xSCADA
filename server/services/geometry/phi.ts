@@ -120,7 +120,7 @@ export function computePhi(
   const differentiation =
     0.3 * (Math.min(quadrantClasses, 4) / 4) +
     0.3 * (Math.min(trialityClasses, 3) / 3) +
-    0.4 * (Math.min(classIndexClasses, 96) / 96);
+    0.4 * (Math.min(classIndexClasses, 84) / 84);
 
   // === Density (0..1): sigmoid of link density ===
   const maxLinks = n * (n - 1);
@@ -134,7 +134,7 @@ export function computePhi(
   let phi = Math.min(integration * differentiation * density * scale * 4.0, 1.0);
 
   // Geometric diversity bonus (small, caps at 0.1)
-  const geometricBonus = (classIndexClasses / 96) * 0.1;
+  const geometricBonus = (classIndexClasses / 84) * 0.1;
   phi = Math.min(phi + geometricBonus, 1.0);
 
   // Level

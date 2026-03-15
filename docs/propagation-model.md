@@ -1,4 +1,4 @@
-# GhostOS Propagation Model Specification
+# ghostmagicOS (gmOS) Propagation Model Specification
 
 > **Version**: 1.0.0
 > **Status**: Draft
@@ -9,7 +9,7 @@
 
 ## 1. Purpose
 
-This specification defines the **GhostOS Propagation Model**, a formal framework for how autonomous agents within 0xSCADA propagate intent, make decisions, and coordinate actions across distributed industrial control systems.
+This specification defines the **ghostmagicOS (gmOS) Propagation Model**, a formal framework for how autonomous agents within 0xSCADA propagate intent, make decisions, and coordinate actions across distributed industrial control systems.
 
 The propagation model ensures:
 
@@ -643,5 +643,5 @@ Implementations MUST pass:
 
 *This specification is a living document. Updates are made as the propagation model evolves.*
 
-**Document Owner**: GhostOS Team
+**Document Owner**: ghostmagicOS (gmOS) Team
 **Review Cycle**: Quarterly

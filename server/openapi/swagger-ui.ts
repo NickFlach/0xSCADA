@@ -187,7 +187,7 @@ function jsonToYaml(obj: object, indent = 0): string {
           yaml += `${spaces}  ${line}\n`;
         });
       } else if (value.includes(':') || value.includes('#') || value.startsWith('*')) {
-        yaml += `${spaces}${key}: "${value.replace(/"/g, '\\"')}"\n`;
+        yaml += `${spaces}${key}: "${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
       } else {
         yaml += `${spaces}${key}: ${value}\n`;
       }
