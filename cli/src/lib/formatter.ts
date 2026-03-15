@@ -218,7 +218,7 @@ export function formatYaml(data: unknown, indent: number = 0): string {
       /^[\d.]+$/.test(data) ||
       ["true", "false", "null", "yes", "no"].includes(data.toLowerCase())
     ) {
-      return `"${data.replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+      return `"${data.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
     }
     return data;
   }

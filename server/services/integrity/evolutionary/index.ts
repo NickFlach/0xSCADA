@@ -9,3 +9,4 @@ export * from './registry';
 export * from './fitness';
 export * from './evolution-engine';
 export * from './safety-guard';
+export * from './evolutionary-resolver';
