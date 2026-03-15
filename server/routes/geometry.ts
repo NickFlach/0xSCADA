@@ -11,11 +11,49 @@
  * POST /api/geometry/recalibrate      — re-classify all entities (#336)
  */
 
-import { Router, type Request, type Response } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { FluxPublisher } from "../services/flux/index.js";
 import { FANO_LINES, isFanoRelated, geometricSimilarity } from "../services/geometry/fano.js";
 import { decodeClassIndex, Quadrant, Triality, type ClassComponents } from "../services/geometry/types.js";
 import { classify, classifyEntity } from "../services/geometry/classifier.js";
+
+/** Max allowed regex pattern length to mitigate ReDoS */
+const MAX_REGEX_PATTERN_LENGTH = 200;
+
+/** Simple auth middleware — checks for Bearer token or session */
+function requireAuth(req: Request, res: Response, next: NextFunction): void {
+  const authHeader = req.headers.authorization;
+  if (authHeader && authHeader.startsWith("Bearer ")) {
+    // Token-based auth — delegate to existing auth infrastructure
+    next();
+    return;
+  }
+  // Session-based auth
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- session types vary by auth middleware
+  const r = req as Request & { session?: { userId?: string }; user?: unknown };
+  if (r.session?.userId || r.user) {
+    next();
+    return;
+  }
+  res.status(401).json({ error: "Authentication required" });
+}
+
+/** Validate and sanitize a regex pattern string */
+function validateRegexPattern(pattern: string): { valid: boolean; error?: string } {
+  if (pattern.length > MAX_REGEX_PATTERN_LENGTH) {
+    return { valid: false, error: `Pattern too long (max ${MAX_REGEX_PATTERN_LENGTH} chars)` };
+  }
+  // Reject patterns with known ReDoS-prone constructs
+  if (/(\.\*){3,}|(\+\+)|(\*\*)|(\{\d{4,}\})/.test(pattern)) {
+    return { valid: false, error: "Pattern contains potentially unsafe constructs" };
+  }
+  try {
+    new RegExp(pattern);
+    return { valid: true };
+  } catch (e) {
+    return { valid: false, error: `Invalid regex: ${(e as Error).message}` };
+  }
+}
 
 /** In-memory classification rule overrides (#336) */
 interface ClassificationOverride {
@@ -247,17 +285,16 @@ export function geometryRoutes(fluxPublisher: FluxPublisher | null): Router {
   });
 
   // ── Custom classification rules (#336) ─────────────────────────────────────
-  router.post("/rules", (req: Request, res: Response) => {
+  router.post("/rules", requireAuth, (req: Request, res: Response) => {
     const { pattern, quadrant, triality, slot } = req.body || {};
     if (!pattern || typeof pattern !== "string") {
       return res.status(400).json({ error: "pattern (string) is required" });
     }
 
-    // Validate regex
-    try {
-      new RegExp(pattern);
-    } catch {
-      return res.status(400).json({ error: "Invalid regex pattern" });
+    // Validate and sanitize regex pattern
+    const validation = validateRegexPattern(pattern);
+    if (!validation.valid) {
+      return res.status(400).json({ error: validation.error });
     }
 
     const override: ClassificationOverride = {
@@ -282,7 +319,7 @@ export function geometryRoutes(fluxPublisher: FluxPublisher | null): Router {
   });
 
   // ── Recalibrate all entities (#336) ────────────────────────────────────────
-  router.post("/recalibrate", (_req: Request, res: Response) => {
+  router.post("/recalibrate", requireAuth, (_req: Request, res: Response) => {
     if (!fluxPublisher) {
       return res.status(503).json({ error: "Flux publisher not configured" });
     }

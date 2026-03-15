@@ -134,8 +134,9 @@ export class PIDController {
     let output = pTerm + iTerm + dTerm;
     output = Math.max(this.outputMin, Math.min(this.outputMax, output));
 
-    // Back-calculation anti-windup
-    if (output !== pTerm + iTerm + dTerm) {
+    // Back-calculation anti-windup: if output was clamped, undo the integral accumulation
+    const unclamped = pTerm + iTerm + dTerm;
+    if (Math.abs(output - unclamped) > 1e-10) {
       this.integral -= error * deltaT;
     }
 

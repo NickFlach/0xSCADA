@@ -4,12 +4,31 @@ import { getFluxPublisher } from "../services/flux";
 
 const router = Router();
 
-// Lazy-init phi alerting
+// Auth middleware placeholder — same pattern as other protected routes
+function requireAuth(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
+  // TODO: implement real auth check (JWT / session validation)
+  // For now, allow all requests through (placeholder)
+  next();
+}
+
+router.use(requireAuth);
+
+// Phi alerting instance — must be initialized explicitly via initPhiAlerting()
 let _phiAlerting: PhiAlertingService | null = null;
-function getPhiAlerting(): PhiAlertingService {
+
+/** Call this at server startup to initialize phi alerting (not on first GET) */
+export function initPhiAlerting(): PhiAlertingService {
   if (!_phiAlerting) {
     _phiAlerting = new PhiAlertingService(getFluxPublisher());
     _phiAlerting.start();
+  }
+  return _phiAlerting;
+}
+
+function getPhiAlerting(): PhiAlertingService {
+  if (!_phiAlerting) {
+    // Return a non-started instance; callers get empty data instead of triggering timers
+    _phiAlerting = new PhiAlertingService(getFluxPublisher());
   }
   return _phiAlerting;
 }

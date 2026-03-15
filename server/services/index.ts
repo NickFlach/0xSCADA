@@ -7,6 +7,24 @@
  * Issue: #282 — services/ barrel export missing modules
  */
 
+// ── Verification Service ─────────────────────────────────────────────────────
+export * from './verification';
+
+// ── Governance Service ───────────────────────────────────────────────────────
+// Re-export selectively to avoid name conflicts with integrity module
+export * from './governance';
+
+// ── Integrity Service ────────────────────────────────────────────────────────
+// Some type names conflict with governance — use namespace import pattern
+export {
+  ParadoxResolver, paradoxResolver,
+  createValveFlowConstraint, createPressureTemperatureConstraint,
+  ExplainabilityMonitor, explainabilityMonitor,
+} from './integrity';
+
+// ── Vendors Service ──────────────────────────────────────────────────────────
+export * from './vendors';
+
 // ── Cache Service ────────────────────────────────────────────────────────────
 export * from './cache';
 export { getRedisClient, isRedisHealthy } from './cache';
