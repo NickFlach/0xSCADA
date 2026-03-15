@@ -161,6 +161,8 @@ export class GrListenFilter {
 
   /** Active incidents for correlation */
   private incidents: Map<string, Incident> = new Map();
+  private static readonly MAX_INCIDENTS = 5000;
+  private static readonly MAX_RECENT_ALERT_TAGS = 10000;
 
   /** Recent alerts for correlation: sourceTagId → {alarmId, timestamp}[] */
   private recentAlerts: Map<string, { alarmId: string; timestamp: number }[]> = new Map();
@@ -402,6 +404,19 @@ export class GrListenFilter {
       alert.sourceTagId,
       existing.filter((a) => a.timestamp > cutoff),
     );
+    // Evict oldest incidents if map is too large
+    if (this.incidents.size > GrListenFilter.MAX_INCIDENTS) {
+      const sorted = Array.from(this.incidents.entries())
+        .sort((a, b) => a[1].lastUpdatedAt - b[1].lastUpdatedAt);
+      const toRemove = sorted.slice(0, sorted.length - GrListenFilter.MAX_INCIDENTS);
+      for (const [key] of toRemove) this.incidents.delete(key);
+    }
+    // Evict stale recentAlerts entries
+    if (this.recentAlerts.size > GrListenFilter.MAX_RECENT_ALERT_TAGS) {
+      const keys = Array.from(this.recentAlerts.keys());
+      const toRemove = keys.slice(0, keys.length - GrListenFilter.MAX_RECENT_ALERT_TAGS);
+      for (const key of toRemove) this.recentAlerts.delete(key);
+    }
   }
 
   private getBudget(

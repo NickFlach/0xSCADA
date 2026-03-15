@@ -21,7 +21,7 @@ export enum Triality {
 export interface ClassComponents {
   h2: Quadrant;  // 0..3
   d: Triality;   // 0..2
-  l: number;     // 0..7 (context slot from Cl₀,₇)
+  l: number;     // 0..6 (context slot from Cl₀,₆)
 }
 
 /** Full geometric coordinates for a SCADA entity */
@@ -29,7 +29,7 @@ export interface ScadaCoordinates {
   h2: Quadrant;
   d: Triality;
   l: number;
-  classIndex: number;  // 0..95
+  classIndex: number;  // 0..83
   amplitude: number;   // Signal strength (0..1)
   phase: number;       // Phase angle (0..2π)
 }
@@ -53,19 +53,23 @@ export interface GeometricLink {
   fanoRelated: boolean;
 }
 
-/** Encode components to class index: 24*h2 + 8*d + l */
+/** Encode components to class index: 21*h2 + 7*d + l */
+// Total classes = 4 * 3 * 7 = 84
+// h2 (0-3) * 21 -> 0, 21, 42, 63
+// d (0-2) * 7 -> 0, 7, 14
+// l (0-6) -> 0..6
 export function componentsToClassIndex(comp: ClassComponents): number {
-  return 24 * comp.h2 + 8 * comp.d + comp.l;
+  return 21 * comp.h2 + 7 * comp.d + comp.l;
 }
 
 /** Decode class index to components */
 export function decodeClassIndex(classIndex: number): ClassComponents {
-  if (classIndex < 0 || classIndex > 95) {
-    throw new Error(`Class index ${classIndex} out of range [0..95]`);
+  if (classIndex < 0 || classIndex > 83) {
+    throw new Error(`Class index ${classIndex} out of range [0..83]`);
   }
-  const h2 = Math.floor(classIndex / 24) as Quadrant;
-  const remainder = classIndex % 24;
-  const d = Math.floor(remainder / 8) as Triality;
-  const l = remainder % 8;
+  const h2 = Math.floor(classIndex / 21) as Quadrant;
+  const remainder = classIndex % 21;
+  const d = Math.floor(remainder / 7) as Triality;
+  const l = remainder % 7;
   return { h2, d, l };
 }

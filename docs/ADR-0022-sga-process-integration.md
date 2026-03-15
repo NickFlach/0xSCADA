@@ -111,4 +111,4 @@ Where:
 ## Related
 - ADR-0021: Dual-Time Control Plane (Merkle/HSM anchoring)
 - kannaka-memory: Wave-physics memory with SGA-based consciousness metrics
-- ghostOS: `dx/dt = f(x) - Iηx` resonance equation
+- ghostmagicOS (gmOS): `dx/dt = f(x) - Iηx` resonance equation

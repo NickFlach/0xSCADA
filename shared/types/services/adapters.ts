@@ -34,7 +34,7 @@ export interface AdapterManifest {
 }
 
 export interface AdapterContext {
-  config: Record<string, any>;
+  config: Record<string, unknown>;
   logger: {
     debug: (message: string, ...args: any[]) => void;
     info: (message: string, ...args: any[]) => void;
@@ -51,20 +51,20 @@ export interface AdapterContext {
 export interface AdapterHealthStatus {
   state: AdapterState;
   lastUpdate: Date;
-  metrics?: {
-    connectionsActive: number;
-    messagesProcessed: number;
-    errorsCount: number;
-    uptime: number;
+  metrics?: Record<string, unknown> & {
+    connectionsActive?: number;
+    messagesProcessed?: number;
+    errorsCount?: number;
+    uptime?: number;
   };
-  diagnostics?: Record<string, any>;
+  diagnostics?: Record<string, unknown>;
 }
 
 export interface AdapterTag {
   address: string;
   name?: string;
   dataType: 'boolean' | 'number' | 'string' | 'object';
-  value?: any;
+  value?: unknown;
   quality: 'good' | 'bad' | 'uncertain';
   timestamp: Date;
 }
@@ -76,7 +76,7 @@ export interface ProtocolEndpoint {
   protocol: string;
   authentication?: {
     type: 'none' | 'basic' | 'certificate';
-    credentials?: Record<string, any>;
+    credentials?: Record<string, unknown>;
   };
 }
 
@@ -106,7 +106,7 @@ export interface ProtocolAdapter extends IAdapter {
   
   readTags(addresses: string[]): Promise<AdapterTag[]>;
   writeTags(tags: AdapterTag[]): Promise<void>;
-  discoverDevices?(): Promise<any[]>;
+  discoverDevices?(): Promise<Record<string, unknown>[]>;
 }
 
 // Device adapter specific interface  
@@ -114,8 +114,8 @@ export interface DeviceAdapter extends IAdapter {
   readonly manifest: AdapterManifest & { type: 'device' };
   readonly deviceTypes: string[];
   
-  getDeviceInfo(deviceId: string): Promise<any>;
-  getDeviceDiagnostics?(deviceId: string): Promise<any>;
+  getDeviceInfo(deviceId: string): Promise<Record<string, unknown>>;
+  getDeviceDiagnostics?(deviceId: string): Promise<Record<string, unknown>>;
   updateFirmware?(deviceId: string, firmware: Buffer): Promise<void>;
 }
 
@@ -217,11 +217,11 @@ export abstract class BaseAdapter<T extends AdapterType> implements IAdapter {
   protected abstract doDestroy(): Promise<void>;
   
   // Optional methods that subclasses can override
-  protected async getMetrics(): Promise<any> {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
     return {};
   }
   
-  protected async getDiagnostics(): Promise<any> {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {};
   }
 }
