@@ -322,8 +322,11 @@ export function estimateLatencyMs(
       const hops = Math.ceil(distKm / 1000); // Approximate one hop per 1000 km
       return Math.round(propagation * LATENCY_MODEL.routingOverhead + hops * LATENCY_MODEL.perHopLatencyMs);
     }
-    case 'satellite':
-      return Math.round(LATENCY_MODEL.satelliteBaseMs + (Math.random() * LATENCY_MODEL.satelliteJitterMs));
+    case 'satellite': {
+      // Deterministic jitter based on route coordinates to avoid non-determinism in Dijkstra
+      const coordHash = Math.abs(Math.sin(lat1 * 12.9898 + lng1 * 78.233 + lat2 * 37.719 + lng2 * 43.758) * 43758.5453) % 1;
+      return Math.round(LATENCY_MODEL.satelliteBaseMs + (coordHash * LATENCY_MODEL.satelliteJitterMs));
+    }
     case 'microwave': {
       const propagation = distKm / LATENCY_MODEL.microwaveSpeedKmPerMs;
       return Math.round(propagation * 1.1); // Minimal overhead

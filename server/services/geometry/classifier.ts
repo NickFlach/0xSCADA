@@ -1,19 +1,38 @@
 /**
- * Entity classifier — maps SCADA entities to 96-class SGA coordinates.
+ * Entity classifier — maps SCADA entities to 84-class SGA coordinates.
  * 
  * Classification heuristics:
- *   h₂: Determined by entity type / event type / property names
+ *   h₂: Determined by entity type / event type / property names (weighted scoring)
  *   d:  Determined by entity hierarchy (site > asset > event)
- *   ℓ:  Content hash mod 8 (distributes within domain)
+ *   ℓ:  Content hash mod 7 (distributes within domain, perfect Fano alignment)
  */
 
 import {
   Quadrant,
   Triality,
   type ScadaCoordinates,
-  type ClassComponents,
   componentsToClassIndex,
 } from "./types.js";
+
+/** Keyword dictionaries for weighted classification */
+const KEYWORDS: Record<Quadrant, string[]> = {
+  [Quadrant.Sensor]: [
+    "sensor", "reading", "temperature", "pressure", "flow", "level",
+    "historian", "tag", "measurement", "analog", "meter", "gauge"
+  ],
+  [Quadrant.Control]: [
+    "control", "command", "setpoint", "output", "actuator", "valve",
+    "pid", "recipe", "relay", "switch", "motor", "drive"
+  ],
+  [Quadrant.Alarm]: [
+    "alarm", "alert", "fault", "trip", "deviation", "anomaly",
+    "event", "incident", "warning", "error", "critical"
+  ],
+  [Quadrant.Maintenance]: [
+    "maintenance", "calibration", "inspection", "work_order",
+    "compliance", "certification", "audit", "repair", "service"
+  ]
+};
 
 /** Simple string hash (same as kannaka-memory) */
 function contentHash(s: string): number {
@@ -24,55 +43,52 @@ function contentHash(s: string): number {
   return hash;
 }
 
-/** Classify by explicit quadrant name */
+/** Classify by explicit quadrant name using weighted scoring */
 function classifyQuadrant(entityType: string, properties: Record<string, unknown> = {}): Quadrant {
   const t = entityType.toLowerCase();
   const propKeys = Object.keys(properties).join(" ").toLowerCase();
   const combined = `${t} ${propKeys}`;
 
-  // Sensor / measurement domain
-  if (
-    combined.includes("sensor") || combined.includes("reading") ||
-    combined.includes("temperature") || combined.includes("pressure") ||
-    combined.includes("flow") || combined.includes("level") ||
-    combined.includes("historian") || combined.includes("tag") ||
-    combined.includes("measurement") || combined.includes("analog")
-  ) {
-    return Quadrant.Sensor;
+  // Initialize scores
+  const scores: Record<Quadrant, number> = {
+    [Quadrant.Sensor]: 0,
+    [Quadrant.Control]: 0,
+    [Quadrant.Alarm]: 0,
+    [Quadrant.Maintenance]: 0
+  };
+
+  // Calculate scores based on keyword matches
+  // Matches in entityType are weighted higher (2x) than property keys (1x)
+  for (const [qStr, keywords] of Object.entries(KEYWORDS)) {
+    const q = Number(qStr) as Quadrant;
+    for (const kw of keywords) {
+      if (t.includes(kw)) scores[q] += 2;
+      if (propKeys.includes(kw)) scores[q] += 1;
+    }
   }
 
-  // Control / command domain
-  if (
-    combined.includes("control") || combined.includes("command") ||
-    combined.includes("setpoint") || combined.includes("output") ||
-    combined.includes("actuator") || combined.includes("valve") ||
-    combined.includes("pid") || combined.includes("recipe")
-  ) {
-    return Quadrant.Control;
+  // Find quadrant with max score
+  let maxScore = -1;
+  let bestQuadrant: Quadrant | null = null;
+  let tie = false;
+
+  for (const [qStr, score] of Object.entries(scores)) {
+    const q = Number(qStr) as Quadrant;
+    if (score > maxScore) {
+      maxScore = score;
+      bestQuadrant = q;
+      tie = false;
+    } else if (score === maxScore) {
+      tie = true;
+    }
   }
 
-  // Alarm / event domain
-  if (
-    combined.includes("alarm") || combined.includes("alert") ||
-    combined.includes("fault") || combined.includes("trip") ||
-    combined.includes("deviation") || combined.includes("anomaly") ||
-    combined.includes("event") || combined.includes("incident")
-  ) {
-    return Quadrant.Alarm;
+  // If no keywords matched, or there was a tie, use hash to break tie deterministically
+  if (maxScore === 0 || tie || bestQuadrant === null) {
+    return (contentHash(t) % 4) as Quadrant;
   }
 
-  // Maintenance domain
-  if (
-    combined.includes("maintenance") || combined.includes("calibration") ||
-    combined.includes("inspection") || combined.includes("work_order") ||
-    combined.includes("compliance") || combined.includes("certification") ||
-    combined.includes("audit") || combined.includes("repair")
-  ) {
-    return Quadrant.Maintenance;
-  }
-
-  // Fallback: hash to quadrant
-  return (contentHash(t) % 4) as Quadrant;
+  return bestQuadrant;
 }
 
 /** Classify triality by entity hierarchy */
@@ -122,7 +138,8 @@ export function classify(
 ): ScadaCoordinates {
   const h2 = classifyQuadrant(entityType, properties);
   const d = classifyTriality(entityType, entityId);
-  const l = contentHash(`${entityId}:${entityType}`) % 8;
+  // Use modulo 7 for perfect Fano plane alignment (0-6)
+  const l = contentHash(`${entityId}:${entityType}`) % 7;
 
   const classIndex = componentsToClassIndex({ h2, d, l });
   const amplitude = Math.min(importance * 0.5 + 0.5, 1.0);

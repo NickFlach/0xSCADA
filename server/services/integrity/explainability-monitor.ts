@@ -40,7 +40,7 @@ export interface DecisionRecord {
   /** Input data that led to the decision */
   inputs: Record<string, any>;
   /** Output/result of the decision */
-  output: any;
+  output: unknown;
   /** Confidence score 0-1 */
   confidence: number;
   /** Which verification layers passed */
@@ -80,8 +80,8 @@ export interface AuditEntry {
   action: 'create' | 'modify' | 'delete' | 'approve' | 'reject' | 'acknowledge' | 'login' | 'logout';
   resource: string;
   resourceId: string;
-  oldValue?: any;
-  newValue?: any;
+  oldValue?: unknown;
+  newValue?: unknown;
   reason?: string;
   ipAddress?: string;
   /** Monotonic sequence number for deterministic ordering */
@@ -218,7 +218,7 @@ export class ExplainabilityMonitor extends EventEmitter {
     ruleApplied?: string;
     reasoning: string;
     inputs: Record<string, any>;
-    output: any;
+    output: unknown;
     confidence: number;
     verificationLayers: VerificationLayerResult[];
     signature?: ElectronicSignature;
@@ -249,9 +249,11 @@ export class ExplainabilityMonitor extends EventEmitter {
       .update(recordContent + this.lastDecisionHash)
       .digest('hex');
 
+    const seq = this.decisionSequence++;
     const record: DecisionRecord = {
       id,
       timestamp: new Date(),
+      sequence: seq,
       source: params.source,
       action: params.action,
       ruleApplied: params.ruleApplied ?? 'unspecified',
@@ -387,8 +389,8 @@ export class ExplainabilityMonitor extends EventEmitter {
     action: AuditEntry['action'];
     resource: string;
     resourceId: string;
-    oldValue?: any;
-    newValue?: any;
+    oldValue?: unknown;
+    newValue?: unknown;
     reason?: string;
     ipAddress?: string;
   }): AuditEntry {
@@ -409,9 +411,11 @@ export class ExplainabilityMonitor extends EventEmitter {
       .update(entryContent + this.lastAuditHash)
       .digest('hex');
 
+    const seq = this.auditSequence++;
     const entry: AuditEntry = {
       id,
       timestamp: new Date(),
+      sequence: seq,
       userId: params.userId,
       action: params.action,
       resource: params.resource,
@@ -484,7 +488,7 @@ export class ExplainabilityMonitor extends EventEmitter {
   /** Verify the integrity of the decision record chain */
   verifyDecisionChain(): { valid: boolean; brokenAt?: string; details: string } {
     const sorted = Array.from(this.decisions.values())
-      .sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+      .sort((a, b) => a.sequence - b.sequence);
 
     let previousHash = '0'.repeat(64);
     for (const record of sorted) {

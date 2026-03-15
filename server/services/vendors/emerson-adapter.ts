@@ -12,7 +12,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -21,6 +20,14 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
+import {
+  MODBUS_FC,
+  MODBUS_EXCEPTION,
+  buildModbusReadRequest,
+  buildModbusWriteSingleRegister as sharedBuildWriteSingle,
+  buildModbusWriteMultipleRegisters as sharedBuildWriteMultiple,
+} from './modbus-utils';
 
 // ─── HART Protocol Constants ──────────────────────────────────────────
 
@@ -118,34 +125,9 @@ export const HART_UNITS = {
   CUBIC_METERS_PER_HOUR: 131,
 } as const;
 
-// ─── Modbus Constants (Emerson-specific) ──────────────────────────────
-
-/** Modbus function codes */
-export const MODBUS_FC = {
-  READ_COILS: 0x01,
-  READ_DISCRETE_INPUTS: 0x02,
-  READ_HOLDING_REGISTERS: 0x03,
-  READ_INPUT_REGISTERS: 0x04,
-  WRITE_SINGLE_COIL: 0x05,
-  WRITE_SINGLE_REGISTER: 0x06,
-  WRITE_MULTIPLE_COILS: 0x0F,
-  WRITE_MULTIPLE_REGISTERS: 0x10,
-  READ_EXCEPTION_STATUS: 0x07,
-  DIAGNOSTICS: 0x08,
-} as const;
-
-/** Modbus exception codes */
-export const MODBUS_EXCEPTION = {
-  ILLEGAL_FUNCTION: 0x01,
-  ILLEGAL_DATA_ADDRESS: 0x02,
-  ILLEGAL_DATA_VALUE: 0x03,
-  SLAVE_DEVICE_FAILURE: 0x04,
-  ACKNOWLEDGE: 0x05,
-  SLAVE_DEVICE_BUSY: 0x06,
-  MEMORY_PARITY_ERROR: 0x08,
-  GATEWAY_PATH_UNAVAILABLE: 0x0A,
-  GATEWAY_TARGET_FAILED: 0x0B,
-} as const;
+// Modbus constants imported from shared modbus-utils.ts
+// Re-export for backward compatibility
+export { MODBUS_FC, MODBUS_EXCEPTION } from './modbus-utils';
 
 export const EMERSON_REGISTER_MAP = {
   HART: {
@@ -402,59 +384,12 @@ function parseHartCmd3Response(data: Buffer): {
   };
 }
 
-// ─── Modbus TCP Frame Encoding ───────────────────────────────────────
+// ─── Modbus TCP Frame Encoding (delegated to shared modbus-utils) ────
 
-let modbusTransactionId = 0;
-
-/** Build Modbus TCP request (MBAP header + PDU) */
-function buildModbusTcpRequest(unitId: number, functionCode: number, startAddr: number, quantity: number): Buffer {
-  const transId = modbusTransactionId & 0xFFFF;
-  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
-  const buf = Buffer.alloc(12);
-  buf.writeUInt16BE(transId, 0);    // Transaction ID
-  buf.writeUInt16BE(0, 2);          // Protocol ID (Modbus)
-  buf.writeUInt16BE(6, 4);          // Length (remaining bytes)
-  buf.writeUInt8(unitId, 6);        // Unit ID
-  buf.writeUInt8(functionCode, 7);  // Function code
-  buf.writeUInt16BE(startAddr, 8);  // Starting address
-  buf.writeUInt16BE(quantity, 10);  // Quantity
-  return buf;
-}
-
-/** Build Modbus TCP write single register */
-function buildModbusWriteSingleRegister(unitId: number, address: number, value: number): Buffer {
-  const transId = modbusTransactionId & 0xFFFF;
-  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
-  const buf = Buffer.alloc(12);
-  buf.writeUInt16BE(transId, 0);
-  buf.writeUInt16BE(0, 2);
-  buf.writeUInt16BE(6, 4);
-  buf.writeUInt8(unitId, 6);
-  buf.writeUInt8(MODBUS_FC.WRITE_SINGLE_REGISTER, 7);
-  buf.writeUInt16BE(address, 8);
-  buf.writeUInt16BE(value, 10);
-  return buf;
-}
-
-/** Build Modbus TCP write multiple registers */
-function buildModbusWriteMultipleRegisters(unitId: number, startAddr: number, values: number[]): Buffer {
-  const transId = modbusTransactionId & 0xFFFF;
-  modbusTransactionId = (modbusTransactionId + 1) & 0xFFFF;
-  const byteCount = values.length * 2;
-  const buf = Buffer.alloc(13 + byteCount);
-  buf.writeUInt16BE(transId, 0);
-  buf.writeUInt16BE(0, 2);
-  buf.writeUInt16BE(7 + byteCount, 4);
-  buf.writeUInt8(unitId, 6);
-  buf.writeUInt8(MODBUS_FC.WRITE_MULTIPLE_REGISTERS, 7);
-  buf.writeUInt16BE(startAddr, 8);
-  buf.writeUInt16BE(values.length, 10);
-  buf.writeUInt8(byteCount, 12);
-  for (let i = 0; i < values.length; i++) {
-    buf.writeUInt16BE(values[i], 13 + i * 2);
-  }
-  return buf;
-}
+/** Alias for backward compatibility */
+const buildModbusTcpRequest = buildModbusReadRequest;
+const buildModbusWriteSingleRegister = sharedBuildWriteSingle;
+const buildModbusWriteMultipleRegisters = sharedBuildWriteMultiple;
 
 /** Parse Modbus TCP response */
 function parseModbusTcpResponse(buf: Buffer): { unitId: number; fc: number; data: Buffer; isException: boolean; exceptionCode?: number } {
@@ -485,7 +420,20 @@ function modbusExceptionToString(code: number): string {
 type EmersonProtocol = 'hart' | 'modbus' | 'deltav';
 
 /** Determine which protocol to use based on address format */
-function routeAddress(address: string): { protocol: EmersonProtocol; parsed: any } {
+/** Parsed address fields from routeAddress */
+interface EmersonParsedAddress {
+  pollingAddress?: number;
+  command?: number;
+  mfr?: number;
+  type?: number;
+  id?: number;
+  area?: string;
+  module?: string;
+  parameter?: string;
+  register?: number;
+}
+
+function routeAddress(address: string): { protocol: EmersonProtocol; parsed: EmersonParsedAddress } {
   // HART: "HART:<pollingAddr>:<command>" or "HART:<mfr>:<type>:<id>:<command>"
   if (address.toUpperCase().startsWith('HART:')) {
     const parts = address.split(':');
@@ -507,7 +455,7 @@ function routeAddress(address: string): { protocol: EmersonProtocol; parsed: any
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'emerson-vendor',
     name: 'Emerson Vendor Adapter',
@@ -521,12 +469,7 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   readonly protocols = ['hart', 'foundation-fieldbus', 'modbus', 'modbus-tcp'];
 
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; quality: string }> = new Map();
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
   private hartDevices: Map<number, { manufacturerId: number; deviceType: number; deviceId: number; tag: string }> = new Map();
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Emerson vendor adapter — HART + Modbus + DeltaV');
@@ -580,17 +523,11 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   }
 
   protected async doDisconnect(): Promise<void> {
-    for (const timer of this.pollingTimers.values()) {
-      clearInterval(timer);
-    }
-    this.pollingTimers.clear();
     this.connections.clear();
-    this.tagCache.clear();
   }
 
   protected async doDestroy(): Promise<void> {
     this.connections.clear();
-    this.tagCache.clear();
     this.hartDevices.clear();
   }
 
@@ -619,7 +556,7 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     return tags;
   }
 
-  private async readHartTag(address: string, parsed: any): Promise<AdapterTag> {
+  private async readHartTag(address: string, parsed: EmersonParsedAddress): Promise<AdapterTag> {
     const pollingAddr = parsed.pollingAddress ?? 0;
     const command = parsed.command ?? HART_UNIVERSAL_CMD.READ_PRIMARY_VARIABLE;
 
@@ -633,13 +570,13 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
       name: `HART_${pollingAddr}_CMD${command}`,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
 
-  private async readModbusTag(address: string, parsed: any): Promise<AdapterTag> {
-    const register = parsed.register;
+  private async readModbusTag(address: string, parsed: EmersonParsedAddress): Promise<AdapterTag> {
+    const register = parsed.register ?? 0;
     const fc = register >= 30000 ? MODBUS_FC.READ_INPUT_REGISTERS : MODBUS_FC.READ_HOLDING_REGISTERS;
     const actualRegister = register >= 40000 ? register - 40001 : register >= 30000 ? register - 30001 : register;
 
@@ -651,12 +588,12 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
       address,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
 
-  private async readDeltaVTag(address: string, parsed: any): Promise<AdapterTag> {
+  private async readDeltaVTag(address: string, parsed: EmersonParsedAddress): Promise<AdapterTag> {
     // DeltaV uses area/module/parameter addressing
     this.messagesProcessed++;
 
@@ -666,7 +603,7 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
       name: `${parsed.area}.${parsed.module}.${parsed.parameter}`,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -685,8 +622,9 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
           break;
         }
         case 'modbus': {
-          const register = parsed.register >= 40000 ? parsed.register - 40001 : parsed.register;
-          const request = buildModbusWriteSingleRegister(EMERSON_CONNECTION_PARAMS.modbus.unitId, register, Number(tag.value));
+          const reg = parsed.register ?? 0;
+          const writeAddr = reg >= 40000 ? reg - 40001 : reg;
+          const request = buildModbusWriteSingleRegister(EMERSON_CONNECTION_PARAMS.modbus.unitId, writeAddr, Number(tag.value));
           this.messagesProcessed++;
           break;
         }
@@ -702,9 +640,9 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   // ─── Discovery ─────────────────────────────────────────────────────
 
-  async discoverDevices(): Promise<any[]> {
+  async discoverDevices(): Promise<Record<string, unknown>[]> {
     this.context?.logger.info('Discovering Emerson devices via HART polling and Modbus scan');
-    const devices: any[] = [];
+    const devices: Record<string, unknown>[] = [];
 
     // HART: Poll addresses 0-15 with Command 0
     for (let addr = 0; addr <= 15; addr++) {
@@ -724,7 +662,7 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     // HART Command 0 + Command 13 (Read Tag) + Command 15 (Device Info)
     const frame0 = encodeHartShortFrame(parseInt(deviceId) || 0, HART_UNIVERSAL_CMD.READ_UNIQUE_ID);
     const frame13 = encodeHartShortFrame(parseInt(deviceId) || 0, HART_UNIVERSAL_CMD.READ_TAG);
@@ -733,7 +671,7 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
     return { deviceId, vendor: 'Emerson', models: EMERSON_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     // HART Command 48 — Read Additional Device Status
     const frame48 = encodeHartShortFrame(parseInt(deviceId) || 0, HART_COMMON_CMD.READ_ADDITIONAL_DEVICE_STATUS);
     this.messagesProcessed++;
@@ -746,17 +684,17 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
   }
 
   /** Send HART pass-through command */
-  async sendHartCommand(pollingAddress: number, command: number, data?: Buffer): Promise<any> {
+  async sendHartCommand(pollingAddress: number, command: number, data?: Buffer): Promise<Record<string, unknown>> {
     const frame = encodeHartShortFrame(pollingAddress, command, data);
     this.messagesProcessed++;
     return {};
   }
 
   /** Read all 4 dynamic variables via HART Command 3 */
-  async readDynamicVariables(pollingAddress: number): Promise<any> {
+  async readDynamicVariables(pollingAddress: number): Promise<Record<string, unknown>> {
     const frame = encodeHartShortFrame(pollingAddress, HART_UNIVERSAL_CMD.READ_DYNAMIC_VARIABLES_AND_CURRENT);
     this.messagesProcessed++;
-    return null;
+    return {};
   }
 
   /** Perform loop current trim (Command 45/46) */
@@ -770,43 +708,20 @@ export class EmersonVendorAdapter extends BaseAdapter<'protocol'> implements Pro
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof EMERSON_POLLING, callback: (tags: AdapterTag[]) => void): string {
-    const interval = EMERSON_POLLING[tier];
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`Emerson polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
+  startPollingByTier(addresses: string[], tier: keyof typeof EMERSON_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    return this.startPolling(addresses, EMERSON_POLLING[tier], callback, tier);
   }
 
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) {
-      clearInterval(timer);
-      this.pollingTimers.delete(key);
-    }
-  }
-
-  protected async getMetrics() {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.connections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
       hartDevicesKnown: this.hartDevices.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: EMERSON_REGISTER_MAP,
       connectionParams: EMERSON_CONNECTION_PARAMS,

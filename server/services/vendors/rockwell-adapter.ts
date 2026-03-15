@@ -9,7 +9,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -18,6 +17,87 @@ import {
   ProtocolEndpoint,
   ProtocolConnection
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
+
+// ─── CIP Protocol Constants ───────────────────────────────────────────
+
+/** EtherNet/IP encapsulation header commands */
+export const EIP_COMMANDS = {
+  NOP: 0x0000,
+  LIST_SERVICES: 0x0004,
+  LIST_IDENTITY: 0x0063,
+  LIST_INTERFACES: 0x0064,
+  REGISTER_SESSION: 0x0065,
+  UNREGISTER_SESSION: 0x0066,
+  SEND_RR_DATA: 0x006F,      // Connected/Unconnected Send
+  SEND_UNIT_DATA: 0x0070,    // Connected data
+} as const;
+
+/** CIP service codes */
+export const CIP_SERVICES = {
+  GET_ATTRIBUTE_ALL: 0x01,
+  GET_ATTRIBUTE_SINGLE: 0x0E,
+  SET_ATTRIBUTE_SINGLE: 0x10,
+  READ_TAG: 0x4C,
+  READ_TAG_FRAGMENTED: 0x52,
+  WRITE_TAG: 0x4D,
+  WRITE_TAG_FRAGMENTED: 0x53,
+  READ_MODIFY_WRITE: 0x4E,
+  MULTIPLE_SERVICE_PACKET: 0x0A,
+  FORWARD_OPEN: 0x54,
+  FORWARD_CLOSE: 0x4E,
+  LARGE_FORWARD_OPEN: 0x5B,
+  GET_CONNECTION_DATA: 0x56,
+} as const;
+
+/** CIP general status codes */
+export const CIP_STATUS = {
+  SUCCESS: 0x00,
+  CONNECTION_FAILURE: 0x01,
+  RESOURCE_UNAVAILABLE: 0x02,
+  INVALID_PARAMETER: 0x03,
+  PATH_SEGMENT_ERROR: 0x04,
+  PATH_DESTINATION_UNKNOWN: 0x05,
+  PARTIAL_TRANSFER: 0x06,
+  CONNECTION_LOST: 0x07,
+  SERVICE_NOT_SUPPORTED: 0x08,
+  INVALID_ATTRIBUTE: 0x09,
+  ATTRIBUTE_LIST_ERROR: 0x0A,
+  ALREADY_IN_STATE: 0x0B,
+  OBJECT_STATE_CONFLICT: 0x0C,
+  OBJECT_ALREADY_EXISTS: 0x0D,
+  ATTRIBUTE_NOT_SETTABLE: 0x0E,
+  PRIVILEGE_VIOLATION: 0x0F,
+  DEVICE_STATE_CONFLICT: 0x10,
+  REPLY_DATA_TOO_LARGE: 0x11,
+  FRAGMENTATION_OF_PRIMITIVE: 0x12,
+  NOT_ENOUGH_DATA: 0x13,
+  ATTRIBUTE_NOT_SUPPORTED: 0x14,
+  TOO_MUCH_DATA: 0x15,
+  OBJECT_DOES_NOT_EXIST: 0x16,
+  KEY_FAILURE_IN_PATH: 0x25,
+  INVALID_MEMBER: 0x28,
+  MEMBER_NOT_SETTABLE: 0x29,
+} as const;
+
+/** CIP object class IDs */
+export const CIP_CLASSES = {
+  IDENTITY: 0x01,
+  MESSAGE_ROUTER: 0x02,
+  DEVICE_NET: 0x03,
+  ASSEMBLY: 0x04,
+  CONNECTION: 0x05,
+  CONNECTION_MANAGER: 0x06,
+  REGISTER: 0x07,
+  PARAMETER: 0x0F,
+  PORT: 0xF4,
+  TCP_IP: 0xF5,
+  ETHERNET_LINK: 0xF6,
+  SYMBOL: 0x6B,
+  TEMPLATE: 0x6C,
+  PROGRAM: 0x68,
+  WALL_CLOCK_TIME: 0x8B,
+} as const;
 
 // ─── CIP Protocol Constants ───────────────────────────────────────────
 
@@ -183,7 +263,7 @@ interface CipConnection {
   originatorSerialNumber: number;
   rpi: number;
   endpoint: ProtocolEndpoint;
-  socket: any; // TCP socket
+  socket: import('net').Socket | null;
   keepAliveTimer?: NodeJS.Timeout;
   lastActivity: Date;
   sequenceCount: number;
@@ -402,7 +482,7 @@ function parseCipReadResponse(data: Buffer): { status: number; typeCode: number;
 }
 
 /** Marshal a JS value into a CIP typed buffer */
-function marshalCipValue(value: any, cipType: number): Buffer {
+function marshalCipValue(value: unknown, cipType: number): Buffer {
   switch (cipType) {
     case ROCKWELL_REGISTER_MAP.DATA_TYPES.BOOL: {
       const b = Buffer.alloc(1);
@@ -452,7 +532,7 @@ function marshalCipValue(value: any, cipType: number): Buffer {
 }
 
 /** Unmarshal raw bytes into a JS value based on CIP type code */
-function unmarshalCipValue(typeCode: number, data: Buffer): any {
+function unmarshalCipValue(typeCode: number, data: Buffer): unknown {
   switch (typeCode) {
     case ROCKWELL_REGISTER_MAP.DATA_TYPES.BOOL:
       return data.readUInt8(0) !== 0;
@@ -480,8 +560,8 @@ function unmarshalCipValue(typeCode: number, data: Buffer): any {
 }
 
 /** Parse a ListIdentity response into discovered device info */
-function parseListIdentityResponse(data: Buffer): any[] {
-  const devices: any[] = [];
+function parseListIdentityResponse(data: Buffer): Record<string, unknown>[] {
+  const devices: Record<string, unknown>[] = [];
   if (data.length < 26) return devices; // Need at least header + some identity data
   
   const header = decodeEncapsulationHeader(data);
@@ -560,7 +640,7 @@ function cipStatusToString(status: number): string {
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class RockwellVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'rockwell-vendor',
     name: 'Rockwell Automation Vendor Adapter',
@@ -575,12 +655,6 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   private cipConnections: Map<string, CipConnection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; quality: string; typeCode: number }> = new Map();
-  private static readonly MAX_TAG_CACHE = 50000;
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Rockwell vendor adapter — EtherNet/IP + CIP stack');
@@ -740,9 +814,9 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
       return {
         address,
         name: this.parseTagName(address),
-        dataType: this.cipTypeToAdapterType(cached.typeCode),
+        dataType: this.cipTypeToAdapterType(cached.typeCode as number),
         value: cached.value,
-        quality: cached.quality as any,
+        quality: cached.quality as AdapterTag['quality'],
         timestamp: cached.timestamp,
       };
     }
@@ -772,7 +846,7 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
         name: this.parseTagName(address),
         dataType: this.inferCipDataType(address),
         value: cached?.value ?? null,
-        quality: (cached ? 'good' : 'uncertain') as any,
+        quality: (cached ? 'good' : 'uncertain') as AdapterTag['quality'],
         timestamp: cached?.timestamp ?? new Date(),
       };
     });
@@ -815,7 +889,7 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   // ─── Device Discovery ─────────────────────────────────────────────
 
-  async discoverDevices(): Promise<any[]> {
+  async discoverDevices(): Promise<Record<string, unknown>[]> {
     this.context?.logger.info('Broadcasting CIP ListIdentity on port 44818');
     
     const listIdentityPacket = buildListIdentity();
@@ -830,7 +904,7 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
   // ─── Diagnostics ──────────────────────────────────────────────────
 
   /** Read CIP Identity Object (Class 0x01, Instance 1) */
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     // Build Get_Attribute_All for Identity object
     const path = Buffer.from([
       0x20, CIP_CLASSES.IDENTITY,  // Class segment
@@ -853,7 +927,7 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
   }
 
   /** Read fault log and module status */
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     // Read Wall Clock Time object for uptime
     // Read fault log via controller attributes
     // Read module status for each slot in chassis
@@ -884,28 +958,9 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
 
   // ─── Polling ──────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof ROCKWELL_POLLING, callback: (tags: AdapterTag[]) => void): string {
-    const interval = ROCKWELL_POLLING[tier];
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`Polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
+  startPollingByTier(addresses: string[], tier: keyof typeof ROCKWELL_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    return this.startPolling(addresses, ROCKWELL_POLLING[tier], callback, tier);
   }
-
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) {
-      clearInterval(timer);
-      this.pollingTimers.delete(key);
-    }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────
@@ -939,18 +994,15 @@ export class RockwellVendorAdapter extends BaseAdapter<'protocol'> implements Pr
     }
   }
 
-  protected async getMetrics() {
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.cipConnections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: ROCKWELL_REGISTER_MAP,
       connectionParams: ROCKWELL_CONNECTION_PARAMS,

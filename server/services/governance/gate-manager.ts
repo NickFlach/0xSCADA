@@ -19,7 +19,13 @@ import type {
   AuditEntry,
 } from './types';
 import { VerificationPipeline } from '../verification/pipeline';
-import type { VerificationInput, PipelineResult } from '../verification/types';
+import type { VerificationInput, PipelineResult, VerificationPipelineConfig, VerificationSeverity } from '../verification/types';
+
+/** Rank severity for comparison (higher = worse) */
+function severityRank(s: VerificationSeverity): number {
+  const ranks: Record<VerificationSeverity, number> = { info: 0, warning: 1, error: 2, critical: 3 };
+  return ranks[s] ?? 0;
+}
 
 const logger = pino({ name: 'gate-manager' });
 
@@ -29,6 +35,18 @@ const MAX_GATE_INSTANCES = 10000;
 export class GateManager extends EventEmitter implements IGateManager {
   private definitions: Map<string, GateDefinition> = new Map();
   private instances: Map<string, GateInstance> = new Map();
+  /** Cached pipeline instances keyed by serialized config */
+  private pipelineCache: Map<string, VerificationPipeline> = new Map();
+
+  private getOrCreatePipeline(config?: Partial<VerificationPipelineConfig>): VerificationPipeline {
+    const key = config ? JSON.stringify(config) : '__default__';
+    let pipeline = this.pipelineCache.get(key);
+    if (!pipeline) {
+      pipeline = new VerificationPipeline(config);
+      this.pipelineCache.set(key, pipeline);
+    }
+    return pipeline;
+  }
 
   // ─── Gate Definitions ───────────────────────────────────────────────────
 
@@ -70,24 +88,64 @@ export class GateManager extends EventEmitter implements IGateManager {
     // Record initial audit entry
     instance.auditTrail.push(this.createAuditEntry(instanceId, 'submit', 'initial', 'pending', actor));
 
-    // Run automated verification conditions
+    // Run automated verification conditions — ALL of them, not just the first
     if (definition.type === 'automated' || definition.type === 'hybrid') {
       const verificationConditions = definition.conditions.filter(c => c.type === 'verification');
       if (verificationConditions.length > 0) {
-        const pipeline = new VerificationPipeline(verificationConditions[0].verificationConfig);
         const verInput: VerificationInput = {
           id: subject.id,
           data: subject.data,
         };
-        instance.verificationResult = await pipeline.execute(verInput);
+
+        // Execute all verification conditions and aggregate results
+        const results: PipelineResult[] = [];
+        for (const condition of verificationConditions) {
+          const pipeline = this.getOrCreatePipeline(condition.verificationConfig);
+          results.push(await pipeline.execute(verInput));
+        }
+
+        // Use first result as the primary (backward compatible), but aggregate status
+        instance.verificationResult = results[0];
+        if (results.length > 1) {
+          // Store all results in metadata for full visibility
+          instance.metadata = {
+            ...instance.metadata,
+            properties: {
+              ...instance.metadata?.properties,
+              verificationResults: results as unknown as Record<string, unknown>,
+            },
+          };
+          // Aggregate: if ANY result fails, the overall result is a failure
+          const anyFailed = results.some(r => r.status !== 'pass');
+          if (anyFailed && instance.verificationResult.status === 'pass') {
+            // Override the primary result status to reflect aggregate failure
+            instance.verificationResult = {
+              ...instance.verificationResult,
+              status: 'fail',
+              summary: {
+                ...instance.verificationResult.summary,
+                failed: results.reduce((sum, r) => sum + r.summary.failed, 0),
+                passed: results.reduce((sum, r) => sum + r.summary.passed, 0),
+                errors: results.reduce((sum, r) => sum + r.summary.errors, 0),
+                skipped: results.reduce((sum, r) => sum + r.summary.skipped, 0),
+                highestSeverity: results.reduce((worst, r) =>
+                  r.summary.highestSeverity && (!worst || severityRank(r.summary.highestSeverity) > severityRank(worst))
+                    ? r.summary.highestSeverity
+                    : worst,
+                  instance.verificationResult.summary.highestSeverity),
+              },
+            };
+          }
+        }
 
         if (definition.type === 'automated') {
-          // Auto-resolve based on verification result
+          // Auto-resolve based on aggregated verification result
           if (instance.verificationResult.status === 'pass') {
             instance.state = 'approved';
             instance.resolvedAt = new Date().toISOString();
             instance.auditTrail.push(
-              this.createAuditEntry(instanceId, 'approve', 'pending', 'approved', 'system', 'Automated verification passed')
+              this.createAuditEntry(instanceId, 'approve', 'pending', 'approved', 'system',
+                `Automated verification passed (${results.length} condition(s))`)
             );
           } else {
             instance.state = 'rejected';
