@@ -96,7 +96,7 @@ Every agentic system in 0xSCADA operates under the constraint that **safety-crit
 
 > Agentic systems should augment operators and engineers, not obscure control or accountability.
 
-The [GhostOS Propagation Model](propagation-model.md) encodes this directly: **M3: SAFE_HOLD** mode halts autonomous action and escalates to human review whenever confidence drops below threshold.
+The [ghostmagicOS (gmOS) Propagation Model](propagation-model.md) encodes this directly: **M3: SAFE_HOLD** mode halts autonomous action and escalates to human review whenever confidence drops below threshold.
 
 ### Interoperability Over Lock-In
 
@@ -163,7 +163,7 @@ This charter formalizes the principles that have been implicitly guiding 0xSCADA
 | Charter Principle | 0xSCADA Implementation |
 |------------------|----------------------|
 | Safety First | Off-chain real-time control, Guardian agent override |
-| Human-in-the-Loop | GhostOS M3: SAFE_HOLD, multi-sig governance |
+| Human-in-the-Loop | ghostmagicOS (gmOS) M3: SAFE_HOLD, multi-sig governance |
 | Interoperability | 5-vendor codegen, ISA-88 blueprints, OPC-UA driver |
 | Security as Foundation | Zero-trust agents, Merkle audit trail, PoA chain |
 | Measured Emergence | Propagation modes M1-M4, bounded exploration |

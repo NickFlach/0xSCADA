@@ -1,0 +1,22 @@
+{
+  "ownerId": "kn7472bg474xtcrazj1dhmh0m180ywh6",
+  "slug": "0xscada",
+  "version": "1.0.0",
+  "publishedAt": 1741651200000,
+  "dependencies": ["flux"],
+  "requires": {
+    "bins": ["node", "npm"],
+    "env": []
+  },
+  "optional": {
+    "bins": ["docker"],
+    "env": [
+      "SCADA_PORT",
+      "DATABASE_URL"
+    ]
+  },
+  "dataDestinations": {
+    "alwaysLocal": ["scada-local"],
+    "optionalRemote": []
+  }
+}
