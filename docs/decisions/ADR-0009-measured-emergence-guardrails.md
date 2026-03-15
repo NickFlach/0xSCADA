@@ -12,7 +12,7 @@ Proposed
 
 The [Agentic Engineering Charter](../CHARTER.md) defines "Measured Emergence" as a core principle: adaptive systems must operate within defined constraints to ensure predictability and trust.
 
-0xSCADA agents currently operate under the [GhostOS Propagation Model](../propagation-model.md) with four modes (M1-M4). However, the boundaries between modes — particularly the conditions under which an agent may autonomously escalate or de-escalate — are not formally specified.
+0xSCADA agents currently operate under the [ghostmagicOS (gmOS) Propagation Model](../propagation-model.md) with four modes (M1-M4). However, the boundaries between modes — particularly the conditions under which an agent may autonomously escalate or de-escalate — are not formally specified.
 
 As agents gain more capability (self-diagnosis, optimization, learning), we need formal guardrails that:
 
@@ -175,7 +175,7 @@ Rejected because: Prevents agents from becoming more useful over time; operators
 ## References
 
 - [Agentic Engineering Charter](../CHARTER.md)
-- [GhostOS Propagation Model](../propagation-model.md)
+- [ghostmagicOS (gmOS) Propagation Model](../propagation-model.md)
 - [ADR-0007: Agent-Based Governance](ADR-0007-agent-based-governance.md)
 - [ADR-0008: Zero-Trust Agent Deployment](ADR-0008-zero-trust-agent-deployment.md)
 - [IEC 61508: Functional Safety](https://www.iec.ch/functional-safety)

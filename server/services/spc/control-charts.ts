@@ -43,6 +43,7 @@ function mean(arr: number[]): number {
 }
 
 function stdDev(arr: number[]): number {
+  if (arr.length <= 1) return 0;
   const m = mean(arr);
   return Math.sqrt(arr.reduce((s, v) => s + (v - m) ** 2, 0) / (arr.length - 1));
 }

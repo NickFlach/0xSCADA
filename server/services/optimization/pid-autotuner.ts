@@ -35,6 +35,8 @@ interface RelayState {
   output: number;
   peaks: number[];
   valleys: number[];
+  peakValues: number[];
+  valleyValues: number[];
   lastCrossing: number;
   cycleCount: number;
 }
@@ -63,14 +65,17 @@ function cohenCoonPID(k: number, tau: number, theta: number): PIDGains {
 /** Compute ultimate gain and period from relay feedback oscillation data */
 function relayFeedbackAnalysis(
   relayAmplitude: number,
-  peaks: number[],
-  valleys: number[]
+  peakTimestamps: number[],
+  valleyTimestamps: number[],
+  peakValues: number[] = [],
+  valleyValues: number[] = []
 ): { ku: number; tu: number } | null {
-  if (peaks.length < 2 || valleys.length < 2) return null;
+  if (peakTimestamps.length < 2 || valleyTimestamps.length < 2) return null;
+  if (peakValues.length < 2 || valleyValues.length < 2) return null;
 
-  // Oscillation amplitude from average peak-to-valley
-  const peakAvg = peaks.reduce((a, b) => a + b, 0) / peaks.length;
-  const valleyAvg = valleys.reduce((a, b) => a + b, 0) / valleys.length;
+  // Oscillation amplitude from average peak-to-valley PV values
+  const peakAvg = peakValues.reduce((a, b) => a + b, 0) / peakValues.length;
+  const valleyAvg = valleyValues.reduce((a, b) => a + b, 0) / valleyValues.length;
   const amplitude = (peakAvg - valleyAvg) / 2;
 
   if (amplitude <= 0) return null;
@@ -78,12 +83,11 @@ function relayFeedbackAnalysis(
   // Ultimate gain: Ku = 4d / (π·a) where d = relay amplitude, a = oscillation amplitude
   const ku = (4 * relayAmplitude) / (Math.PI * amplitude);
 
-  // Ultimate period from peak-to-peak or valley-to-valley spacing
-  // Here peaks/valleys are timestamps; compute average period
+  // Ultimate period (Tu) from peak-to-peak timestamp spacing
   let totalPeriod = 0;
   let count = 0;
-  for (let i = 1; i < peaks.length; i++) {
-    totalPeriod += peaks[i] - peaks[i - 1];
+  for (let i = 1; i < peakTimestamps.length; i++) {
+    totalPeriod += peakTimestamps[i] - peakTimestamps[i - 1];
     count++;
   }
   if (count === 0) return null;
@@ -237,6 +241,8 @@ export class PIDAutoTuner extends EventEmitter {
       output: this.relayConfig.relayAmplitude,
       peaks: [],
       valleys: [],
+      peakValues: [],
+      valleyValues: [],
       lastCrossing: Date.now() / 1000,
       cycleCount: 0,
     };
@@ -256,12 +262,14 @@ export class PIDAutoTuner extends EventEmitter {
     // Relay switching with hysteresis
     if (error > this.relayConfig.hysteresis && this.relayState.output < 0) {
       this.relayState.output = this.relayConfig.relayAmplitude;
-      this.relayState.valleys.push(processVariable);
+      this.relayState.valleys.push(now);
+      this.relayState.valleyValues.push(processVariable);
       this.relayState.cycleCount++;
       this.relayState.lastCrossing = now;
     } else if (error < -this.relayConfig.hysteresis && this.relayState.output > 0) {
       this.relayState.output = -this.relayConfig.relayAmplitude;
-      this.relayState.peaks.push(processVariable);
+      this.relayState.peaks.push(now);
+      this.relayState.peakValues.push(processVariable);
       this.relayState.lastCrossing = now;
     }
 
@@ -284,6 +292,8 @@ export class PIDAutoTuner extends EventEmitter {
       this.relayConfig.relayAmplitude,
       this.relayState.peaks,
       this.relayState.valleys,
+      this.relayState.peakValues,
+      this.relayState.valleyValues,
     );
 
     this.relayState.active = false;

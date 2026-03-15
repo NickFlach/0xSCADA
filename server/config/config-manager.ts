@@ -178,15 +178,20 @@ const ENV_PROFILES: Record<string, Partial<Record<string, unknown>>> = {
 // --- Helpers ---
 
 function setNested(obj: Record<string, any>, path: string, value: unknown): void {
+  const FORBIDDEN_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
   const parts = path.split('.');
   let current = obj;
   for (let i = 0; i < parts.length - 1; i++) {
-    if (!current[parts[i]] || typeof current[parts[i]] !== 'object') {
-      current[parts[i]] = {};
+    const key = parts[i];
+    if (FORBIDDEN_KEYS.has(key)) return; // Guard against prototype pollution
+    if (!Object.prototype.hasOwnProperty.call(current, key) || !current[key] || typeof current[key] !== 'object') {
+      current[key] = {};
     }
-    current = current[parts[i]];
+    current = current[key];
   }
-  current[parts[parts.length - 1]] = value;
+  const finalKey = parts[parts.length - 1];
+  if (FORBIDDEN_KEYS.has(finalKey)) return; // Guard against prototype pollution
+  current[finalKey] = value;
 }
 
 function getNested(obj: Record<string, any>, path: string): unknown {

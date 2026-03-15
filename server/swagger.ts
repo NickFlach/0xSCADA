@@ -10,8 +10,13 @@
 import { Router } from "express";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { rateLimitMiddleware } from "./middleware/api-gateway";
 
 export const swaggerRouter = Router();
+
+// Rate limit for documentation endpoints (generous limit for static content)
+const docsRateLimit = rateLimitMiddleware({ windowMs: 60_000, maxRequests: 100 });
+swaggerRouter.use(docsRateLimit);
 
 // Get the path to the OpenAPI spec
 function getSpecPath(): string {
