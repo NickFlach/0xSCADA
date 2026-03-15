@@ -19,11 +19,16 @@ import {
   type EventBatch,
   type EventBatcherMetrics
 } from "../kernel/event-batcher";
+import { rateLimitMiddleware } from "../middleware/api-gateway";
 
 const logger = pino({ name: "event-routes" });
 const eventBatcher = getDefaultEventBatcher();
 
 export const eventRoutes = Router();
+
+// Rate limit for event ingestion endpoints
+const eventRateLimit = rateLimitMiddleware({ windowMs: 60_000, maxRequests: 100 });
+eventRoutes.use(eventRateLimit);
 
 // ─── Event Ingestion ────────────────────────────────────────────────────────
 
