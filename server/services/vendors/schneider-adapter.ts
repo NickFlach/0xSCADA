@@ -1,10 +1,10 @@
 /**
  * Schneider Electric Vendor Adapter
- * 
+ *
  * Extends 0xSCADA BaseAdapter for Schneider Electric PLC/HMI/RTU systems.
  * Protocols: Modbus TCP/RTU, EtherNet/IP, IEC 60870-5-104
  * Models: Modicon M580, M340, Quantum, SCADAPack, Easergy
- * 
+ *
  * Implements:
  *   - Modbus TCP (MBAP) frame encoding/decoding with full function code support
  *   - Modbus RTU with CRC-16 calculation
@@ -14,7 +14,6 @@
  */
 
 import {
-  BaseAdapter,
   ProtocolAdapter,
   AdapterManifest,
   AdapterCapability,
@@ -23,6 +22,130 @@ import {
   ProtocolEndpoint,
   ProtocolConnection,
 } from '@shared/types/services/adapters';
+import { VendorBaseAdapter } from './vendor-base';
+import {
+  MODBUS_FC,
+  MODBUS_EXCEPTION,
+  encodeModbusTcpRequest,
+  buildModbusReadRequest,
+  buildModbusWriteSingleRegister,
+  buildModbusWriteSingleCoil,
+  buildModbusWriteMultipleRegisters,
+  buildModbusWriteMultipleCoils,
+} from './modbus-utils';
+
+// Modbus constants imported from shared modbus-utils.ts
+// Re-export base constants and add Schneider-extended function codes
+export { MODBUS_FC, MODBUS_EXCEPTION } from './modbus-utils';
+
+/** Schneider-extended Modbus function codes beyond the standard set */
+export const SCHNEIDER_EXTENDED_FC = {
+  GET_COMM_EVENT_COUNTER: 0x0B,
+  GET_COMM_EVENT_LOG: 0x0C,
+  REPORT_SERVER_ID: 0x11,
+  READ_FILE_RECORD: 0x14,
+  WRITE_FILE_RECORD: 0x15,
+  MASK_WRITE_REGISTER: 0x16,
+  READ_WRITE_MULTIPLE_REGISTERS: 0x17,
+  READ_DEVICE_IDENTIFICATION: 0x2B,
+} as const;
+
+/** Modbus diagnostic sub-function codes (FC 0x08) */
+export const MODBUS_DIAG_SUB = {
+  RETURN_QUERY_DATA: 0x0000,
+  RESTART_COMMUNICATIONS: 0x0001,
+  RETURN_DIAGNOSTIC_REGISTER: 0x0002,
+  FORCE_LISTEN_ONLY: 0x0004,
+  CLEAR_COUNTERS: 0x000A,
+  RETURN_BUS_MESSAGE_COUNT: 0x000B,
+  RETURN_BUS_COMM_ERROR_COUNT: 0x000C,
+  RETURN_BUS_EXCEPTION_ERROR_COUNT: 0x000D,
+  RETURN_SERVER_MESSAGE_COUNT: 0x000E,
+  RETURN_SERVER_NO_RESPONSE_COUNT: 0x000F,
+} as const;
+
+// ─── IEC 60870-5-104 Constants ───────────────────────────────────────
+
+/** IEC 104 APCI frame types */
+export const IEC104_FRAME_TYPE = {
+  I_FORMAT: 0x00,   // Information transfer
+  S_FORMAT: 0x01,   // Supervisory
+  U_FORMAT: 0x03,   // Unnumbered control
+} as const;
+
+/** IEC 104 U-format function codes */
+export const IEC104_U_FUNCTION = {
+  STARTDT_ACT: 0x07,   // Start Data Transfer Activation
+  STARTDT_CON: 0x0B,   // Start Data Transfer Confirmation
+  STOPDT_ACT: 0x13,    // Stop Data Transfer Activation
+  STOPDT_CON: 0x23,    // Stop Data Transfer Confirmation
+  TESTFR_ACT: 0x43,    // Test Frame Activation
+  TESTFR_CON: 0x83,    // Test Frame Confirmation
+} as const;
+
+/** IEC 104 Type Identification (TI) - Information Object types */
+export const IEC104_TYPE_ID = {
+  // Monitor direction (from controlled station)
+  M_SP_NA_1: 1,    // Single-point information
+  M_SP_TA_1: 2,    // Single-point with time tag
+  M_DP_NA_1: 3,    // Double-point information
+  M_DP_TA_1: 4,    // Double-point with time tag
+  M_ST_NA_1: 5,    // Step position information
+  M_BO_NA_1: 7,    // Bitstring of 32 bit
+  M_ME_NA_1: 9,    // Measured value, normalized
+  M_ME_NB_1: 11,   // Measured value, scaled
+  M_ME_NC_1: 13,   // Measured value, short floating point
+  M_IT_NA_1: 15,   // Integrated totals
+  M_SP_TB_1: 30,   // Single-point with CP56Time2a
+  M_DP_TB_1: 31,   // Double-point with CP56Time2a
+  M_ME_TD_1: 34,   // Measured normalized with CP56Time2a
+  M_ME_TE_1: 35,   // Measured scaled with CP56Time2a
+  M_ME_TF_1: 36,   // Measured float with CP56Time2a
+  // Control direction (from controlling station)
+  C_SC_NA_1: 45,   // Single command
+  C_DC_NA_1: 46,   // Double command
+  C_RC_NA_1: 47,   // Regulating step command
+  C_SE_NA_1: 48,   // Set-point, normalized
+  C_SE_NB_1: 49,   // Set-point, scaled
+  C_SE_NC_1: 50,   // Set-point, short floating point
+  C_BO_NA_1: 51,   // Bitstring of 32 bit
+  // System information
+  C_IC_NA_1: 100,  // Interrogation command
+  C_CI_NA_1: 101,  // Counter interrogation
+  C_RD_NA_1: 102,  // Read command
+  C_CS_NA_1: 103,  // Clock synchronization
+  C_RP_NA_1: 105,  // Reset process command
+} as const;
+
+/** IEC 104 Cause of Transmission (COT) */
+export const IEC104_COT = {
+  PERIODIC: 1,
+  BACKGROUND: 2,
+  SPONTANEOUS: 3,
+  INITIALIZED: 4,
+  REQUEST: 5,
+  ACTIVATION: 6,
+  ACTIVATION_CON: 7,
+  DEACTIVATION: 8,
+  DEACTIVATION_CON: 9,
+  ACTIVATION_TERM: 10,
+  RETURN_REMOTE: 11,
+  RETURN_LOCAL: 12,
+  INTERROGATED_STATION: 20,
+  INTERROGATED_GROUP_1: 21,
+} as const;
+
+/** IEC 104 connection parameters (T0..T3, k, w) */
+export const IEC104_PARAMS = {
+  T0: 30,    // Connection establishment timeout (s)
+  T1: 15,    // Send or test APDU timeout (s)
+  T2: 10,    // Ack timeout for S-format (s) - must be < T1
+  T3: 20,    // Test frame timeout (s)
+  K: 12,     // Max unconfirmed I-format APDUs sent
+  W: 8,      // Max unconfirmed I-format APDUs received before ack
+} as const;
+
+// ─── Schneider-Specific Register Maps ────────────────────────────────
 
 // ─── Modbus Protocol Constants ───────────────────────────────────────
 
@@ -95,7 +218,7 @@ export const IEC104_U_FUNCTION = {
   TESTFR_CON: 0x83,    // Test Frame Confirmation
 } as const;
 
-/** IEC 104 Type Identification (TI) — Information Object types */
+/** IEC 104 Type Identification (TI) - Information Object types */
 export const IEC104_TYPE_ID = {
   // Monitor direction (from controlled station)
   M_SP_NA_1: 1,    // Single-point information
@@ -151,7 +274,7 @@ export const IEC104_COT = {
 export const IEC104_PARAMS = {
   T0: 30,    // Connection establishment timeout (s)
   T1: 15,    // Send or test APDU timeout (s)
-  T2: 10,    // Ack timeout for S-format (s) — must be < T1
+  T2: 10,    // Ack timeout for S-format (s) - must be < T1
   T3: 20,    // Test frame timeout (s)
   K: 12,     // Max unconfirmed I-format APDUs sent
   W: 8,      // Max unconfirmed I-format APDUs received before ack
@@ -228,78 +351,8 @@ export const SCHNEIDER_MODELS = {
 } as const;
 
 // ─── Modbus TCP Frame Encoding/Decoding ──────────────────────────────
-
-let mbapTransactionId = 0;
-
-/** Encode a Modbus TCP (MBAP) request frame */
-function encodeModbusTcpRequest(unitId: number, functionCode: number, payload: Buffer): Buffer {
-  const transId = mbapTransactionId++ & 0xFFFF;
-  const mbapHeader = Buffer.alloc(7);
-  mbapHeader.writeUInt16BE(transId, 0);        // Transaction ID
-  mbapHeader.writeUInt16BE(0x0000, 2);         // Protocol ID (Modbus = 0)
-  mbapHeader.writeUInt16BE(1 + payload.length, 4); // Length (Unit ID + PDU)
-  mbapHeader.writeUInt8(unitId, 6);            // Unit Identifier
-  
-  const pdu = Buffer.alloc(1 + payload.length);
-  pdu.writeUInt8(functionCode, 0);
-  payload.copy(pdu, 1);
-  
-  return Buffer.concat([mbapHeader, pdu]);
-}
-
-/** Build Modbus read request (FC01/02/03/04) */
-function buildModbusReadRequest(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(quantity, 2);
-  return encodeModbusTcpRequest(unitId, fc, payload);
-}
-
-/** Build Modbus write single register (FC06) */
-function buildModbusWriteSingleRegister(unitId: number, address: number, value: number): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(address, 0);
-  payload.writeUInt16BE(value & 0xFFFF, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_REGISTER, payload);
-}
-
-/** Build Modbus write single coil (FC05) */
-function buildModbusWriteSingleCoil(unitId: number, address: number, value: boolean): Buffer {
-  const payload = Buffer.alloc(4);
-  payload.writeUInt16BE(address, 0);
-  payload.writeUInt16BE(value ? 0xFF00 : 0x0000, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_COIL, payload);
-}
-
-/** Build Modbus write multiple registers (FC16) */
-function buildModbusWriteMultipleRegisters(unitId: number, startAddress: number, values: number[]): Buffer {
-  const byteCount = values.length * 2;
-  const payload = Buffer.alloc(5 + byteCount);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(values.length, 2);
-  payload.writeUInt8(byteCount, 4);
-  for (let i = 0; i < values.length; i++) {
-    payload.writeUInt16BE(values[i] & 0xFFFF, 5 + i * 2);
-  }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_REGISTERS, payload);
-}
-
-/** Build Modbus write multiple coils (FC15) */
-function buildModbusWriteMultipleCoils(unitId: number, startAddress: number, values: boolean[]): Buffer {
-  const byteCount = Math.ceil(values.length / 8);
-  const payload = Buffer.alloc(5 + byteCount);
-  payload.writeUInt16BE(startAddress, 0);
-  payload.writeUInt16BE(values.length, 2);
-  payload.writeUInt8(byteCount, 4);
-  for (let i = 0; i < values.length; i++) {
-    if (values[i]) {
-      const byteIdx = Math.floor(i / 8);
-      const bitIdx = i % 8;
-      payload[5 + byteIdx] |= (1 << bitIdx);
-    }
-  }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_COILS, payload);
-}
+// Core frame builders imported from shared modbus-utils.ts
+// Schneider-specific builders below:
 
 /** Build Modbus diagnostics request (FC08) */
 function buildModbusDiagnostics(unitId: number, subFunction: number, data: number = 0): Buffer {
@@ -430,7 +483,7 @@ function buildIec104UFormat(controlField: number): Buffer {
   return buf;
 }
 
-/** Build IEC 104 S-format frame (supervisory — ack received I-frames) */
+/** Build IEC 104 S-format frame (supervisory - ack received I-frames) */
 function buildIec104SFormat(receiveSeq: number): Buffer {
   const buf = Buffer.alloc(6);
   buf.writeUInt8(0x68, 0);
@@ -680,7 +733,7 @@ function parseSchneiderAddress(address: string): {
 
 interface Iec104Connection {
   endpoint: ProtocolEndpoint;
-  socket: any;
+  socket: import('net').Socket | null;
   sendSeq: number;
   receiveSeq: number;
   isStarted: boolean;
@@ -694,7 +747,7 @@ interface Iec104Connection {
 
 // ─── Adapter Implementation ──────────────────────────────────────────
 
-export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements ProtocolAdapter {
+export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implements ProtocolAdapter {
   readonly manifest: AdapterManifest & { type: 'protocol' } = {
     id: 'schneider-vendor',
     name: 'Schneider Electric Vendor Adapter',
@@ -710,15 +763,10 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
   private modbusConnections: Map<string, ProtocolConnection> = new Map();
   private iec104Connections: Map<string, Iec104Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
-  private tagCache: Map<string, { value: any; timestamp: Date; quality: string }> = new Map();
-  private pollingTimers: Map<string, NodeJS.Timeout> = new Map();
-  private iec104SpontaneousBuffer: Map<number, { value: any; timestamp: Date; typeId: number }> = new Map();
-  private messagesProcessed = 0;
-  private errorsCount = 0;
-  private startTime = 0;
+  private iec104SpontaneousBuffer: Map<number, { value: unknown; timestamp: Date; typeId: number }> = new Map();
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
-    context.logger.info('Initializing Schneider Electric vendor adapter — Modbus TCP/RTU + IEC 104');
+    context.logger.info('Initializing Schneider Electric vendor adapter - Modbus TCP/RTU + IEC 104');
     this.startTime = Date.now();
   }
 
@@ -785,7 +833,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
     // Step 3: Send General Interrogation
     const giAsdu = buildIec104InterrogationAsdu(commonAddress);
-    const giPacket = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, giAsdu);
+    const giPacket = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, giAsdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
 
@@ -853,12 +901,12 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       }
     }
 
-    // Modbus reads — group by function code for batch reads
+    // Modbus reads - group by function code for batch reads
     if (modbusAddrs.length > 0) {
       tags.push(...await this.readModbusTags(modbusAddrs));
     }
 
-    // IEC 104 reads — use spontaneous buffer or send read command
+    // IEC 104 reads - use spontaneous buffer or send read command
     for (const { address, parsed } of iec104Addrs) {
       tags.push(await this.readIec104Tag(address, parsed));
     }
@@ -902,7 +950,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
             address: regs[i].address,
             dataType: regs[i].isBool ? 'boolean' : 'number',
             value: cached?.value ?? null,
-            quality: (cached?.quality as any) ?? 'uncertain',
+            quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
             timestamp: cached?.timestamp ?? new Date(),
           });
         }
@@ -943,7 +991,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       readAsdu.writeUInt8((ioa >> 8) & 0xFF, pos); pos += 1;
       readAsdu.writeUInt8((ioa >> 16) & 0xFF, pos);
 
-      const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, readAsdu);
+      const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, readAsdu);
       conn.unconfirmedSent++;
       this.messagesProcessed++;
     }
@@ -953,7 +1001,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       address,
       dataType: 'number',
       value: cached?.value ?? null,
-      quality: (cached?.quality as any) ?? 'uncertain',
+      quality: (cached?.quality as AdapterTag['quality']) ?? 'uncertain',
       timestamp: cached?.timestamp ?? new Date(),
     };
   }
@@ -1006,16 +1054,16 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
       asdu = buildIec104SingleCommandAsdu(conn.commonAddress, ioa, !!tag.value);
     }
 
-    const packet = buildIec104IFormat(conn.sendSeq++, conn.receiveSeq, asdu);
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
     conn.unconfirmedSent++;
     this.messagesProcessed++;
   }
 
   // ─── Discovery ─────────────────────────────────────────────────────
 
-  async discoverDevices(): Promise<any[]> {
+  async discoverDevices(): Promise<Record<string, unknown>[]> {
     this.context?.logger.info('Discovering Schneider devices via Modbus device identification');
-    const devices: any[] = [];
+    const devices: Record<string, unknown>[] = [];
 
     // Scan unit IDs 1-10 with Read Device Identification
     for (let unitId = 1; unitId <= 10; unitId++) {
@@ -1028,7 +1076,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
   // ─── Diagnostics ───────────────────────────────────────────────────
 
-  async getDeviceInfo(deviceId: string): Promise<any> {
+  async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
     const request = buildModbusReadDeviceId(unitId);
     this.messagesProcessed++;
@@ -1036,7 +1084,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     return { deviceId, vendor: 'Schneider Electric', models: SCHNEIDER_MODELS };
   }
 
-  async getDeviceDiagnostics(deviceId: string): Promise<any> {
+  async getDeviceDiagnostics(deviceId: string): Promise<Record<string, unknown>> {
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
 
     // Read M580 system bits (%S)
@@ -1070,7 +1118,7 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
   }
 
   /** Read SCADAPack system registers */
-  async readScadapackSystemRegisters(unitId: number): Promise<any> {
+  async readScadapackSystemRegisters(unitId: number): Promise<Record<string, unknown>> {
     const request = buildModbusReadRequest(
       unitId,
       MODBUS_FC.READ_HOLDING_REGISTERS,
@@ -1105,31 +1153,14 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
 
   // ─── Polling ───────────────────────────────────────────────────────
 
-  startPolling(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
+  startPollingByTier(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
     const interval = SCHNEIDER_POLLING[tier];
     if (interval === 0) {
-      // IEC 104 spontaneous — no polling, event-driven
-      this.context?.logger.info('IEC 104 spontaneous mode — no active polling');
+      // IEC 104 spontaneous - no polling, event-driven
+      this.context?.logger.info('IEC 104 spontaneous mode - no active polling');
       return 'iec104-spontaneous';
     }
-
-    const key = `poll_${tier}_${Date.now()}`;
-    const timer = setInterval(async () => {
-      try {
-        const tags = await this.readTags(addresses);
-        callback(tags);
-      } catch (err) {
-        this.context?.logger.error(`Schneider polling error (${tier}):`, err);
-        this.errorsCount++;
-      }
-    }, interval);
-    this.pollingTimers.set(key, timer);
-    return key;
-  }
-
-  stopPolling(key: string): void {
-    const timer = this.pollingTimers.get(key);
-    if (timer) { clearInterval(timer); this.pollingTimers.delete(key); }
+    return this.startPolling(addresses, interval, callback, tier);
   }
 
   // ─── Helpers ───────────────────────────────────────────────────────
@@ -1138,21 +1169,60 @@ export class SchneiderVendorAdapter extends BaseAdapter<'protocol'> implements P
     return this.iec104Connections.values().next().value as Iec104Connection | undefined;
   }
 
-  protected async getMetrics() {
+  }
+
+  /** Send IEC 104 clock synchronization */
+  async syncIec104Clock(time?: Date): Promise<void> {
+    const conn = this.getFirstIec104Connection();
+    if (!conn) return;
+
+    const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
+    conn.unconfirmedSent++;
+    this.messagesProcessed++;
+  }
+
+  /** Re-interrogate IEC 104 station */
+  async interrogateIec104Station(): Promise<void> {
+    const conn = this.getFirstIec104Connection();
+    if (!conn) return;
+
+    const asdu = buildIec104InterrogationAsdu(conn.commonAddress);
+    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
+    conn.unconfirmedSent++;
+    this.messagesProcessed++;
+  }
+
+  // ─── Polling ───────────────────────────────────────────────────────
+
+  startPollingByTier(addresses: string[], tier: keyof typeof SCHNEIDER_POLLING, callback: (tags: AdapterTag[]) => void): string {
+    const interval = SCHNEIDER_POLLING[tier];
+    if (interval === 0) {
+      // IEC 104 spontaneous - no polling, event-driven
+      this.context?.logger.info('IEC 104 spontaneous mode - no active polling');
+      return 'iec104-spontaneous';
+    }
+    return this.startPolling(addresses, interval, callback, tier);
+  }
+
+  // ─── Helpers ───────────────────────────────────────────────────────
+
+  private getFirstIec104Connection(): Iec104Connection | undefined {
+    return this.iec104Connections.values().next().value as Iec104Connection | undefined;
+  }
+
+  protected async getMetrics(): Promise<Record<string, unknown>> {
+    const base = await super.getMetrics();
     return {
+      ...base,
       connectionsActive: this.connections.size,
-      messagesProcessed: this.messagesProcessed,
-      errorsCount: this.errorsCount,
-      uptime: Date.now() - this.startTime,
-      cachedTags: this.tagCache.size,
       modbusConnections: this.modbusConnections.size,
       iec104Connections: this.iec104Connections.size,
       iec104SpontaneousItems: this.iec104SpontaneousBuffer.size,
-      activePollers: this.pollingTimers.size,
     };
   }
 
-  protected async getDiagnostics() {
+  protected async getDiagnostics(): Promise<Record<string, unknown>> {
     return {
       registerMap: SCHNEIDER_REGISTER_MAP,
       connectionParams: SCHNEIDER_CONNECTION_PARAMS,

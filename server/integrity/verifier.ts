@@ -72,8 +72,8 @@ export interface BatchStorageInterface {
  */
 export class ProofVerificationClient {
   private config: VerifierConfig;
-  private provider: ethers.JsonRpcProvider;
-  private contract: ethers.Contract;
+  private provider!: ethers.JsonRpcProvider;
+  private contract!: ethers.Contract;
   private proofCache: Map<string, ProofCache> = new Map();
   
   // Event Anchor contract ABI (read-only functions)
@@ -86,8 +86,6 @@ export class ProofVerificationClient {
 
   constructor(config: VerifierConfig) {
     this.config = {
-      proofCacheTtlMs: 24 * 60 * 60 * 1000, // 24 hours default
-      maxCacheSize: 10000, // 10k proofs max
       ...config
     };
 
@@ -220,7 +218,7 @@ export class ProofVerificationClient {
       }
 
       // Cache the proof
-      this.cacheProof(eventId, event.hash, batch.id, proof);
+      this.cacheProof(eventId, event.hash, Number(batch.id), proof);
 
       return proof;
 
@@ -251,7 +249,7 @@ export class ProofVerificationClient {
       }
 
       // Generate proof
-      const proof = MerkleTreeBuilder.generateProof(treeResult.tree, eventIndex);
+      const proof = MerkleTreeBuilder.generateProof(treeResult.tree, event.hash, eventIndex);
       if (!proof) {
         throw new Error('Failed to generate Merkle proof');
       }
