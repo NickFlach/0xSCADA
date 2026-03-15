@@ -7,6 +7,24 @@
  * Issue: #282 — services/ barrel export missing modules
  */
 
+// ── Verification Service ─────────────────────────────────────────────────────
+export * from './verification';
+
+// ── Governance Service ───────────────────────────────────────────────────────
+// Re-export selectively to avoid name conflicts with integrity module
+export * from './governance';
+
+// ── Integrity Service ────────────────────────────────────────────────────────
+// Some type names conflict with governance — use namespace import pattern
+export {
+  ParadoxResolver, paradoxResolver,
+  createValveFlowConstraint, createPressureTemperatureConstraint,
+  ExplainabilityMonitor, explainabilityMonitor,
+} from './integrity';
+
+// ── Vendors Service ──────────────────────────────────────────────────────────
+export * from './vendors';
+
 // ── Cache Service ────────────────────────────────────────────────────────────
 export * from './cache';
 export { getRedisClient, isRedisHealthy } from './cache';
@@ -17,6 +35,12 @@ export { complianceService } from './compliance';
 
 // ── Flux Service ─────────────────────────────────────────────────────────────
 export * from './flux';
+
+// ── SingularisPrime Integration ──────────────────────────────────────────────
+export * from './singularis-prime';
+
+// ── GR::LISTEN Alert Filtering ───────────────────────────────────────────────
+export * from './gr-listen';
 
 // ── Geometry Service ─────────────────────────────────────────────────────────
 export * from './geometry';
@@ -29,6 +53,14 @@ export { mlService } from './ml';
 // ── Ubiquity Service ─────────────────────────────────────────────────────────
 export * from './ubiquity';
 export { ubiquityService } from './ubiquity';
+
+// ── Optimization Service (PID Auto-Tuning & Decoherence Scheduler) ───────────
+export * from './optimization';
+export { optimizationService } from './optimization';
+
+// ── Statistical Process Control Service ──────────────────────────────────────
+export * from './spc';
+export { spcService } from './spc';
 
 // ── Layer 2 Rollup Service ───────────────────────────────────────────────────
 export * from './l2-rollup';
@@ -46,7 +78,9 @@ export async function initializeServices(): Promise<void> {
     { name: 'Geometry', service: () => import('./geometry').then(m => m.geometryService.initialize()) },
     { name: 'Machine Learning', service: () => import('./ml').then(m => m.mlService.initialize()) },
     { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
-    { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) }
+    { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
+    { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
+    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) }
   ];
 
   for (const { name, service } of services) {
@@ -122,6 +156,22 @@ export async function getServicesHealthStatus(): Promise<{
       } catch {
         return { healthy: false, message: 'L2 Rollup service not available' };
       }
+    },
+    optimization: async () => {
+      try {
+        const { optimizationService } = await import('./optimization');
+        return await optimizationService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'Optimization service not available' };
+      }
+    },
+    spc: async () => {
+      try {
+        const { spcService } = await import('./spc');
+        return await spcService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'SPC service not available' };
+      }
     }
   };
 
@@ -153,7 +203,9 @@ export const serviceRegistry = {
   geometry: () => import('./geometry'),
   ml: () => import('./ml'),
   ubiquity: () => import('./ubiquity'),
-  l2Rollup: () => import('./l2-rollup')
+  l2Rollup: () => import('./l2-rollup'),
+  optimization: () => import('./optimization'),
+  spc: () => import('./spc')
 } as const;
 
 export type ServiceName = keyof typeof serviceRegistry;
