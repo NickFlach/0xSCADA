@@ -1,6 +1,7 @@
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { getFluxPublisher } from "./services/flux";
+import { natsPublisher } from "./services/nats";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -113,6 +114,20 @@ class FieldSimulator {
           timestamp: new Date().toISOString(),
         });
       } catch { /* WebSocket not connected — that's fine */ }
+
+      // Publish to NATS for blockchain anchoring
+      try {
+        natsPublisher.publish("scada.events", {
+          asset: asset.nameOrTag,
+          event_type: eventType,
+          site_id: asset.siteId,
+          site_name: asset.siteName,
+          asset_type: asset.assetType,
+          timestamp: new Date().toISOString(),
+          payload: payload,
+          details: details,
+        });
+      } catch { /* NATS not connected — that's fine */ }
     } catch (error) {
       logError("❌ Failed to generate event", error as any);
     }
