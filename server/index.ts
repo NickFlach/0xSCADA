@@ -184,6 +184,10 @@ app.use((req, res, next) => {
       const { startFluxIntegration } = await import("./services/flux");
       startFluxIntegration();
 
+      // Connect to NATS for SCADA event publishing
+      const { natsPublisher } = await import("./services/nats");
+      await natsPublisher.connect();
+
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);
     },
