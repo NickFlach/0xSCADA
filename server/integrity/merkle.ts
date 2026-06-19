@@ -81,6 +81,10 @@ export class MerkleTreeBuilder {
       throw new Error(`Leaf not found in tree: ${leafData} at index ${leafIndex}`);
     }
 
+    // generateProofRecursive collects siblings top-down (root level first), but
+    // verifyProof folds from the leaf upward. Store siblings in leaf→root order.
+    proof.reverse();
+
     return {
       leaf: leafData,
       leafIndex,

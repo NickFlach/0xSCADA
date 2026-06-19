@@ -313,11 +313,18 @@ export const PIDCanvas: React.FC<PIDCanvasProps> = ({
 
         {/* Symbols */}
         {sortedSymbols.map(symbol => (
-          <g key={symbol.id} className="pid-symbol">
+          <g
+            key={symbol.id}
+            className="pid-symbol"
+            onClick={(e) => {
+              e.stopPropagation();
+              onSymbolClick?.(symbol.id);
+            }}
+            style={{ cursor: onSymbolClick ? 'pointer' : 'default' }}
+          >
             <SymbolRenderer
               symbol={symbol}
               selected={selectedId === symbol.id}
-              onClick={() => onSymbolClick?.(symbol.id)}
               values={values}
             />
           </g>

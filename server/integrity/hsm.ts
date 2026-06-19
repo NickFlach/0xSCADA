@@ -6,7 +6,7 @@
  * Part of the Dual-Time Control Plane (ADR-0021).
  */
 
-import { createSign, createVerify, generateKeyPairSync, KeyPairKeyObjectResult } from 'crypto';
+import { createSign, createVerify, generateKeyPairSync } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
 
@@ -66,7 +66,8 @@ export abstract class BaseSigner {
  * Uses Node.js crypto with local key storage
  */
 export class SoftwareSigner extends BaseSigner {
-  private keyPairs: Map<string, KeyPairKeyObjectResult> = new Map();
+  // Keys are generated with PEM encoding, so both halves are PEM strings.
+  private keyPairs: Map<string, { publicKey: string; privateKey: string }> = new Map();
   private keyStorage: string;
 
   constructor(config: HSMConfig) {
@@ -154,10 +155,9 @@ export class SoftwareSigner extends BaseSigner {
       throw new Error(`Key not found: ${keyId}`);
     }
 
-    return keyPair.publicKey.export({
-      type: 'spki',
-      format: 'pem',
-    }) as string;
+    // Keys are generated with PEM encoding, so publicKey is already an
+    // SPKI/PEM string (no KeyObject.export available).
+    return keyPair.publicKey;
   }
 
   async listKeys(): Promise<KeyInfo[]> {

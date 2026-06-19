@@ -16,13 +16,13 @@ import { z } from "zod";
 
 export const EventSchema = z.object({
   /** RFC 3339 timestamp when event occurred */
-  timestamp: z.string(),
+  timestamp: z.string().datetime(),
   /** Unique identifier for the event source (asset, device, or system) */
-  source_id: z.string(),
+  source_id: z.string().min(1),
   /** Event type/category (e.g., 'alarm', 'state_change', 'maintenance') */
-  event_type: z.string(),
+  event_type: z.string().min(1),
   /** SHA-256 hash of the event payload for integrity verification */
-  payload_hash: z.string(),
+  payload_hash: z.string().min(1),
   /** Monotonic sequence number for ordering within source */
   sequence_number: z.number().int().min(0),
   /** Optional: The actual event payload (not included in hash) */
@@ -101,6 +101,8 @@ export class EventBatcher extends EventEmitter {
   private flushTimer: NodeJS.Timeout | null = null;
   private metrics: EventBatcherMetrics;
   private currentBatchStartTime: number = 0;
+  /** Promise for an in-flight scheduled (threshold-triggered) flush, if any. */
+  private pendingFlush: Promise<EventBatch | null> | null = null;
 
   constructor(config: Partial<EventBatcherConfig> = {}) {
     super();
@@ -153,15 +155,21 @@ export class EventBatcher extends EventEmitter {
         this.currentBatchStartTime = Date.now();
       }
 
-      // Check if we should flush due to count threshold
+      // Check if we should flush due to count threshold. Flushing is deferred
+      // to a microtask (rather than awaited inline) so that a synchronous burst
+      // of ingest() calls can accumulate in the queue. This is what makes the
+      // backpressure cap (max_events_per_batch * 2) reachable: without the
+      // deferral the queue would drain at the count threshold before the burst
+      // could ever exceed the cap. The microtask still runs before any awaited
+      // caller observes metrics, keeping total_batches/queue_depth consistent.
       if (this.eventQueue.length >= this.config.max_events_per_batch) {
-        this.flushBatch("max_events");
-      }
-
-      // Check if we should flush due to size threshold
-      const currentBatchSize = this.estimateBatchSize();
-      if (currentBatchSize >= this.config.max_batch_size_bytes) {
-        this.flushBatch("max_size");
+        this.scheduleFlush("max_events");
+      } else {
+        // Check if we should flush due to size threshold
+        const currentBatchSize = this.estimateBatchSize();
+        if (currentBatchSize >= this.config.max_batch_size_bytes) {
+          this.scheduleFlush("max_size");
+        }
       }
 
       this.logger.debug("Event ingested", {
@@ -169,6 +177,16 @@ export class EventBatcher extends EventEmitter {
         source_id: validatedEvent.source_id,
         queue_depth: this.eventQueue.length,
       });
+
+      // Await any scheduled flush before returning. During a synchronous burst
+      // (e.g. Promise.all) the synchronous prefixes of every ingest() run first
+      // — letting the queue fill and backpressure engage — and only then do the
+      // awaits resolve and run the single coalesced flush. For sequential
+      // awaited callers this guarantees the flush (and its metrics updates) have
+      // completed by the time ingest() resolves.
+      if (this.pendingFlush) {
+        await this.pendingFlush;
+      }
 
       return true;
     } catch (error: any) {
@@ -181,6 +199,10 @@ export class EventBatcher extends EventEmitter {
    * Force flush current batch
    */
   public async flush(): Promise<EventBatch | null> {
+    // Let any scheduled threshold flush complete first so we don't race it.
+    if (this.pendingFlush) {
+      await this.pendingFlush;
+    }
     return this.flushBatch("manual");
   }
 
@@ -217,6 +239,23 @@ export class EventBatcher extends EventEmitter {
   }
 
   // ─── Private Methods ─────────────────────────────────────────────────────
+
+  /**
+   * Schedule a threshold-triggered flush on a microtask. Coalesces multiple
+   * triggers within the same synchronous burst into a single flush so the queue
+   * is drained exactly once after the burst settles.
+   */
+  private scheduleFlush(trigger: string): void {
+    if (this.pendingFlush) {
+      return;
+    }
+    this.pendingFlush = Promise.resolve().then(async () => {
+      this.pendingFlush = null;
+      return this.flushBatch(trigger);
+    });
+    // Avoid unhandled-rejection warnings; flushBatch already handles its errors.
+    this.pendingFlush.catch(() => {});
+  }
 
   private startBatchTimer(): void {
     if (this.flushTimer) {
@@ -375,20 +414,20 @@ export class EventBatcher extends EventEmitter {
     let index = targetIndex;
 
     while (hashes.length > 1) {
+      // Record the sibling of the current target node at this level.
+      // Even index → sibling is to the right (duplicate self if odd-length),
+      // odd index → sibling is to the left.
+      const isLeftChild = index % 2 === 0;
+      const siblingIndex = isLeftChild ? index + 1 : index - 1;
+      const sibling =
+        siblingIndex < hashes.length ? hashes[siblingIndex] : hashes[index];
+      proof.push(sibling);
+
+      // Build the next level up.
       const nextLevel: string[] = [];
-      
       for (let i = 0; i < hashes.length; i += 2) {
         const left = hashes[i];
         const right = hashes[i + 1] || hashes[i];
-        
-        // If our target is at this position, record the sibling
-        if (i === index || i + 1 === index) {
-          const sibling = (i === index) ? right : left;
-          if (sibling !== left || sibling !== right) {
-            proof.push(sibling);
-          }
-        }
-
         const combined = crypto.createHash("sha256")
           .update(left + right, "utf8")
           .digest("hex");
@@ -408,6 +447,13 @@ export class EventBatcher extends EventEmitter {
     proof: string[],
     expectedRoot: string
   ): boolean {
+    // The index must be addressable by a tree of this proof's height.
+    // A proof of length N covers at most 2^N leaves, so any index outside
+    // [0, 2^N) cannot correspond to this proof and must be rejected.
+    if (targetIndex < 0 || targetIndex >= Math.pow(2, proof.length)) {
+      return false;
+    }
+
     let hash = targetHash;
     let index = targetIndex;
 
@@ -442,7 +488,12 @@ export class EventBatcher extends EventEmitter {
    */
   public async shutdown(): Promise<void> {
     this.logger.info("EventBatcher shutting down");
-    
+
+    // Let any scheduled threshold flush settle before we tear down.
+    if (this.pendingFlush) {
+      await this.pendingFlush;
+    }
+
     if (this.flushTimer) {
       clearTimeout(this.flushTimer);
       this.flushTimer = null;
