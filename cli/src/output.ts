@@ -80,6 +80,9 @@ export const colors = {
   bold: (text: string) => (shouldUseColor() ? chalk.bold(text) : text),
   cyan: (text: string) => (shouldUseColor() ? chalk.cyan(text) : text),
   magenta: (text: string) => (shouldUseColor() ? chalk.magenta(text) : text),
+  green: (text: string) => (shouldUseColor() ? chalk.green(text) : text),
+  yellow: (text: string) => (shouldUseColor() ? chalk.yellow(text) : text),
+  red: (text: string) => (shouldUseColor() ? chalk.red(text) : text),
 };
 
 // Status indicators
@@ -174,11 +177,19 @@ export function outputSection(title: string): void {
   }
 }
 
-// Key-value output
-export function outputKeyValue(items: Array<{ key: string; value: string }>): void {
+// Key-value output. Accepts either {key, value} objects or [key, value] tuples.
+type KeyValueItem = { key: string; value: string } | [string, unknown];
+
+export function outputKeyValue(items: KeyValueItem[]): void {
+  const normalized = items.map((item) =>
+    Array.isArray(item)
+      ? { key: item[0], value: String(item[1]) }
+      : item
+  );
+
   if (isStructuredOutput()) {
     const obj: Record<string, string> = {};
-    items.forEach(({ key, value }) => {
+    normalized.forEach(({ key, value }) => {
       obj[key] = value;
     });
     const formatter = getFormatter();
@@ -186,8 +197,8 @@ export function outputKeyValue(items: Array<{ key: string; value: string }>): vo
     return;
   }
 
-  const maxKeyLength = Math.max(...items.map((i) => i.key.length));
-  items.forEach(({ key, value }) => {
+  const maxKeyLength = Math.max(...normalized.map((i) => i.key.length));
+  normalized.forEach(({ key, value }) => {
     const paddedKey = key.padEnd(maxKeyLength);
     console.log(`  ${colors.dim(paddedKey)}  ${value}`);
   });

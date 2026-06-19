@@ -7,10 +7,34 @@ import {
   outputKeyValue,
   outputError,
   outputSuccess,
-  outputWarning,
   setOutputOptions,
   colors,
 } from "../output.js";
+
+interface Alarm {
+  id: string;
+  severity?: string;
+  message?: string;
+  description?: string;
+  tagId?: string;
+  state?: string;
+  triggeredAt?: string;
+  timestamp?: string;
+}
+
+interface AlarmListResponse {
+  alarms?: Alarm[];
+}
+
+interface AlarmSummary {
+  critical?: number;
+  high?: number;
+  medium?: number;
+  low?: number;
+  info?: number;
+  total?: number;
+  unacknowledged?: number;
+}
 
 export function registerAlarmsCommand(program: Command): void {
   const alarms = program
@@ -32,17 +56,20 @@ export function registerAlarmsCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get("/api/alarms", {
-          params: {
-            ...(options.severity && { severity: options.severity }),
-            ...(options.site && { siteId: options.site }),
-            ...(options.state && { state: options.state }),
-            limit: parseInt(options.limit),
-          },
-        });
+        const query = new URLSearchParams();
+        if (options.severity) query.set("severity", options.severity);
+        if (options.site) query.set("siteId", options.site);
+        if (options.state) query.set("state", options.state);
+        query.set("limit", String(parseInt(options.limit)));
+        const response = await api.get<AlarmListResponse | Alarm[]>(
+          `/api/alarms?${query.toString()}`
+        );
         spinner?.succeed("Alarms retrieved");
 
-        const alarmList = response.data?.alarms ?? response.data ?? [];
+        const data = response.data;
+        const alarmList: Alarm[] = Array.isArray(data)
+          ? data
+          : data?.alarms ?? [];
 
         if (options.json) {
           output(alarmList);
@@ -141,10 +168,10 @@ export function registerAlarmsCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get("/api/alarms/summary");
+        const response = await api.get<AlarmSummary>("/api/alarms/summary");
         spinner?.succeed("Alarm summary retrieved");
 
-        const summary = response.data;
+        const summary = response.data ?? {};
 
         if (options.json) {
           output(summary);
