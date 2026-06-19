@@ -20,5 +20,11 @@ export const getBlockchainHealth = async (): Promise<BlockchainHealth> => {
 // Export service as expected by health/index.ts
 export const blockchainService = {
   isConnected: () => false,
+  /**
+   * Whether on-chain anchoring is enabled. Blockchain integration is optional
+   * and opt-in via configuration; disabled by default.
+   */
+  isEnabled: () =>
+    process.env.ENABLE_BLOCKCHAIN === 'true' || process.env.BLOCKCHAIN_ENABLED === 'true',
   getHealth: getBlockchainHealth
 };

@@ -144,8 +144,11 @@ export class EventIntegrityPipeline extends EventEmitter {
    * Initialize a new time window
    */
   private initializeWindow(timestamp?: number): void {
-    const now = timestamp || Date.now();
-    this.currentWindowStart = Math.floor(now / this.config.windowSizeMs) * this.config.windowSizeMs;
+    // Anchor the window to its first event's timestamp rather than the absolute
+    // clock grid. Clock-grid alignment made batch membership depend on where
+    // events fell relative to wall-clock boundaries, splitting a single logical
+    // burst non-deterministically when it straddled a boundary.
+    this.currentWindowStart = timestamp || Date.now();
     this.currentBatch = [];
   }
 

@@ -16,7 +16,7 @@ class NatsPublisher {
       this.nc = await connect({ servers: this.url });
       log(`✅ NATS connected to ${this.url}`, "nats");
     } catch (err) {
-      logError(`❌ NATS connection failed (${this.url})`, err as Error);
+      logError(err, `❌ NATS connection failed (${this.url})`);
     }
   }
 

@@ -2,6 +2,8 @@
  * Tests for [12.7] Configuration Management
  */
 import { describe, test, expect, beforeEach, afterEach } from 'vitest';
+import path from 'path';
+import os from 'os';
 import { loadConfig, dumpConfig, diffConfig, resetConfig, AppConfigSchema } from '../config-manager';
 
 describe('ConfigManager', () => {
@@ -9,10 +11,16 @@ describe('ConfigManager', () => {
 
   beforeEach(() => {
     resetConfig();
-    // Save env
-    for (const key of ['NODE_ENV', 'PORT', 'DB_HOST', 'JWT_SECRET', 'LOG_LEVEL']) {
+    // Save and clear env so each test starts from a known-empty baseline.
+    // The test runner injects NODE_ENV=test, which would otherwise leak into
+    // the "no env vars" defaults assertions.
+    for (const key of ['NODE_ENV', 'PORT', 'DB_HOST', 'JWT_SECRET', 'LOG_LEVEL', 'CONFIG_BASE_PATH']) {
       savedEnv[key] = process.env[key];
+      delete process.env[key];
     }
+    // Isolate loadConfig() from the repo's dev .env files (which set PORT etc.)
+    // by pointing the .env search at a directory with no env files.
+    process.env.CONFIG_BASE_PATH = path.join(os.tmpdir(), 'scada-config-test-no-env');
   });
 
   afterEach(() => {
