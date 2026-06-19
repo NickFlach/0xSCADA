@@ -46,6 +46,7 @@ export default defineConfig({
             "**/dist/**",
             "test/integration/**",
             "cli/__tests__/e2e/**",
+            "cli/__tests__/integration/**",
           ],
         },
       },

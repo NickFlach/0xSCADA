@@ -144,6 +144,29 @@ export class ApiClient {
     }
   }
 
+  // Generic HTTP helpers for ad-hoc endpoints not covered by typed methods
+  async get<T>(endpoint: string): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint);
+  }
+
+  async post<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: "POST",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async put<T>(endpoint: string, body?: unknown): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, {
+      method: "PUT",
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+  }
+
+  async delete<T>(endpoint: string): Promise<ApiResponse<T>> {
+    return this.request<T>(endpoint, { method: "DELETE" });
+  }
+
   // Health & Status
   async getHealth(): Promise<ApiResponse<HealthResponse>> {
     return this.request<HealthResponse>("/api/health");
@@ -292,6 +315,211 @@ export class ApiClient {
     return this.request("/api/controllers");
   }
 
+  // Blueprints - CM Types
+  async getCMTypes(): Promise<ApiResponse<CMType[]>> {
+    return this.request<CMType[]>("/api/blueprints/cm-types");
+  }
+
+  async getCMTypeByName(name: string): Promise<ApiResponse<CMType>> {
+    return this.request<CMType>(`/api/blueprints/cm-types/${encodeURIComponent(name)}`);
+  }
+
+  async createCMType(data: unknown): Promise<ApiResponse<CMType>> {
+    return this.request<CMType>("/api/blueprints/cm-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Unit Types
+  async getUnitTypes(): Promise<ApiResponse<UnitType[]>> {
+    return this.request<UnitType[]>("/api/blueprints/unit-types");
+  }
+
+  async createUnitType(data: unknown): Promise<ApiResponse<UnitType>> {
+    return this.request<UnitType>("/api/blueprints/unit-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Phase Types
+  async getPhaseTypes(): Promise<ApiResponse<PhaseType[]>> {
+    return this.request<PhaseType[]>("/api/blueprints/phase-types");
+  }
+
+  async createPhaseType(data: unknown): Promise<ApiResponse<PhaseType>> {
+    return this.request<PhaseType>("/api/blueprints/phase-types", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Blueprints - Import
+  async importBlueprints(data: unknown): Promise<
+    ApiResponse<{
+      success: boolean;
+      imported?: {
+        cmTypes: number;
+        cmInstances: number;
+        unitTypes: number;
+        unitInstances: number;
+        phaseTypes: number;
+      };
+      warnings?: string[];
+      errors?: string[];
+    }>
+  > {
+    return this.request("/api/blueprints/import", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  // Anchor Operations
+  async createAnchor(data: {
+    dataHash: string;
+    metadata?: Record<string, unknown>;
+  }): Promise<
+    ApiResponse<{
+      anchorId: string;
+      dataHash: string;
+      status: string;
+      batchId?: string;
+    }>
+  > {
+    return this.request("/api/anchor", {
+      method: "POST",
+      body: JSON.stringify(data),
+    });
+  }
+
+  async batchAnchor(hashes: string[]): Promise<
+    ApiResponse<{
+      batchId: string;
+      hashCount: number;
+      status: string;
+    }>
+  > {
+    return this.request("/api/anchor/batch", {
+      method: "POST",
+      body: JSON.stringify({ hashes }),
+    });
+  }
+
+  async verifyAnchor(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      valid: boolean;
+      dataHash: string;
+      merkleRoot?: string;
+      blockNumber?: number;
+      txHash?: string;
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}/verify`);
+  }
+
+  async getAnchorProof(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      dataHash: string;
+      merkleRoot: string;
+      leafIndex: number;
+      proof: string[];
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}/proof`);
+  }
+
+  async getAnchorStatus(anchorId: string): Promise<
+    ApiResponse<{
+      anchorId: string;
+      status: string;
+      dataHash: string;
+      batchId?: string;
+      merkleRoot?: string;
+      txHash?: string;
+      blockNumber?: number;
+      createdAt: string;
+      anchoredAt?: string;
+    }>
+  > {
+    return this.request(`/api/anchor/${anchorId}`);
+  }
+
+  // Tree Operations
+  async getTreeInfo(): Promise<
+    ApiResponse<{
+      root: string | null;
+      leafCount: number;
+      height: number;
+      lastUpdated?: string;
+    }>
+  > {
+    return this.request("/api/anchor/tree");
+  }
+
+  async getTreeRoot(): Promise<
+    ApiResponse<{
+      root: string | null;
+    }>
+  > {
+    return this.request("/api/anchor/tree/root");
+  }
+
+  async getPendingAnchors(): Promise<
+    ApiResponse<{
+      count: number;
+      events: Array<{
+        id: string;
+        eventType?: string;
+        type?: string;
+        assetId?: string;
+        receivedAt?: string;
+        timestamp?: string;
+      }>;
+    }>
+  > {
+    return this.request("/api/batch/pending");
+  }
+
+  async getBatchHistory(limit = 20): Promise<
+    ApiResponse<
+      Array<{
+        batchId: string;
+        eventCount: number;
+        merkleRoot: string;
+        txHash?: string;
+        anchoredAt?: string;
+      }>
+    >
+  > {
+    return this.request(`/api/batch/history?limit=${limit}`);
+  }
+
+  // Audit Operations
+  async auditAnchors(params: {
+    from?: string;
+    to?: string;
+  }): Promise<
+    ApiResponse<{
+      totalAnchors: number;
+      anchoredCount: number;
+      pendingCount: number;
+      failedCount: number;
+      batchCount: number;
+      avgEventsPerBatch?: number;
+      issues?: string[];
+    }>
+  > {
+    const queryParams = new URLSearchParams();
+    if (params.from) queryParams.set("from", params.from);
+    if (params.to) queryParams.set("to", params.to);
+    const query = queryParams.toString();
+    return this.request(`/api/anchor/audit${query ? `?${query}` : ""}`);
+  }
+
   // ==========================================================================
   // AGENTS (Issue #90: Governance Agent Management)
   // ==========================================================================
@@ -308,6 +536,11 @@ export class ApiClient {
 
   // Get agent state
   async getAgentState(agentId: string): Promise<ApiResponse<AgentState[]>> {
+    return this.request<AgentState[]>(`/api/agents/${agentId}/state`);
+  }
+
+  // Get agent configuration (state entries)
+  async getAgentConfig(agentId: string): Promise<ApiResponse<AgentState[]>> {
     return this.request<AgentState[]>(`/api/agents/${agentId}/state`);
   }
 
@@ -354,6 +587,11 @@ export class ApiClient {
   // List all proposals
   async getProposals(): Promise<ApiResponse<AgentProposal[]>> {
     return this.request<AgentProposal[]>("/api/agents/proposals");
+  }
+
+  // List proposals for a specific agent
+  async getAgentProposals(agentId: string): Promise<ApiResponse<AgentProposal[]>> {
+    return this.request<AgentProposal[]>(`/api/agents/${agentId}/proposals`);
   }
 
   // Get proposal by ID
@@ -498,6 +736,38 @@ export interface AgentAuditEntry {
   details: Record<string, unknown>;
   timestamp: string;
   signature?: string;
+}
+
+// Blueprint types
+export interface CMType {
+  id: string;
+  name: string;
+  inputs: unknown[];
+  outputs: unknown[];
+  inOuts: unknown[];
+  sourcePackage?: string;
+  createdAt?: string;
+}
+
+export interface UnitType {
+  id: string;
+  name: string;
+  description?: string;
+  variables?: unknown[];
+  createdAt?: string;
+}
+
+export interface PhaseType {
+  id: string;
+  name: string;
+  description?: string;
+  linkedModules?: unknown[];
+  inputs?: unknown[];
+  outputs?: unknown[];
+  inOuts?: unknown[];
+  internalValues?: unknown[];
+  sequences?: Record<string, unknown>;
+  createdAt?: string;
 }
 
 // Singleton instance
