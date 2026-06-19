@@ -18,7 +18,7 @@
     "azure-iot-device": "^1.17.8",
     "azure-iot-device-mqtt": "^1.15.6",
     "cli-table3": "^0.6.5",
-    "commander": "^15.0.0",
+    "commander": "^12.1.0",
     "dotenv": "^16.4.0",
     "drizzle-kit": "^0.31.9",
     "drizzle-orm": "^0.29.0",
