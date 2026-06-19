@@ -36,10 +36,17 @@ export default defineConfig({
             "{server,cli,shared}/**/*.{test,spec}.{ts,tsx}",
             "test/**/*.{test,spec}.{ts,tsx}",
           ],
-          // test/integration/** spawns a live server (DB-backed); it has its
-          // own `npm run test:integration` script and is excluded from the
-          // default in-process unit/integration run.
-          exclude: ["**/node_modules/**", "**/dist/**", "test/integration/**"],
+          // Excluded from the default unit run (they belong to the separate
+          // Integration Tests job): test/integration/** spawns a live
+          // DB-backed server; cli/__tests__/e2e/** spawns the CLI binary
+          // against a mock server (skipIf(isWindows), so Windows-skipped
+          // locally) and needs the full CLI surface.
+          exclude: [
+            "**/node_modules/**",
+            "**/dist/**",
+            "test/integration/**",
+            "cli/__tests__/e2e/**",
+          ],
         },
       },
     ],
