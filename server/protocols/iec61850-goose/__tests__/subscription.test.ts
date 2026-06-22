@@ -238,6 +238,7 @@ describe("GooseSubscription — simulated / test bit", () => {
     const sub = new GooseSubscription({ ...baseConfig, simulationPolicy: "reject" });
     const r = sub.validate(frameOf(canonicalFrame({ simulation: true })), 100);
     expect(r.accepted).toBe(false);
+    if (!r.accepted) expect(r.reason).toBe("simulation");
   });
 
   it("flags simulated frames when policy=accept-flagged", () => {

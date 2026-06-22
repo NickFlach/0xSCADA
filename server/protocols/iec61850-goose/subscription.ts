@@ -174,7 +174,7 @@ export class GooseSubscription {
 
     // 5. simulation/test bit
     if (pdu.simulation && this.config.simulationPolicy === "reject") {
-      return reject("nds_com", "simulation bit set and policy=reject");
+      return reject("simulation", "simulation bit set and policy=reject");
     }
 
     // 6. dataset shape

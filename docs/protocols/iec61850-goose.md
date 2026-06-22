@@ -86,7 +86,8 @@ on the existing `/metrics` endpoint:
 
 `reason` is a fixed enum (`parse_error`, `no_subscription`, `mac_mismatch`,
 `app_id_mismatch`, `dataset_shape`, `stnum_regression`, `sqnum_regression`,
-`ttl_expired`, `conf_rev_mismatch`, `nds_com`) to bound label cardinality.
+`ttl_expired`, `conf_rev_mismatch`, `simulation`, `nds_com`) to bound label
+cardinality.
 
 The `goose_round_trip_us` histogram (publisher `t` → local receive) is paired
 with wave-2b control-loop latency telemetry to validate the **sub-4 ms** budget

@@ -70,4 +70,5 @@ export type GooseRejectReason =
   | "sqnum_regression" // sqNum went backwards within same stNum
   | "ttl_expired" // previous message TTL elapsed (stale link)
   | "conf_rev_mismatch" // configuration revision changed unexpectedly
+  | "simulation" // simulation/test bit set and simulationPolicy="reject"
   | "nds_com"; // publisher signalled needsCommissioning
