@@ -323,6 +323,32 @@ export const certificationApprovals = pgTable("certification_approvals", {
   certIdIdx: index("idx_cert_approvals_cert_id").on(table.certificationId),
 }));
 
+// ─── Modbus Register Map (Issue #462: Modbus TCP Server Mode) ────────────────
+//
+// Per-site mapping of 0xSCADA tags to Modbus addresses so standard Modbus
+// masters can poll 0xSCADA. One row per (site, area, address). `area` is one of
+// coil | discreteInput | holdingRegister | inputRegister; `dataType` is one of
+// bool | uint16 | int16 | uint32 | int32 | float32 (see
+// server/protocols/modbus-server/register-map.ts for the runtime schema/codec).
+
+export const modbusRegisterMap = pgTable("modbus_register_map", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  siteId: varchar("site_id", { length: 64 }).notNull().references(() => sites.id, { onDelete: "cascade" }),
+  unitId: integer("unit_id").default(1).notNull(),
+  area: varchar("area", { length: 32 }).notNull(),
+  address: integer("address").notNull(),
+  tagId: varchar("tag_id", { length: 255 }).notNull(),
+  dataType: varchar("data_type", { length: 16 }).notNull(),
+  scale: real("scale"),
+  wordOrder: varchar("word_order", { length: 8 }),
+  readOnly: boolean("read_only").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  siteAreaAddressIdx: uniqueIndex("idx_modbus_register_map_site_area_address").on(table.siteId, table.unitId, table.area, table.address),
+  siteIdIdx: index("idx_modbus_register_map_site_id").on(table.siteId),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -330,6 +356,7 @@ export const insertSiteSchema = createInsertSchema(sites);
 export const insertAssetSchema = createInsertSchema(assets);
 export const insertEventAnchorSchema = createInsertSchema(eventAnchors);
 export const insertMaintenanceRecordSchema = createInsertSchema(maintenanceRecords);
+export const insertModbusRegisterMapSchema = createInsertSchema(modbusRegisterMap);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -339,3 +366,5 @@ export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;
 export type InsertSite = typeof sites.$inferInsert;
 export type InsertAsset = typeof assets.$inferInsert;
 export type InsertEventAnchor = typeof eventAnchors.$inferInsert;
+export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
+export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
