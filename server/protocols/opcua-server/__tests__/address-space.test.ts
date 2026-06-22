@@ -184,6 +184,27 @@ describe("buildAddressSpace", () => {
     expect(dup[0].dataType).toBe(UaDataType.Boolean);
   });
 
+  test("distinct (siteId, tagId) pairs never collide under dedup", () => {
+    // Regression: a naive `siteId + tagId` (or any single-delimiter) key can
+    // collide for boundary-ambiguous inputs. e.g. ("A/B","C") vs ("A","B/C").
+    // The escaped composite key must keep them as two separate variables.
+    const plan = buildAddressSpace(
+      [
+        { id: "A/B", name: "AB" },
+        { id: "A", name: "A" },
+      ],
+      [
+        { tagId: "C", siteId: "A/B", dataType: "number" },
+        { tagId: "B/C", siteId: "A", dataType: "number" },
+      ],
+    );
+    expect(plan.variables).toHaveLength(2);
+    const ids = plan.variables.map((v) => v.nodeId);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toContain("ns=1;s=Tags/A%2FB/C");
+    expect(ids).toContain("ns=1;s=Tags/A/B%2FC");
+  });
+
   test("de-duplicates sites by id", () => {
     const plan = buildAddressSpace(
       [
