@@ -18,6 +18,9 @@ import Intelligence from './pages/intelligence';
 import SecurityCompliance from './pages/security-compliance';
 import Integrity from './pages/integrity';
 
+// Slashing & Liveness Visualizer (issue #456)
+import SlashingVisualizer from './pages/SlashingVisualizer';
+
 const App: React.FC = () => {
   return (
     <div style={{ backgroundColor: '#0a0a0a', minHeight: '100vh', color: '#e5e5e5' }}>
@@ -64,6 +67,11 @@ const App: React.FC = () => {
               Integrity
             </a>
           </Link>
+          <Link href="/slashing">
+            <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
+              Slashing
+            </a>
+          </Link>
         </nav>
       </header>
 
@@ -79,7 +87,10 @@ const App: React.FC = () => {
           <Route path="/intelligence" component={Intelligence} />
           <Route path="/security" component={SecurityCompliance} />
           <Route path="/integrity" component={Integrity} />
-          
+
+          {/* Slashing & Liveness Visualizer (issue #456) */}
+          <Route path="/slashing" component={SlashingVisualizer} />
+
           {/* Catch-all route */}
           <Route>
             <div style={{ padding: 24 }}>
