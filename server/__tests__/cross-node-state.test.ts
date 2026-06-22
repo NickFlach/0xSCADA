@@ -343,6 +343,33 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     expect(body.code).toBe("no-registered-pubkey");
     await closeServer(proxy.server);
   });
+
+  it("rate-limits per-operator (returns 429 once the window is exhausted)", async () => {
+    // Acceptance criterion: requests are rate-limited per operator. The in-router
+    // sliding-window limit is 60 req/min keyed by operator (IP fallback here, since
+    // all requests originate from 127.0.0.1 they share one bucket). The 61st request
+    // in the window must be rejected with 429 — proving the limiter is actually wired,
+    // not just that the key extractor exists.
+    controls.tamper = false;
+    proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
+
+    let sawRateLimited = false;
+    let lastStatus = 0;
+    // 60 are allowed; the 61st should trip the limiter. Issue sequentially so the
+    // sliding-window counter is deterministic.
+    for (let i = 0; i < 61; i++) {
+      const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+      lastStatus = res.status;
+      await res.body?.cancel().catch(() => undefined);
+      if (res.status === 429) {
+        sawRateLimited = true;
+        break;
+      }
+    }
+    expect(sawRateLimited).toBe(true);
+    expect(lastStatus).toBe(429);
+    await closeServer(proxy.server);
+  });
 });
 
 // =============================================================================
