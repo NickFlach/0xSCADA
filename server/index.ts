@@ -184,6 +184,11 @@ app.use((req, res, next) => {
       const { startFluxIntegration } = await import("./services/flux");
       startFluxIntegration();
 
+      // Start MQTT Sparkplug B bridge (Issue #463) — no-op unless
+      // SPARKPLUG_BROKER_URL is configured.
+      const { startSparkplugBridge } = await import("./protocols/sparkplug-b");
+      startSparkplugBridge();
+
       // Connect to NATS for SCADA event publishing
       const { natsPublisher } = await import("./services/nats");
       await natsPublisher.connect();
