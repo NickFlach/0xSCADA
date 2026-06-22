@@ -1,34 +1,40 @@
 /**
  * Shared Modbus TCP Utilities
  * Issue #370: Extract duplicated Modbus framing from vendor adapters
+ *
+ * The function-code and exception-code constants now live in the shared,
+ * protocol-agnostic module `@shared/protocols/modbus-constants` so they cannot
+ * drift from the Modbus TCP server's copy (issue #462). They are re-exported
+ * here under their original names — including the legacy "slave" exception
+ * names — so existing vendor-adapter imports keep working unchanged.
  */
 
-/** Standard Modbus function codes */
-export const MODBUS_FC = {
-  READ_COILS: 0x01,
-  READ_DISCRETE_INPUTS: 0x02,
-  READ_HOLDING_REGISTERS: 0x03,
-  READ_INPUT_REGISTERS: 0x04,
-  WRITE_SINGLE_COIL: 0x05,
-  WRITE_SINGLE_REGISTER: 0x06,
-  WRITE_MULTIPLE_COILS: 0x0F,
-  WRITE_MULTIPLE_REGISTERS: 0x10,
-  READ_EXCEPTION_STATUS: 0x07,
-  DIAGNOSTICS: 0x08,
-  READ_DEVICE_IDENTIFICATION: 0x2B,
-} as const;
+import {
+  MODBUS_FUNCTION_CODES,
+  MODBUS_EXCEPTION_CODES,
+} from '@shared/protocols/modbus-constants';
 
-/** Modbus exception codes */
+/**
+ * Standard Modbus function codes.
+ * Re-exported alias of the shared {@link MODBUS_FUNCTION_CODES}.
+ */
+export const MODBUS_FC = MODBUS_FUNCTION_CODES;
+
+/**
+ * Modbus exception codes, using the legacy "slave" naming the vendor adapters
+ * were built against. Values come from the shared {@link MODBUS_EXCEPTION_CODES}
+ * (where 0x04/0x06 use the modern "server" names).
+ */
 export const MODBUS_EXCEPTION = {
-  ILLEGAL_FUNCTION: 0x01,
-  ILLEGAL_DATA_ADDRESS: 0x02,
-  ILLEGAL_DATA_VALUE: 0x03,
-  SLAVE_DEVICE_FAILURE: 0x04,
-  ACKNOWLEDGE: 0x05,
-  SLAVE_DEVICE_BUSY: 0x06,
-  MEMORY_PARITY_ERROR: 0x08,
-  GATEWAY_PATH_UNAVAILABLE: 0x0A,
-  GATEWAY_TARGET_FAILED: 0x0B,
+  ILLEGAL_FUNCTION: MODBUS_EXCEPTION_CODES.ILLEGAL_FUNCTION,
+  ILLEGAL_DATA_ADDRESS: MODBUS_EXCEPTION_CODES.ILLEGAL_DATA_ADDRESS,
+  ILLEGAL_DATA_VALUE: MODBUS_EXCEPTION_CODES.ILLEGAL_DATA_VALUE,
+  SLAVE_DEVICE_FAILURE: MODBUS_EXCEPTION_CODES.SERVER_DEVICE_FAILURE,
+  ACKNOWLEDGE: MODBUS_EXCEPTION_CODES.ACKNOWLEDGE,
+  SLAVE_DEVICE_BUSY: MODBUS_EXCEPTION_CODES.SERVER_DEVICE_BUSY,
+  MEMORY_PARITY_ERROR: MODBUS_EXCEPTION_CODES.MEMORY_PARITY_ERROR,
+  GATEWAY_PATH_UNAVAILABLE: MODBUS_EXCEPTION_CODES.GATEWAY_PATH_UNAVAILABLE,
+  GATEWAY_TARGET_FAILED: MODBUS_EXCEPTION_CODES.GATEWAY_TARGET_FAILED,
 } as const;
 
 let modbusTransactionId = 0;

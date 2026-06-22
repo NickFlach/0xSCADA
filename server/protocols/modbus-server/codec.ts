@@ -21,26 +21,40 @@
  *     [8..]  Function-specific data
  */
 
-/** Standard Modbus function codes supported by this server. */
+import {
+  MODBUS_EXCEPTION_CODES,
+  MODBUS_FUNCTION_CODES,
+} from "@shared/protocols/modbus-constants";
+
+/**
+ * Standard Modbus function codes supported by this server — the subset of the
+ * shared {@link MODBUS_FUNCTION_CODES} this server implements. Sourcing the
+ * values from the shared module keeps them in lock-step with the vendor-side
+ * `MODBUS_FC` (issue #370 / #462).
+ */
 export const FunctionCode = {
-  READ_COILS: 0x01,
-  READ_DISCRETE_INPUTS: 0x02,
-  READ_HOLDING_REGISTERS: 0x03,
-  READ_INPUT_REGISTERS: 0x04,
-  WRITE_SINGLE_COIL: 0x05,
-  WRITE_SINGLE_REGISTER: 0x06,
-  WRITE_MULTIPLE_COILS: 0x0f,
-  WRITE_MULTIPLE_REGISTERS: 0x10,
+  READ_COILS: MODBUS_FUNCTION_CODES.READ_COILS,
+  READ_DISCRETE_INPUTS: MODBUS_FUNCTION_CODES.READ_DISCRETE_INPUTS,
+  READ_HOLDING_REGISTERS: MODBUS_FUNCTION_CODES.READ_HOLDING_REGISTERS,
+  READ_INPUT_REGISTERS: MODBUS_FUNCTION_CODES.READ_INPUT_REGISTERS,
+  WRITE_SINGLE_COIL: MODBUS_FUNCTION_CODES.WRITE_SINGLE_COIL,
+  WRITE_SINGLE_REGISTER: MODBUS_FUNCTION_CODES.WRITE_SINGLE_REGISTER,
+  WRITE_MULTIPLE_COILS: MODBUS_FUNCTION_CODES.WRITE_MULTIPLE_COILS,
+  WRITE_MULTIPLE_REGISTERS: MODBUS_FUNCTION_CODES.WRITE_MULTIPLE_REGISTERS,
 } as const;
 
 export type FunctionCode = (typeof FunctionCode)[keyof typeof FunctionCode];
 
-/** Modbus exception codes (set in responses with the high bit of the FC set). */
+/**
+ * Modbus exception codes this server can return (set in responses with the high
+ * bit of the FC set) — the subset of the shared {@link MODBUS_EXCEPTION_CODES}
+ * it produces.
+ */
 export const ExceptionCode = {
-  ILLEGAL_FUNCTION: 0x01,
-  ILLEGAL_DATA_ADDRESS: 0x02,
-  ILLEGAL_DATA_VALUE: 0x03,
-  SERVER_DEVICE_FAILURE: 0x04,
+  ILLEGAL_FUNCTION: MODBUS_EXCEPTION_CODES.ILLEGAL_FUNCTION,
+  ILLEGAL_DATA_ADDRESS: MODBUS_EXCEPTION_CODES.ILLEGAL_DATA_ADDRESS,
+  ILLEGAL_DATA_VALUE: MODBUS_EXCEPTION_CODES.ILLEGAL_DATA_VALUE,
+  SERVER_DEVICE_FAILURE: MODBUS_EXCEPTION_CODES.SERVER_DEVICE_FAILURE,
 } as const;
 
 export type ExceptionCode = (typeof ExceptionCode)[keyof typeof ExceptionCode];
