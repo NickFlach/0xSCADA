@@ -12,6 +12,10 @@ import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewa
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
 import { registry, metricsHandler } from '../metrics';
+import type { Request, Response } from 'express';
+// Tick-aware scheduler (#458): surface schedulingMode in /health and append
+// blueprint tick telemetry to /metrics.
+import { applyScheduler, createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -130,6 +134,12 @@ healthManager.registerSimple(
   false, // Optional, depends on configuration
 );
 
+// 9. Tick-aware scheduler (#458) — reports schedulingMode (realtime|fallback).
+//    Applied once at import time so the single startup warning fires during
+//    boot and the mode is fixed before the first /health scrape.
+applyScheduler();
+healthManager.register(createSchedulerCheck());
+
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
   healthStatusGauge.set(result.healthy ? 1 : 0);
@@ -144,5 +154,15 @@ healthManager.onCheckComplete((result) => {
 // ── Export the pre-built router ──────────────────────────────────────────────
 export const healthRouter = healthManager.createRouter();
 
-// Expose Prometheus metrics alongside health routes so /metrics works
-healthRouter.get('/metrics', metricsHandler);
+// Expose Prometheus metrics alongside health routes so /metrics works.
+// Wrap the shared handler so blueprint tick telemetry (#458) is appended to the
+// same scrape. The shared metrics use the `scada_` prefix; the blueprint tick
+// gauges/histogram carry their authoritative un-prefixed / `oxscada_` names, so
+// both coexist in one exposition document.
+healthRouter.get('/metrics', (_req: Request, res: Response) => {
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(`${registry.metrics()}\n${exposeBlueprintMetrics()}`);
+});
+// Keep the original handler referenced so it remains available for callers that
+// import it directly (and to avoid an unused-import lint when wrapped above).
+export { metricsHandler };
