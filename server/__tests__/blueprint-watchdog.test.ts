@@ -266,9 +266,34 @@ describe("SafeStateController — operator resume", () => {
     expect(runtime.resumed).toBe(true);
     const exitEvent = anchor.events.find((e) => e.eventType === "SafeStateExited");
     expect(exitEvent).toBeDefined();
+    expect(exitEvent?.severity).toBe("WARNING");
     expect(exitEvent?.data.operator).toBe("operator-a");
     const exitAudit = audit.entries.find((e) => e.transition === "EXITED");
     expect(exitAudit?.operator).toBe("operator-a");
+    // The EXITED audit row carries the safe state that had been applied and the
+    // configured budget, so the audit trail is self-describing without joins.
+    expect(exitAudit?.safeState).toBe("hold-last");
+    expect(exitAudit?.tickBudgetMs).toBe(10);
+    expect(exitAudit?.reason).toBe("condition cleared");
+  });
+
+  it("clears trip metadata from status on resume", async () => {
+    const ctl = new SafeStateController(new FakeRuntime(), makeConfig(), new FakeAnchor(), new FakeAudit());
+    await ctl.enterSafeState("trip", 4);
+    const tripped = ctl.getStatus();
+    expect(tripped.reason).toBe("trip");
+    expect(tripped.enteredAt).toBeTruthy();
+    expect(tripped.consecutiveMisses).toBe(4);
+    expect(tripped.anchorHash).toBeTruthy();
+
+    const resumed = await ctl.resume("operator-a");
+    // A resumed blueprint must not advertise stale trip metadata, or the UI
+    // would keep showing details from the previous (now-cleared) safe state.
+    expect(resumed.runState).toBe("RUNNING");
+    expect(resumed.reason).toBeUndefined();
+    expect(resumed.enteredAt).toBeUndefined();
+    expect(resumed.consecutiveMisses).toBeUndefined();
+    expect(resumed.anchorHash).toBeUndefined();
   });
 
   it("Watchdog.resume clears the miss counter and re-arms", async () => {
@@ -284,6 +309,45 @@ describe("SafeStateController — operator resume", () => {
     await wd.observeTick(20);
     const obs = await wd.observeTick(20);
     expect(obs.tripped).toBe(true);
+  });
+});
+
+// ─── Registry ────────────────────────────────────────────────────────────────
+
+describe("WatchdogRegistry", () => {
+  it("tracks, fetches and removes per-blueprint watchdogs", async () => {
+    const registry = new WatchdogRegistry(new FakeAnchor(), new FakeAudit());
+    const rt = new FakeRuntime("bp-a", "site-a");
+    const wd = registry.register(rt, makeConfig({ consecutiveMissesBeforeSafeState: 1 }));
+    expect(registry.get("bp-a")).toBe(wd);
+    expect(registry.getAllStatuses()).toHaveLength(1);
+    expect(registry.getSafeStateStatuses()).toHaveLength(0);
+
+    await wd.observeTick(999); // trip (N=1)
+    expect(registry.getSafeStateStatuses()).toHaveLength(1);
+
+    registry.unregister("bp-a");
+    expect(registry.get("bp-a")).toBeUndefined();
+    expect(registry.getAllStatuses()).toHaveLength(0);
+  });
+
+  it("surfaces a recipe safe state as badge-renderable status", async () => {
+    const registry = new WatchdogRegistry(new FakeAnchor(), new FakeAudit());
+    const rt = new FakeRuntime("bp-recipe", "site-r");
+    const action: SafeStateAction = { recipe: "purge-and-vent" };
+    const wd = registry.register(
+      rt,
+      makeConfig({ consecutiveMissesBeforeSafeState: 1, safeState: action }),
+    );
+    await wd.observeTick(999);
+
+    expect(rt.appliedRecipe).toBe("purge-and-vent");
+    const [status] = registry.getSafeStateStatuses();
+    expect(status.runState).toBe("SAFE_STATE");
+    // The recipe object must survive serialisation intact so the badge can
+    // render `Safe recipe: purge-and-vent`.
+    expect(status.safeState).toEqual({ recipe: "purge-and-vent" });
+    expect(describeSafeState(status.safeState)).toMatch(/purge-and-vent/);
   });
 });
 
