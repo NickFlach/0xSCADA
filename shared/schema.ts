@@ -32,6 +32,7 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod"; // #459: safe-state config validation schemas
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -322,6 +323,67 @@ export const certificationApprovals = pgTable("certification_approvals", {
 }, (table) => ({
   certIdIdx: index("idx_cert_approvals_cert_id").on(table.certificationId),
 }));
+
+// ─── Blueprint Safe-State (#459) ─────────────────────────────────────────────
+// Watchdog & Safe-State Fallback. A blueprint's control tick has a per-tick
+// budget; if it is exceeded for N consecutive ticks the watchdog halts the
+// blueprint and applies a pre-declared safe state, anchoring a CRITICAL
+// `SafeStateEntered` event. Re-entry to RUNNING requires explicit operator
+// action. These additions are append-only to avoid cross-issue merge conflicts.
+
+/**
+ * Pre-declared safe state a blueprint falls back to on a watchdog trip.
+ *  - `hold-last`  : freeze all outputs at their last commanded value.
+ *  - `force-zero` : drive all outputs to zero / de-energised.
+ *  - { recipe }   : load a named, previously-validated safe recipe.
+ */
+export const safeStateActionSchema = z.union([
+  z.literal("hold-last"),
+  z.literal("force-zero"),
+  z.object({ recipe: z.string().min(1) }),
+]);
+export type SafeStateAction = z.infer<typeof safeStateActionSchema>;
+
+/** Per-blueprint watchdog / safe-state configuration. */
+export const safeStateConfigSchema = z.object({
+  /** Whether the watchdog is armed for this blueprint. */
+  enabled: z.boolean().default(true),
+  /** Per-tick wall-clock budget in milliseconds. */
+  tickBudgetMs: z.number().int().positive(),
+  /** Consecutive over-budget ticks tolerated before the safe state is applied. */
+  consecutiveMissesBeforeSafeState: z.number().int().positive(),
+  /** The pre-declared safe state to apply on a trip. */
+  safeState: safeStateActionSchema,
+});
+export type SafeStateConfig = z.infer<typeof safeStateConfigSchema>;
+
+// Persisted record of every safe-state entry / exit transition (audit trail).
+export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  blueprintId: varchar("blueprint_id", { length: 64 }).notNull(),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  // "ENTERED" when the watchdog trips, "EXITED" when an operator resumes.
+  transition: varchar("transition", { length: 16 }).notNull(),
+  // Serialized SafeStateAction that was applied.
+  safeState: jsonb("safe_state").notNull(),
+  tickBudgetMs: integer("tick_budget_ms").notNull(),
+  consecutiveMisses: integer("consecutive_misses"),
+  // Operator who acknowledged / resumed (null for an automatic ENTERED event).
+  operator: varchar("operator", { length: 255 }),
+  reason: text("reason"),
+  // Hash anchored to the canonical anchor backend for this transition.
+  anchorHash: varchar("anchor_hash", { length: 255 }),
+  anchorTxHash: varchar("anchor_tx_hash", { length: 255 }),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  blueprintIdIdx: index("idx_safe_state_log_blueprint_id").on(table.blueprintId),
+  transitionIdx: index("idx_safe_state_log_transition").on(table.transition),
+  createdAtIdx: index("idx_safe_state_log_created_at").on(table.createdAt),
+}));
+
+export type BlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferSelect;
+export type InsertBlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferInsert;
 
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
