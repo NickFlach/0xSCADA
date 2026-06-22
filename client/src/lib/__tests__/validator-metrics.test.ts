@@ -180,18 +180,34 @@ describe('aggregateThroughput', () => {
   });
 
   it('buckets anchor events per minute and computes rolling rates', () => {
+    // Bucketing floors each timestamp to its absolute UTC minute. NOW is a minute
+    // boundary, so -20s and -30s straddle it into different minutes; these three
+    // events therefore land in three distinct minute buckets.
     const events = [
-      anchor(NOW - 30_000, 4, 400), // bucket A
-      anchor(NOW - 20_000, 6, 600), // bucket A (same minute)
-      anchor(NOW - 90_000, 5, 500), // bucket B (one minute earlier)
+      anchor(NOW - 30_000, 4, 400),
+      anchor(NOW - 20_000, 6, 600),
+      anchor(NOW - 90_000, 5, 500),
     ];
     const out = aggregateThroughput(events, NOW);
-    // Two distinct minute buckets, oldest first.
-    expect(out.series).toHaveLength(2);
+    // Three distinct minute buckets, emitted oldest first.
+    expect(out.series).toHaveLength(3);
     expect(out.series[0].bucketStart).toBeLessThan(out.series[1].bucketStart);
+    expect(out.series[1].bucketStart).toBeLessThan(out.series[2].bucketStart);
+    // Each event's tx count lands in its own bucket.
+    expect(out.series.map((p) => p.txs).sort((a, b) => a - b)).toEqual([4, 5, 6]);
     // Total txs = 4+6+5 = 15 over a 10-minute window → 1.5 txs/min.
     expect(out.txsPerMin).toBeCloseTo(1.5);
     expect(out.bytesPerMin).toBeCloseTo(150);
+  });
+
+  it('groups multiple events that share an absolute minute bucket', () => {
+    // A round minute boundary; both events fall strictly inside the same minute.
+    const base = 1_700_000_040_000; // divisible by 60_000
+    const events = [anchor(base + 5_000, 4, 400), anchor(base + 50_000, 6, 600)];
+    const out = aggregateThroughput(events, base + 55_000);
+    expect(out.series).toHaveLength(1);
+    expect(out.series[0].txs).toBe(10);
+    expect(out.series[0].bytes).toBe(1000);
   });
 
   it('excludes events outside the window and non-anchor events', () => {
