@@ -205,7 +205,7 @@ router.post('/', async (req, res) => {
       // The switch itself succeeded; failing to anchor the audit event must not
       // silently lose the record. Log loudly and still report the switch, but
       // flag that the audit anchor did not land.
-      logError('Anchor-backend switch audit event failed to anchor', anchorErr as Error);
+      logError(anchorErr, 'Anchor-backend switch audit event failed to anchor');
     }
 
     const entry: SwitchHistoryEntry = {
@@ -230,7 +230,7 @@ router.post('/', async (req, res) => {
       projection,
     });
   } catch (err) {
-    logError('Failed to commit anchor-backend switch', err as Error);
+    logError(err, 'Failed to commit anchor-backend switch');
     return res.status(500).json({ error: 'Failed to commit anchor-backend switch' });
   }
 });

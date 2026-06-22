@@ -93,6 +93,16 @@ describe('projectSwitch', () => {
     expect(p.effectiveConfirmationLatencyMs).toBe(slowest);
   });
 
+  it('effective latency tracks the slower backend even when node is overridden slower', () => {
+    // Guards against hardcoding l2 as "the slow one": make node slower via override.
+    const p = projectSwitch({
+      backend: 'both',
+      eventsPerMinute: 100,
+      profiles: { node: { costPerEventUsd: 0, confirmationLatencyMs: 99_000 } },
+    });
+    expect(p.effectiveConfirmationLatencyMs).toBe(99_000);
+  });
+
   it('respects profile overrides', () => {
     const p = projectSwitch({
       backend: 'l2',
