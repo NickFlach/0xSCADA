@@ -40,6 +40,7 @@ import { intelligenceRoutes } from "./routes/intelligence";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
+import { nodeRoutes } from "./routes/nodes"; // #454: cross-node state queries
 import { getFluxPublisher } from "./services/flux";
 // import { (null as any) } from "./websocket";
 import { tagStreamServer } from "./websocket/tag-stream";
@@ -71,7 +72,8 @@ export async function registerRoutes(
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
-  
+  app.use("/api/nodes", nodeRoutes); // #454: GET /api/nodes/:id/state/:key
+
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {
     req.url = "/outputs";

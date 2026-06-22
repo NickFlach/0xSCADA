@@ -2,6 +2,7 @@
  * Storage/Database module with SQLite fallback for development
  */
 import { drizzle as drizzlePostgres } from 'drizzle-orm/node-postgres';
+import { and, eq } from 'drizzle-orm'; // #454: validator registry queries
 import { Client } from 'pg';
 import { Database } from 'sqlite3';
 import * as schema from '@shared/schema';
@@ -105,6 +106,87 @@ export const closeDatabase = async () => {
     sqliteClient = null;
   }
   db = null;
+};
+
+// ─── Validator Registry Access (#454: Cross-Node State Queries) ────────────────
+// DB access goes through this module per repo conventions. These helpers resolve
+// a validator node and its active verification key for the /state/:key proxy.
+// In the SQLite dev stub the wrapper returns no rows; the Postgres path uses the
+// Drizzle `validator_nodes` / `validator_pubkeys` tables. The route layer treats
+// a null result as "unknown validator" / "no registered pubkey" respectively.
+
+export interface ValidatorNodeRecord {
+  id: string;
+  name: string;
+  rpcUrl: string;
+  operatorId?: string | null;
+  region?: string | null;
+  enabled: boolean;
+}
+
+export interface ValidatorPubkeyRecord {
+  nodeId: string;
+  algorithm: string;
+  publicKeyPem: string;
+  keyId?: string | null;
+  active: boolean;
+}
+
+/**
+ * Resolve a validator node by its registry id, or null if unknown.
+ * Uses the Drizzle Postgres client when available; falls back to null under the
+ * SQLite dev stub (which has no real query support).
+ */
+export const getValidatorNode = async (id: string): Promise<ValidatorNodeRecord | null> => {
+  const database = getDatabase();
+  if (dbType !== 'postgres') {
+    // Development SQLite stub has no live query layer (#454 INTEGRATION: seed
+    // validator registry once SQLite parity lands).
+    return null;
+  }
+  const { validatorNodes } = schema;
+  const rows = await database
+    .select()
+    .from(validatorNodes)
+    .where(eq(validatorNodes.id, id))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    id: row.id,
+    name: row.name,
+    rpcUrl: row.rpcUrl,
+    operatorId: row.operatorId,
+    region: row.region,
+    enabled: row.enabled,
+  };
+};
+
+/**
+ * Resolve the active verification public key for a validator, or null if none.
+ */
+export const getActiveValidatorPubkey = async (
+  nodeId: string,
+): Promise<ValidatorPubkeyRecord | null> => {
+  const database = getDatabase();
+  if (dbType !== 'postgres') {
+    return null;
+  }
+  const { validatorPubkeys } = schema;
+  const rows = await database
+    .select()
+    .from(validatorPubkeys)
+    .where(and(eq(validatorPubkeys.nodeId, nodeId), eq(validatorPubkeys.active, true)))
+    .limit(1);
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    nodeId: row.nodeId,
+    algorithm: row.algorithm,
+    publicKeyPem: row.publicKeyPem,
+    keyId: row.keyId,
+    active: row.active,
+  };
 };
 
 // Export storage object as expected by health/index.ts

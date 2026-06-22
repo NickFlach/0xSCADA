@@ -323,6 +323,45 @@ export const certificationApprovals = pgTable("certification_approvals", {
   certIdIdx: index("idx_cert_approvals_cert_id").on(table.certificationId),
 }));
 
+// ─── Validator Nodes & Pubkeys (#454: Cross-Node State Queries) ───────────────
+// Additive — these tables back the per-validator /state/:key proxy so the server
+// can resolve a validator's RPC endpoint and verify its signed responses against
+// a registered public key before returning them to the operator.
+
+export const validatorNodes = pgTable("validator_nodes", {
+  // Human/operator-facing node id used in the URL (e.g. "validator-2").
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  // Base URL of the oxscada RPC endpoint, e.g. "http://10.0.0.12:8645".
+  rpcUrl: varchar("rpc_url", { length: 512 }).notNull(),
+  // Owning operator — used as the rate-limit bucket key.
+  operatorId: varchar("operator_id", { length: 255 }),
+  region: varchar("region", { length: 64 }),
+  enabled: boolean("enabled").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  operatorIdIdx: index("idx_validator_nodes_operator_id").on(table.operatorId),
+  enabledIdx: index("idx_validator_nodes_enabled").on(table.enabled),
+}));
+
+export const validatorPubkeys = pgTable("validator_pubkeys", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  nodeId: varchar("node_id", { length: 64 }).notNull().references(() => validatorNodes.id, { onDelete: "cascade" }),
+  // Signature scheme of the registered key. Default is ed25519 (node:crypto).
+  algorithm: varchar("algorithm", { length: 32 }).default("ed25519").notNull(),
+  // PEM-encoded SPKI public key (one row per active/rotated key).
+  publicKeyPem: text("public_key_pem").notNull(),
+  // Optional short fingerprint to identify the key the validator signed with.
+  keyId: varchar("key_id", { length: 128 }),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+}, (table) => ({
+  nodeIdIdx: index("idx_validator_pubkeys_node_id").on(table.nodeId),
+  nodeActiveIdx: index("idx_validator_pubkeys_node_active").on(table.nodeId, table.active),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -330,6 +369,8 @@ export const insertSiteSchema = createInsertSchema(sites);
 export const insertAssetSchema = createInsertSchema(assets);
 export const insertEventAnchorSchema = createInsertSchema(eventAnchors);
 export const insertMaintenanceRecordSchema = createInsertSchema(maintenanceRecords);
+export const insertValidatorNodeSchema = createInsertSchema(validatorNodes);
+export const insertValidatorPubkeySchema = createInsertSchema(validatorPubkeys);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -339,3 +380,7 @@ export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;
 export type InsertSite = typeof sites.$inferInsert;
 export type InsertAsset = typeof assets.$inferInsert;
 export type InsertEventAnchor = typeof eventAnchors.$inferInsert;
+export type ValidatorNode = typeof validatorNodes.$inferSelect;
+export type ValidatorPubkey = typeof validatorPubkeys.$inferSelect;
+export type InsertValidatorNode = typeof validatorNodes.$inferInsert;
+export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
