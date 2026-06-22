@@ -249,7 +249,19 @@ function topoSort(
       if (!producer) continue; // operand is an external input / unwritten tag
       // A stateful node reading its own output uses last tick's state — not an edge.
       if (selfStateful && producer.id === node.id) continue;
-      if (producer.id === node.id) continue; // self-loop on stateless: handled as cycle below if mutual
+      // A STATELESS node reading its own output is a direct combinational
+      // self-cycle (e.g. X = NOT(X)). Nothing breaks the loop, so it would
+      // silently read its own previous-tick value — an undeclared implicit
+      // delay. Reject it for the same reason indirect stateless feedback is
+      // rejected below; feedback must be modelled through a stateful op.
+      if (producer.id === node.id) {
+        throw new BlueprintCompileError(
+          `node "${node.id}" feeds its own stateless output back into itself ` +
+            `(combinational self-cycle on tag "${operand.tag}"). ` +
+            `Model feedback with a stateful op (LATCH/TON) instead.`,
+          node.id,
+        );
+      }
       if (seenProducers.has(producer.id)) continue;
       seenProducers.add(producer.id);
       dependents.get(producer.id)!.push(node.id);

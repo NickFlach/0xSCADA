@@ -287,6 +287,21 @@ describe("compileBlueprint — topological ordering", () => {
     ).toThrow(/combinational cycle/);
   });
 
+  it("rejects a DIRECT stateless self-cycle (X = NOT(X))", () => {
+    // A stateless node reading its own output is a combinational self-loop: it
+    // would otherwise silently read its own previous-tick value (an undeclared
+    // implicit delay). The compiler rejects it, mirroring the indirect-feedback
+    // boundary above — only a *stateful* op may read its own output.
+    expect(() =>
+      compileBlueprint(
+        def({
+          tags: [{ name: "X", direction: "internal", dataType: "bool", initial: 0 }],
+          nodes: [{ id: "inv", op: "NOT", inputs: [{ tag: "X" }], output: "X" }],
+        }),
+      ),
+    ).toThrow(/self-cycle/);
+  });
+
   it("rejects a genuine combinational cycle through stateless nodes", () => {
     expect(() =>
       compileBlueprint(
