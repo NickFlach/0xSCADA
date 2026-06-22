@@ -12,11 +12,16 @@
  * prove the async stage path is faithful.
  */
 
+import { EventEmitter } from 'events';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   ControlLoopLatencyProbe,
   createSentinelBlueprint,
+  createPipelineStageExecutors,
   type StageExecutors,
+  type PipelineLike,
+  type SignerLike,
+  type RelayerLike,
 } from '../latency-probe.js';
 import {
   stageLatencyHistogram,
@@ -185,6 +190,126 @@ describe('ControlLoopLatencyProbe', () => {
     expect(sign.durationMs).toBeGreaterThanOrEqual(180);
     expect(sign.withinSlo).toBe(false);
   }, 10_000);
+
+  describe('createPipelineStageExecutors (production seam)', () => {
+    /**
+     * A fake relayer that emits anchorSuccess on a delay after submitAnchor,
+     * proving the anchor stage AWAITS the per-batch confirmation event rather
+     * than resolving on submit. Correlated by batchId.
+     */
+    class FakeRelayer extends EventEmitter implements RelayerLike {
+      submitted: number[] = [];
+      private confirmDelayMs: number;
+      constructor(confirmDelayMs: number) {
+        super();
+        this.confirmDelayMs = confirmDelayMs;
+      }
+      async submitAnchor(_root: string, batchId: number): Promise<void> {
+        this.submitted.push(batchId);
+        // Confirmation arrives asynchronously, AFTER submit resolves.
+        setTimeout(() => {
+          this.emit('anchorSuccess', { request: { batchId } });
+        }, this.confirmDelayMs);
+      }
+    }
+
+    const pipeline: PipelineLike = { async ingestEvent() {} };
+    const signer: SignerLike = {
+      async sign(data: string) {
+        return { signature: 'sig', merkleRoot: data, timestamp: Date.now() };
+      },
+    };
+
+    it('anchor-confirmed reflects the relayer confirmation event (not submit)', async () => {
+      const relayer = new FakeRelayer(150);
+      const executors = createPipelineStageExecutors({
+        pipeline,
+        signer,
+        relayer,
+        computeMerkleRoot: (ctx) => `root-${ctx.sequence}`,
+      });
+      const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-seam' });
+
+      const m = await probe.runCycle();
+      expect(m).not.toBeNull();
+      // The relayer received exactly our sentinel batch (sequence 1).
+      expect(relayer.submitted).toEqual([1]);
+      // anchor duration spans submit -> confirmation event (~150ms real time).
+      const anchor = m!.stages.find((s) => s.stage === 'anchor')!;
+      expect(anchor.durationMs).toBeGreaterThanOrEqual(120);
+    }, 10_000);
+
+    it('ignores confirmations for OTHER batches and only resolves on its own', async () => {
+      const relayer = new FakeRelayer(0); // we will drive emissions manually
+      // Override submit to NOT auto-confirm; we emit by hand below.
+      relayer.submitAnchor = async (_r: string, batchId: number) => {
+        relayer.submitted.push(batchId);
+      };
+      const executors = createPipelineStageExecutors({
+        pipeline,
+        signer,
+        relayer,
+        computeMerkleRoot: (ctx) => `root-${ctx.sequence}`,
+      });
+      const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-corr' });
+
+      const cyclePromise = probe.runCycle();
+      // A confirmation for an unrelated batch must NOT resolve our cycle.
+      await new Promise((r) => setTimeout(r, 20));
+      relayer.emit('anchorSuccess', { request: { batchId: 999 } });
+      await new Promise((r) => setTimeout(r, 20));
+      // Now the matching batch (sequence 1) confirms.
+      relayer.emit('anchorSuccess', { request: { batchId: 1 } });
+
+      const m = await cyclePromise;
+      expect(m).not.toBeNull();
+      expect(m!.stages.find((s) => s.stage === 'anchor')).toBeDefined();
+    }, 10_000);
+
+    it('surfaces a relayer anchorFailed for THIS batch as a cycle error', async () => {
+      const relayer = new FakeRelayer(0);
+      relayer.submitAnchor = async (_r: string, batchId: number) => {
+        relayer.submitted.push(batchId);
+        setTimeout(() => relayer.emit('anchorFailed', { request: { batchId }, error: 'reverted' }), 10);
+      };
+      const executors = createPipelineStageExecutors({
+        pipeline,
+        signer,
+        relayer,
+        computeMerkleRoot: (ctx) => `root-${ctx.sequence}`,
+      });
+      const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-fail' });
+      let errored = false;
+      probe.on('cycle-error', () => {
+        errored = true;
+      });
+      const m = await probe.runCycle();
+      expect(m).toBeNull();
+      expect(errored).toBe(true);
+    }, 10_000);
+
+    it('times out (and errors the cycle) if the relayer never confirms', async () => {
+      const relayer = new FakeRelayer(0);
+      relayer.submitAnchor = async (_r: string, batchId: number) => {
+        relayer.submitted.push(batchId); // never emits a confirmation
+      };
+      const executors = createPipelineStageExecutors({
+        pipeline,
+        signer,
+        relayer,
+        computeMerkleRoot: (ctx) => `root-${ctx.sequence}`,
+        anchorConfirmTimeoutMs: 50,
+      });
+      const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-timeout' });
+      let errMsg = '';
+      probe.on('cycle-error', ({ error }: { error: unknown }) => {
+        errMsg = error instanceof Error ? error.message : String(error);
+      });
+      const m = await probe.runCycle();
+      expect(m).toBeNull();
+      expect(errMsg).toMatch(/timed out/);
+    }, 10_000);
+  });
 
   it('emits cycle-error when a stage throws and does not leak in-flight slots', async () => {
     const executors: StageExecutors = {

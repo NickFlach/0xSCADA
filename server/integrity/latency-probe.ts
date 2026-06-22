@@ -18,6 +18,10 @@
  *    assert the per-stage histogram reflects it — all without a live
  *    blockchain, HSM, or scheduler.
  *
+ * The production anchor executor awaits the relayer's per-batch confirmation
+ * event (correlated by batchId), so the terminal `anchor-confirmed` stamp
+ * captures real on-chain confirmation latency, not just submit latency.
+ *
  * Part of the Dual-Time Control Plane (ADR-0021).
  */
 
@@ -286,7 +290,27 @@ export interface SignerLike {
   sign(data: string, keyId?: string): Promise<{ signature: string; merkleRoot: string; timestamp: number }>;
 }
 
-export interface RelayerLike {
+/**
+ * Minimal event-subscription surface the anchor executor needs in order to
+ * await the confirmation of a SPECIFIC sentinel batch. This matches the
+ * EventEmitter shape of AnchorRelayerService, which emits:
+ *   'anchorSuccess' { request: { batchId, ... }, result }
+ *   'anchorFailed'  { request: { batchId, ... }, error }
+ * Declared structurally (not importing EventEmitter's full type) so the seam
+ * stays decoupled and unit-testable with a tiny fake emitter.
+ */
+export interface AnchorEventEmitterLike {
+  on(event: string, listener: (payload: AnchorOutcomePayload) => void): unknown;
+  off(event: string, listener: (payload: AnchorOutcomePayload) => void): unknown;
+}
+
+/** Payload shape shared by the relayer's anchorSuccess / anchorFailed events. */
+export interface AnchorOutcomePayload {
+  request: { batchId: number };
+  error?: unknown;
+}
+
+export interface RelayerLike extends AnchorEventEmitterLike {
   submitAnchor(
     merkleRoot: string,
     batchId: number,
@@ -296,26 +320,86 @@ export interface RelayerLike {
   ): Promise<void>;
 }
 
-/**
- * Build StageExecutors that drive the real integrity pipeline.
- *
- * INTEGRATION (#460): this is the additive seam into the existing anchor
- * pipeline. It is intentionally thin — each executor calls the corresponding
- * production method and resolves once that method completes. Because the
- * EventIntegrityPipeline and AnchorRelayerService are event-driven (batch
- * coalescing, async confirmation), a fully faithful "wait for THIS sentinel's
- * anchor to confirm" requires correlating the relayer's `anchorSuccess` event
- * back to the sentinel batch. That correlation is deferred (see TODO) and is
- * the only partial part of this file: the synthetic driver, trace, histograms,
- * dashboard, alerts, and tests are complete.
- */
-export function createPipelineStageExecutors(deps: {
+export interface PipelineStageExecutorOptions {
   pipeline: PipelineLike;
   signer: SignerLike;
   relayer: RelayerLike;
   /** Compute the sentinel batch's Merkle root for signing. */
   computeMerkleRoot: (ctx: ProbeCycleContext) => string;
-}): StageExecutors {
+  /**
+   * Max time to wait for the relayer's per-batch confirmation event before the
+   * anchor stage gives up (so a permanently-stuck relayer cannot hang the probe
+   * loop forever). Defaults to 60s. Set 0 to disable the timeout.
+   */
+  anchorConfirmTimeoutMs?: number;
+}
+
+/**
+ * Await the relayer's per-batch confirmation for THIS sentinel batch, so the
+ * `anchor` stage's exit (`anchor-confirmed`) reflects actual on-chain
+ * confirmation rather than mere submission. Resolves on the matching
+ * `anchorSuccess`, rejects on the matching `anchorFailed`, and rejects on
+ * timeout. Listeners are always torn down to avoid leaks across cycles.
+ */
+function awaitAnchorConfirmation(
+  relayer: AnchorEventEmitterLike,
+  batchId: number,
+  timeoutMs: number,
+): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let timer: NodeJS.Timeout | undefined;
+
+    const cleanup = (): void => {
+      if (timer) clearTimeout(timer);
+      relayer.off('anchorSuccess', onSuccess);
+      relayer.off('anchorFailed', onFailed);
+    };
+    const onSuccess = (payload: AnchorOutcomePayload): void => {
+      if (payload?.request?.batchId !== batchId) return; // not our batch
+      cleanup();
+      resolve();
+    };
+    const onFailed = (payload: AnchorOutcomePayload): void => {
+      if (payload?.request?.batchId !== batchId) return; // not our batch
+      cleanup();
+      reject(
+        new Error(
+          `anchor failed for sentinel batch ${batchId}: ${String(payload?.error ?? 'unknown')}`,
+        ),
+      );
+    };
+
+    relayer.on('anchorSuccess', onSuccess);
+    relayer.on('anchorFailed', onFailed);
+
+    if (timeoutMs > 0) {
+      timer = setTimeout(() => {
+        cleanup();
+        reject(new Error(`anchor confirmation timed out for sentinel batch ${batchId}`));
+      }, timeoutMs);
+    }
+  });
+}
+
+/**
+ * Build StageExecutors that drive the real integrity pipeline.
+ *
+ * INTEGRATION (#460): this is the additive seam into the existing anchor
+ * pipeline. Each executor calls the corresponding production method. The anchor
+ * stage submits via `relayer.submitAnchor(...)` and then AWAITS the relayer's
+ * per-batch `anchorSuccess` event (correlated by `batchId`), so the
+ * `anchor-confirmed` stamp faithfully captures on-chain confirmation latency
+ * rather than mere submit latency. A bounded timeout guards against a stuck
+ * relayer hanging the probe loop.
+ *
+ * The synthetic driver, trace, histograms, dashboard, alerts, and tests are
+ * complete; this seam is exercised by createPipelineStageExecutors tests with a
+ * fake event-emitting relayer.
+ */
+export function createPipelineStageExecutors(
+  deps: PipelineStageExecutorOptions,
+): StageExecutors {
+  const anchorConfirmTimeoutMs = deps.anchorConfirmTimeoutMs ?? 60_000;
   let lastRoot = '';
   let lastSignature: { signature: string; merkleRoot: string; timestamp: number } | null = null;
 
@@ -339,10 +423,13 @@ export function createPipelineStageExecutors(deps: {
     },
     async anchor(ctx) {
       if (!lastSignature) throw new Error('sign stage did not run before anchor');
-      // TODO(#460 integration): await the relayer's confirmation event for THIS
-      // batch instead of resolving on submit. Requires threading the sentinel
-      // batchId through the relayer's `anchorSuccess`/`anchorFailed` events.
-      await deps.relayer.submitAnchor(lastRoot, ctx.sequence, 1, lastSignature, 'high');
+      // The relayer's batchId for this sentinel is its cycle sequence. Subscribe
+      // BEFORE submitting so a fast confirmation cannot race ahead of us, then
+      // await the confirmation correlated to THIS batch.
+      const batchId = ctx.sequence;
+      const confirmed = awaitAnchorConfirmation(deps.relayer, batchId, anchorConfirmTimeoutMs);
+      await deps.relayer.submitAnchor(lastRoot, batchId, 1, lastSignature, 'high');
+      await confirmed;
     },
   };
 }
