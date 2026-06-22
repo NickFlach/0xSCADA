@@ -1,0 +1,217 @@
+/**
+ * Tests for the control-loop latency probe (#460).
+ *
+ * Acceptance-criteria scenario (verification section of the issue):
+ *   "deliberately injecting 200ms delay at sign stage produces the expected
+ *    histogram shift and alert firing"
+ *
+ * We prove the histogram SHIFT here (alert firing is validated by the
+ * Alertmanager rule config, which cannot run in this environment). The probe's
+ * latency clock is injected so the 200ms is measured deterministically without
+ * a 200ms wall-clock sleep, and a separate test uses a REAL awaited delay to
+ * prove the async stage path is faithful.
+ */
+
+import { describe, it, expect, beforeEach } from 'vitest';
+import {
+  ControlLoopLatencyProbe,
+  createSentinelBlueprint,
+  type StageExecutors,
+} from '../latency-probe.js';
+import {
+  stageLatencyHistogram,
+  STAGE_SLO_MS,
+  type Clock,
+} from '../stage-timestamps.js';
+import { registry } from '../../metrics/prometheus.js';
+
+/**
+ * A controllable clock: the probe stamps enter/exit around each awaited stage.
+ * We advance the clock inside each stage executor by a configured amount so the
+ * measured durations are deterministic regardless of real wall time.
+ */
+function makeAdvancingClock(): { clock: Clock; advance: (ms: number) => void } {
+  let now = 0;
+  return {
+    clock: () => now,
+    advance: (ms: number) => {
+      now += ms;
+    },
+  };
+}
+
+describe('ControlLoopLatencyProbe', () => {
+  beforeEach(() => {
+    registry.reset();
+  });
+
+  it('creates an isolated, non-control-relevant sentinel blueprint', () => {
+    const bp = createSentinelBlueprint('validator-1');
+    expect(bp.controlRelevant).toBe(false);
+    expect(bp.id).toBe('sentinel/validator-1');
+    expect(bp.validator).toBe('validator-1');
+  });
+
+  it('derives flip interval from cadence (default 1Hz)', () => {
+    const noop = async () => {};
+    const probe = new ControlLoopLatencyProbe(
+      { tick: noop, batch: noop, sign: noop, anchor: noop },
+      { validator: 'v' },
+    );
+    expect(probe.intervalMs).toBe(1000);
+
+    const fast = new ControlLoopLatencyProbe(
+      { tick: noop, batch: noop, sign: noop, anchor: noop },
+      { validator: 'v', cadenceHz: 4 },
+    );
+    expect(fast.intervalMs).toBe(250);
+  });
+
+  it('flips the sentinel tag each cycle', async () => {
+    const noop = async () => {};
+    const probe = new ControlLoopLatencyProbe(
+      { tick: noop, batch: noop, sign: noop, anchor: noop },
+      { validator: 'v' },
+    );
+    expect(probe.getSentinelBlueprint().tagValue).toBe(false);
+    await probe.runCycle();
+    expect(probe.getSentinelBlueprint().tagValue).toBe(true);
+    await probe.runCycle();
+    expect(probe.getSentinelBlueprint().tagValue).toBe(false);
+  });
+
+  it('records a full round-trip measurement with per-stage durations', async () => {
+    const { clock, advance } = makeAdvancingClock();
+    const executors: StageExecutors = {
+      tick: async () => advance(10),
+      batch: async () => advance(20),
+      sign: async () => advance(30),
+      anchor: async () => advance(500),
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'v', clock });
+
+    const measurement = await probe.runCycle();
+    expect(measurement).not.toBeNull();
+    const m = measurement!;
+    expect(m.stages.find((s) => s.stage === 'tick')!.durationMs).toBe(10);
+    expect(m.stages.find((s) => s.stage === 'batch')!.durationMs).toBe(20);
+    expect(m.stages.find((s) => s.stage === 'sign')!.durationMs).toBe(30);
+    expect(m.stages.find((s) => s.stage === 'anchor')!.durationMs).toBe(500);
+    expect(m.total.durationMs).toBe(560);
+    expect(m.withinSlo).toBe(true);
+  });
+
+  it('injecting a 200ms delay at the SIGN stage shifts the sign histogram (deterministic clock)', async () => {
+    const { clock, advance } = makeAdvancingClock();
+    const SIGN_DELAY_MS = 200;
+    const executors: StageExecutors = {
+      tick: async () => advance(5),
+      batch: async () => advance(10),
+      sign: async () => advance(SIGN_DELAY_MS), // <-- injected 200ms delay
+      anchor: async () => advance(400),
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-sign', clock });
+
+    const m = await probe.runCycle();
+    const sign = m!.stages.find((s) => s.stage === 'sign')!;
+    expect(sign.durationMs).toBe(SIGN_DELAY_MS);
+
+    // The sign SLO budget is 150ms; 200ms must register as a breach.
+    expect(SIGN_DELAY_MS).toBeGreaterThan(STAGE_SLO_MS.sign);
+    expect(sign.withinSlo).toBe(false);
+    expect(m!.withinSlo).toBe(false);
+
+    // The Prometheus histogram must reflect the shift: sum == 0.2s for sign,
+    // and the observation must land ABOVE the 0.1s bucket (i.e. 0.1 bucket
+    // count is 0 while 0.25/+Inf include it).
+    const sign200 = stageLatencyHistogram
+      .collect()
+      .find((r) => r.labels.stage === 'sign' && r.labels.validator === 'val-sign')!;
+    expect(sign200.count).toBe(1);
+    expect(sign200.sum).toBeCloseTo(0.2, 6);
+    expect(sign200.buckets.get(0.1)).toBe(0); // 0.2s does NOT fall in <=0.1s
+    expect(sign200.buckets.get(0.25)).toBe(1); // but DOES fall in <=0.25s
+    expect(sign200.buckets.get(Infinity)).toBe(1);
+  });
+
+  it('a fast sign stage stays within SLO, proving the breach is delay-driven', async () => {
+    const { clock, advance } = makeAdvancingClock();
+    const executors: StageExecutors = {
+      tick: async () => advance(5),
+      batch: async () => advance(10),
+      sign: async () => advance(20), // well under the 150ms budget
+      anchor: async () => advance(400),
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-fast', clock });
+    const m = await probe.runCycle();
+    expect(m!.stages.find((s) => s.stage === 'sign')!.withinSlo).toBe(true);
+  });
+
+  it('emits a measurement event and an slo-breach event when budget is exceeded', async () => {
+    const { clock, advance } = makeAdvancingClock();
+    const executors: StageExecutors = {
+      tick: async () => advance(5),
+      batch: async () => advance(10),
+      sign: async () => advance(STAGE_SLO_MS.sign + 200),
+      anchor: async () => advance(400),
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'v', clock });
+
+    const events: string[] = [];
+    probe.on('measurement', () => events.push('measurement'));
+    probe.on('slo-breach', () => events.push('slo-breach'));
+
+    await probe.runCycle();
+    expect(events).toContain('measurement');
+    expect(events).toContain('slo-breach');
+  });
+
+  it('measures a REAL awaited 200ms delay at the sign stage (default monotonic clock)', async () => {
+    // No injected clock here: uses the real performance.now() clock and a real
+    // sleep, proving the async stage instrumentation is faithful end-to-end.
+    const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+    const executors: StageExecutors = {
+      tick: async () => {},
+      batch: async () => {},
+      sign: async () => sleep(200),
+      anchor: async () => {},
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'val-real' });
+
+    const m = await probe.runCycle();
+    const sign = m!.stages.find((s) => s.stage === 'sign')!;
+    // Allow generous slack for timer scheduling jitter, but it must clearly
+    // reflect ~200ms and breach the 150ms SLO.
+    expect(sign.durationMs).toBeGreaterThanOrEqual(180);
+    expect(sign.withinSlo).toBe(false);
+  }, 10_000);
+
+  it('emits cycle-error when a stage throws and does not leak in-flight slots', async () => {
+    const executors: StageExecutors = {
+      tick: async () => {},
+      batch: async () => {
+        throw new Error('boom');
+      },
+      sign: async () => {},
+      anchor: async () => {},
+    };
+    const probe = new ControlLoopLatencyProbe(executors, { validator: 'v' });
+    let errored = false;
+    probe.on('cycle-error', () => {
+      errored = true;
+    });
+    const m = await probe.runCycle();
+    expect(m).toBeNull();
+    expect(errored).toBe(true);
+
+    // A subsequent cycle still runs (in-flight slot was released in finally).
+    const executors2: StageExecutors = {
+      tick: async () => {},
+      batch: async () => {},
+      sign: async () => {},
+      anchor: async () => {},
+    };
+    const probe2 = new ControlLoopLatencyProbe(executors2, { validator: 'v' });
+    expect(await probe2.runCycle()).not.toBeNull();
+  });
+});

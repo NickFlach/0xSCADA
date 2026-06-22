@@ -1,0 +1,140 @@
+# Control-Loop Latency Alerting Rules (#460)
+#
+# Prometheus alerting rules for the per-stage control-loop SLO instrument
+# (tick -> batch -> sign -> anchor -> confirm). These are evaluated by
+# Prometheus and routed to Alertmanager. The format matches the repo's
+# existing rules in k8s/observability/alertmanager-config.yaml (alerts.yml).
+#
+# Metrics emitted by server/integrity/stage-timestamps.ts:
+#   scada_control_loop_stage_latency_seconds      (histogram, labels: stage, validator)
+#   scada_control_loop_roundtrip_latency_seconds  (histogram, labels: validator)
+#   scada_control_loop_stage_slo_ok               (gauge 1/0, labels: stage, validator)
+#
+# Per-stage SLO budgets (mirror STAGE_SLO_MS in stage-timestamps.ts):
+#   tick=50ms  batch=100ms  sign=150ms  anchor=5000ms  total(round-trip)=5500ms
+#
+# Primary acceptance criterion: "stage-budget breached for over 5min".
+groups:
+  - name: control-loop-latency
+    rules:
+      # ----------------------------------------------------------------------
+      # PRIMARY: a stage stays out of its SLO budget for >5 minutes.
+      # Driven by the SLO gauge the instrument sets on every probe cycle
+      # (1 = within budget, 0 = breach). `min_over_time(... [5m]) == 0` means
+      # the stage was breached for the entire window; `for: 5m` requires the
+      # condition to persist, i.e. a sustained >5min breach.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopStageBudgetBreached
+        expr: min_over_time(scada_control_loop_stage_slo_ok[5m]) == 0
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Control-loop stage '{{ $labels.stage }}' over SLO budget (>5min)"
+          description: >-
+            Stage '{{ $labels.stage }}' for validator '{{ $labels.validator }}'
+            has been outside its latency SLO budget continuously for more than
+            5 minutes. Inspect the per-stage latency panel in the
+            "0xSCADA Control-Loop Latency (SLO)" dashboard.
+
+      # ----------------------------------------------------------------------
+      # Per-stage P95 latency thresholds (defense-in-depth on the gauge above).
+      # Thresholds equal each stage's SLO budget in seconds.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopTickLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, validator) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="tick"}[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: tick
+        annotations:
+          summary: "Tick stage P95 latency > 50ms (validator {{ $labels.validator }})"
+
+      - alert: ControlLoopBatchLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, validator) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="batch"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: batch
+        annotations:
+          summary: "Batch stage P95 latency > 100ms (validator {{ $labels.validator }})"
+
+      - alert: ControlLoopSignLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, validator) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="sign"}[5m]))
+          ) > 0.15
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: sign
+        annotations:
+          summary: "Sign stage P95 latency > 150ms (validator {{ $labels.validator }})"
+          description: >-
+            HSM signing latency for validator '{{ $labels.validator }}' has
+            exceeded its 150ms budget at P95 for over 5 minutes. This is the
+            stage exercised by the #460 verification (200ms injected delay).
+
+      - alert: ControlLoopAnchorLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, validator) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="anchor"}[5m]))
+          ) > 5
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: anchor
+        annotations:
+          summary: "Anchor stage P95 latency > 5s (validator {{ $labels.validator }})"
+
+      # ----------------------------------------------------------------------
+      # End-to-end round-trip budget breach (escalates to critical).
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopRoundTripLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, validator) (rate(scada_control_loop_roundtrip_latency_seconds_bucket[5m]))
+          ) > 5.5
+        for: 5m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Control-loop round-trip P95 latency > 5.5s (validator {{ $labels.validator }})"
+          description: >-
+            End-to-end control-loop round-trip (tick -> anchor-confirmed) for
+            validator '{{ $labels.validator }}' has exceeded its 5.5s budget at
+            P95 for over 5 minutes.
+
+      # ----------------------------------------------------------------------
+      # The probe itself has gone silent (no round-trips observed). Without
+      # samples the SLO gauges go stale, so detect absence explicitly.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopProbeStalled
+        expr: sum(rate(scada_control_loop_roundtrip_latency_seconds_count[5m])) == 0
+        for: 5m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Control-loop latency probe is not producing round-trips"
+          description: >-
+            No control-loop round-trips have been observed for 5 minutes. The
+            latency probe (sentinel tag flip) may be stopped or the integrity
+            pipeline may be stalled before anchor confirmation.

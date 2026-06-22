@@ -1,0 +1,193 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "0xscada-control-loop-latency",
+    "title": "0xSCADA Control-Loop Latency (SLO)",
+    "description": "Per-stage control-loop latency SLO instrument (tick -> batch -> sign -> anchor -> confirm). Backed by the latency probe (#460) which flips a sentinel tag at 1Hz and measures each stage of the integrity pipeline.",
+    "tags": ["0xscada", "control-loop", "latency", "slo", "integrity"],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": { "from": "now-1h", "to": "now" },
+    "templating": {
+      "list": [
+        {
+          "name": "validator",
+          "label": "Validator",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(scada_control_loop_roundtrip_latency_seconds_count, validator)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 2
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Round-Trip P95 (tick -> anchor-confirmed)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(scada_control_loop_roundtrip_latency_seconds_bucket{validator=~\"$validator\"}[5m])))",
+            "legendFormat": "P95 round-trip"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 3 },
+                { "color": "red", "value": 5.5 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Stages In SLO",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "targets": [
+          {
+            "expr": "min(scada_control_loop_stage_slo_ok{validator=~\"$validator\"})",
+            "legendFormat": "All stages OK"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bool_on_off",
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Probe Throughput (round-trips/s)",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(rate(scada_control_loop_roundtrip_latency_seconds_count{validator=~\"$validator\"}[5m]))",
+            "legendFormat": "round-trips/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "ops" }
+        }
+      },
+      {
+        "id": 4,
+        "title": "Anchor Confirm P99",
+        "type": "stat",
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.99, sum by (le) (rate(scada_control_loop_stage_latency_seconds_bucket{stage=\"anchor\",validator=~\"$validator\"}[5m])))",
+            "legendFormat": "P99 anchor"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 3 },
+                { "color": "red", "value": 5 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Per-Stage Latency P95 (tick / batch / sign / anchor)",
+        "type": "timeseries",
+        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{validator=~\"$validator\"}[5m])))",
+            "legendFormat": "{{stage}} P95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": { "lineWidth": 2, "fillOpacity": 10 }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Per-Stage Latency P50 vs P99",
+        "type": "timeseries",
+        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{validator=~\"$validator\"}[5m])))",
+            "legendFormat": "{{stage}} P50"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{validator=~\"$validator\"}[5m])))",
+            "legendFormat": "{{stage}} P99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": { "lineWidth": 1, "fillOpacity": 5 }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Stage SLO Compliance (1=ok, 0=breach)",
+        "type": "state-timeline",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+        "targets": [
+          {
+            "expr": "scada_control_loop_stage_slo_ok{validator=~\"$validator\"}",
+            "legendFormat": "{{stage}} ({{validator}})"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bool_on_off",
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Round-Trip Latency Heatmap",
+        "type": "heatmap",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+        "targets": [
+          {
+            "expr": "sum by (le) (rate(scada_control_loop_roundtrip_latency_seconds_bucket{validator=~\"$validator\"}[5m]))",
+            "legendFormat": "{{le}}",
+            "format": "heatmap"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": { "unit": "s" }
+        }
+      }
+    ]
+  }
+}
