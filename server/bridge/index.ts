@@ -9,6 +9,22 @@
 
 export { eventAnchorBridge, type AnchorableEvent, type AnchorBatch, type EventAnchorConfig } from './event-anchor';
 export { stateSyncBridge, type StateChange, type SyncTarget, type StateSyncConfig } from './state-sync';
+// Anchor-Backend Switch dispatch (#455)
+export {
+  anchorRouter,
+  AnchorRouter,
+  projectSwitch,
+  backendsFor,
+  parseBackendEnv,
+  DEFAULT_BACKEND_PROFILES,
+  type AnchorBackend,
+  type BackendProfile,
+  type ProjectionInput,
+  type SwitchProjection,
+  type BackendRouting,
+  type RoutableEvent,
+  type DispatchResult,
+} from './anchor-router';
 
 import { eventAnchorBridge } from './event-anchor';
 import { stateSyncBridge } from './state-sync';
