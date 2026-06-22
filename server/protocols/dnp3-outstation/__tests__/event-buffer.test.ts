@@ -121,6 +121,46 @@ describe('unsolicited trigger evaluation', () => {
     expect(buf.evaluateUnsolicited(99999)).toEqual({ shouldSend: false, classes: [], reason: 'none' });
   });
 
+  test('reported events do not re-fire the unsolicited trigger (no storm)', () => {
+    // Regression: previously markReported left events counting toward the
+    // threshold, so the unsolicited trigger fired on every evaluation tick.
+    const buf = makeBuffer(); // class1 threshold = 2, delay 1000ms
+    ev(buf, 1, 0, 100);
+    ev(buf, 1, 1, 110);
+    const first = buf.evaluateUnsolicited(150);
+    expect(first.shouldSend).toBe(true);
+
+    // Report (send) the events; they stay buffered until CONFIRM but must not
+    // re-trigger.
+    buf.markReported(buf.peek([1]).map((e) => e.seq));
+    expect(buf.classSize(1)).toBe(2); // still buffered
+    expect(buf.unreportedSize(1)).toBe(0);
+    expect(buf.evaluateUnsolicited(160).shouldSend).toBe(false);
+    expect(buf.evaluateUnsolicited(99999).shouldSend).toBe(false); // not even via delay
+
+    // A fresh un-reported event re-arms the count trigger only once threshold met.
+    ev(buf, 1, 2, 200);
+    expect(buf.evaluateUnsolicited(250).shouldSend).toBe(false); // 1 un-reported < 2
+    ev(buf, 1, 3, 210);
+    const rearmed = buf.evaluateUnsolicited(260);
+    expect(rearmed.shouldSend).toBe(true);
+    expect(rearmed.reason).toBe('count');
+  });
+
+  test('reported events still drain on confirm and clear their reported flag', () => {
+    const buf = makeBuffer();
+    const s1 = ev(buf, 1, 0, 1);
+    const s2 = ev(buf, 1, 1, 2);
+    buf.markReported([s1, s2]);
+    expect(buf.unreportedSize(1)).toBe(0);
+    buf.confirm([s1, s2]);
+    expect(buf.classSize(1)).toBe(0);
+    // Re-using the buffer: a new event is un-reported and triggers normally.
+    ev(buf, 1, 2, 3);
+    ev(buf, 1, 3, 4);
+    expect(buf.evaluateUnsolicited(5).shouldSend).toBe(true);
+  });
+
   test('classEventIinBits reflects buffered classes', () => {
     const buf = makeBuffer();
     ev(buf, 1, 0, 1);

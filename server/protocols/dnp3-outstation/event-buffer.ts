@@ -70,6 +70,13 @@ interface ClassQueue {
   config: ClassBufferConfig;
   /** events in FIFO order */
   events: Dnp3Event[];
+  /**
+   * Sequence numbers that have been reported to a master (sent in a response or
+   * unsolicited fragment) but not yet APPLICATION-CONFIRMed. Per DNP3 these stay
+   * buffered until confirmed, but they MUST NOT re-trigger an unsolicited
+   * response — only *un-reported* events drive the count/delay triggers.
+   */
+  reported: Set<number>;
   /** oldest un-reported (un-confirmed-out) event timestamp, or null */
   oldestUnreportedAt: number | null;
   /** dropped due to overflow since last clear */
@@ -104,7 +111,12 @@ export class Dnp3EventBuffer {
   private maxDelayMs: number;
 
   private makeQueue(config: ClassBufferConfig): ClassQueue {
-    return { config, events: [], oldestUnreportedAt: null, overflowed: false };
+    return { config, events: [], reported: new Set(), oldestUnreportedAt: null, overflowed: false };
+  }
+
+  /** Un-reported events for a class, in FIFO order. */
+  private unreportedOf(q: ClassQueue): Dnp3Event[] {
+    return q.events.filter((e) => !q.reported.has(e.seq));
   }
 
   /**
@@ -117,11 +129,14 @@ export class Dnp3EventBuffer {
     const seq = ++this.seqCounter;
     const full: Dnp3Event = { ...event, seq };
     if (q.events.length >= q.config.maxEvents) {
-      q.events.shift(); // drop oldest
+      const dropped = q.events.shift(); // drop oldest
+      if (dropped) q.reported.delete(dropped.seq);
       q.overflowed = true;
       this.overflowFlag = true;
     }
     q.events.push(full);
+    // A freshly-enqueued event is un-reported; reset the oldest-unreported timer
+    // only when no un-reported event was previously pending.
     if (q.oldestUnreportedAt === null) {
       q.oldestUnreportedAt = event.timestamp;
     }
@@ -133,9 +148,14 @@ export class Dnp3EventBuffer {
     return this.queues[1].events.length + this.queues[2].events.length + this.queues[3].events.length;
   }
 
-  /** Buffered count for one class. */
+  /** Buffered count for one class (incl. reported-but-unconfirmed). */
   classSize(cls: EventClass): number {
     return this.queues[cls].events.length;
+  }
+
+  /** Un-reported (trigger-eligible) count for one class. */
+  unreportedSize(cls: EventClass): number {
+    return this.unreportedOf(this.queues[cls]).length;
   }
 
   /** Whether any class has overflowed since the last clear. */
@@ -158,17 +178,20 @@ export class Dnp3EventBuffer {
   /**
    * Mark a set of events as reported (sent to a master, pending confirmation).
    * In a strict implementation events are only removed on APPLICATION CONFIRM;
-   * here we expose explicit `confirm`/`requeue` so the link layer drives it.
-   * This resets the per-class "oldest unreported" timer for fully-drained
-   * classes.
+   * here we keep them buffered but flag them reported so they no longer drive
+   * the unsolicited count/delay triggers — preventing an unsolicited storm where
+   * the same events re-fire on every evaluation tick. The per-class
+   * "oldest unreported" timer is recomputed from what remains un-reported.
    */
   markReported(seqs: number[]): void {
     const set = new Set(seqs);
     for (const cls of [1, 2, 3] as EventClass[]) {
       const q = this.queues[cls];
-      const remaining = q.events.filter((e) => !set.has(e.seq));
-      // Recompute oldest-unreported timestamp from what is left.
-      q.oldestUnreportedAt = remaining.length ? remaining[0].timestamp : null;
+      for (const e of q.events) {
+        if (set.has(e.seq)) q.reported.add(e.seq);
+      }
+      const unreported = this.unreportedOf(q);
+      q.oldestUnreportedAt = unreported.length ? unreported[0].timestamp : null;
     }
   }
 
@@ -181,7 +204,9 @@ export class Dnp3EventBuffer {
     for (const cls of [1, 2, 3] as EventClass[]) {
       const q = this.queues[cls];
       q.events = q.events.filter((e) => !set.has(e.seq));
-      q.oldestUnreportedAt = q.events.length ? q.events[0].timestamp : null;
+      for (const seq of set) q.reported.delete(seq);
+      const unreported = this.unreportedOf(q);
+      q.oldestUnreportedAt = unreported.length ? unreported[0].timestamp : null;
       if (q.events.length === 0) q.overflowed = false;
     }
     if (!this.queues[1].overflowed && !this.queues[2].overflowed && !this.queues[3].overflowed) {
@@ -210,10 +235,13 @@ export class Dnp3EventBuffer {
 
     for (const cls of [1, 2, 3] as EventClass[]) {
       const q = this.queues[cls];
-      if (q.events.length === 0) continue;
+      // Only UN-REPORTED events drive the trigger. Reported-but-unconfirmed
+      // events stay buffered (DNP3 confirm semantics) but must not re-fire.
+      const unreportedCount = this.unreportedOf(q).length;
+      if (unreportedCount === 0) continue;
 
       const threshold = q.config.unsolicitedThreshold;
-      if (threshold > 0 && q.events.length >= threshold) {
+      if (threshold > 0 && unreportedCount >= threshold) {
         countClasses.push(cls);
       }
       if (
