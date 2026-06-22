@@ -159,10 +159,16 @@ export const healthRouter = healthManager.createRouter();
 // same scrape. The shared metrics use the `scada_` prefix; the blueprint tick
 // gauges/histogram carry their authoritative un-prefixed / `oxscada_` names, so
 // both coexist in one exposition document.
-healthRouter.get('/metrics', (_req: Request, res: Response) => {
-  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
-  res.send(`${registry.metrics()}\n${exposeBlueprintMetrics()}`);
+healthRouter.get('/metrics', (req: Request, res: Response) => {
+  // Delegate to the shared handler so its process-metric refresh
+  // (collectProcessMetrics) and Content-Type stay intact, then append the
+  // blueprint tick telemetry by intercepting the single send() it performs.
+  const originalSend = res.send.bind(res);
+  res.send = ((body?: unknown) => {
+    const base = typeof body === 'string' ? body : registry.metrics();
+    return originalSend(`${base}\n${exposeBlueprintMetrics()}`);
+  }) as Response['send'];
+  metricsHandler(req, res);
 });
-// Keep the original handler referenced so it remains available for callers that
-// import it directly (and to avoid an unused-import lint when wrapped above).
+// Re-export the shared handler for callers that import it directly.
 export { metricsHandler };
