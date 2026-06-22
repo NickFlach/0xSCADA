@@ -311,11 +311,18 @@ export class SparkplugBridge {
     if (msg) this.publishMessage(msg);
   }
 
-  /** Force a fresh NBIRTH (e.g. on Rebirth command). */
+  /**
+   * Re-publish NBIRTH in response to a host `Node Control/Rebirth` command
+   * (§7.6). This is an *in-session* rebirth: the seq sequence restarts at 0 but
+   * the bdSeq is unchanged so the already-registered NDEATH Will still
+   * correlates with this birth (§6.4). A new MQTT session (and thus a new
+   * bdSeq) only happens on an actual reconnect, which is driven by the broker's
+   * `connect` event, not by a Rebirth command.
+   */
   rebirth(): void {
     if (this.lifecycle.getNodeState() !== "online") return;
-    // A rebirth restarts the seq sequence at 0 per §7.6.
-    this.lifecycle.beginSession();
+    // Restart seq at 0 WITHOUT bumping bdSeq (would desync the Will/NDEATH).
+    this.lifecycle.resetSeq();
     this.publishMessage(this.lifecycle.onConnect());
   }
 

@@ -210,7 +210,14 @@ describe("SparkplugBridge", () => {
     const nbirths = fake.decodedPublishes().filter((p) => p.topic.includes("/NBIRTH/"));
     expect(nbirths.length).toBe(2); // initial + rebirth
     expect(nbirths[1].body.seq).toBe(0);
-    expect(bridge.getStatus().bdSeq).toBe(beforeBdSeq + 1);
+    // An in-session Rebirth (§7.6) restarts seq at 0 but must NOT bump bdSeq:
+    // the NDEATH Will registered at connect carries the original bdSeq, and a
+    // mismatched birth bdSeq would break host birth/death correlation (§6.4).
+    expect(bridge.getStatus().bdSeq).toBe(beforeBdSeq);
+    // The re-birth NBIRTH carries the same bdSeq metric as the first NBIRTH.
+    const bdSeqMetric0 = nbirths[0].body.metrics.find((m) => m.name === "bdSeq");
+    const bdSeqMetric1 = nbirths[1].body.metrics.find((m) => m.name === "bdSeq");
+    expect(bdSeqMetric1?.value).toBe(bdSeqMetric0?.value);
   });
 
   it("invokes the command handler on NCMD", () => {

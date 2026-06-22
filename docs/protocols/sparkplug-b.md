@@ -70,7 +70,9 @@ publish and performs no I/O — so it is fully unit-testable.
   carries the **same** `bdSeq` as the NBIRTH for that session, letting the host
   correlate births and deaths and detect stale sessions.
 - A host `Node Control/Rebirth = true` command triggers a fresh NBIRTH
-  (new session, `seq` back to 0).
+  *in the same MQTT session*: `seq` restarts at 0 but `bdSeq` is **unchanged**,
+  so the NDEATH Will registered at connect still correlates with the new birth
+  (§6.4 / §7.6). A new `bdSeq` only occurs on an actual reconnect.
 
 ## Configuration
 

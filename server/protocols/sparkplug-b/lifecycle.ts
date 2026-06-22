@@ -145,6 +145,20 @@ export class EdgeNodeLifecycle {
     this.nodeMetrics = metrics;
   }
 
+  /**
+   * Reset the rolling `seq` counter to 0 *without* starting a new MQTT session.
+   *
+   * This is the correct primitive for an in-session re-birth triggered by a
+   * host `Node Control/Rebirth` command (§7.6): the edge node re-publishes
+   * NBIRTH at `seq = 0` but keeps the **same** `bdSeq` so the previously
+   * registered NDEATH Will still correlates with this birth (§6.4). It must NOT
+   * call {@link beginSession}, which bumps `bdSeq` and would desynchronise the
+   * already-registered Will.
+   */
+  resetSeq(): void {
+    this.seq = 0;
+  }
+
   // --- Sequence helpers ---
 
   /** Consume and return the next seq value, advancing the rolling counter. */

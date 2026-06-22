@@ -200,6 +200,26 @@ describe("seq increments and rolls over mod 256", () => {
   });
 });
 
+describe("in-session rebirth (§7.6)", () => {
+  it("resetSeq restarts seq at 0 without bumping bdSeq", () => {
+    const lc = newLifecycle();
+    lc.beginSession(); // bdSeq -> 1
+    lc.onConnect(); // seq 0 consumed, seq now 1
+    lc.publishNodeData([{ name: "Node/Uptime", dataType: SparkplugDataType.Int64, value: 5 }]); // seq 1
+    expect(lc.getSeq()).toBe(2);
+    const bdSeqBefore = lc.getBdSeq();
+
+    lc.resetSeq();
+    expect(lc.getSeq()).toBe(0);
+    expect(lc.getBdSeq()).toBe(bdSeqBefore); // bdSeq unchanged
+
+    // The re-birth NBIRTH is seq 0 and carries the SAME bdSeq metric.
+    const reBirth = lc.onConnect();
+    expect(reBirth.payload.seq).toBe(0);
+    expect(reBirth.payload.metrics.find((m) => m.name === "bdSeq")?.value).toBe(bdSeqBefore);
+  });
+});
+
 describe("host STATE gating (§10)", () => {
   let lc: FixedClockLifecycle;
   beforeEach(() => {
