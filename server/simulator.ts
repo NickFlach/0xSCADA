@@ -115,9 +115,9 @@ class FieldSimulator {
         });
       } catch { /* WebSocket not connected — that's fine */ }
 
-      // Publish to NATS for blockchain anchoring
+      // Publish to NATS for blockchain anchoring (canonical wire schema, #440)
       try {
-        natsPublisher.publish("scada.events", {
+        natsPublisher.publishScadaEvent({
           asset: asset.nameOrTag,
           event_type: eventType,
           site_id: asset.siteId,
