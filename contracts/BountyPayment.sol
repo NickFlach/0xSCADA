@@ -287,27 +287,12 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         require(bounty.claimant == recipient, "Recipient must be the claimant");
         require(recipient != address(0), "Invalid recipient");
 
-        bounty.status = BountyStatus.Completed;
-
-        // Transfer funds
-        if (bounty.token == address(0)) {
-            // Native token (ETH/MATIC)
-            require(address(this).balance >= bounty.amount, "Insufficient contract balance");
-            (bool success, ) = recipient.call{value: bounty.amount}("");
-            require(success, "Payment failed");
-        } else {
-            // ERC20 token
-            IERC20 tokenContract = IERC20(bounty.token);
-            require(
-                tokenContract.balanceOf(address(this)) >= bounty.amount,
-                "Insufficient token balance"
-            );
-            tokenContract.safeTransfer(recipient, bounty.amount);
-        }
-
+        // Effects: finalize all state before the external transfer so a
+        // re-entering recipient can never observe or exploit an intermediate
+        // state (checks-effects-interactions). A failed transfer reverts the
+        // whole transaction, rolling these back.
         bounty.status = BountyStatus.Paid;
 
-        // Record payment
         address[] memory recipients = new address[](1);
         recipients[0] = recipient;
         uint256[] memory amounts = new uint256[](1);
@@ -323,6 +308,22 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         });
 
         totalPaidOut += bounty.amount;
+
+        // Interactions: transfer funds
+        if (bounty.token == address(0)) {
+            // Native token (ETH/MATIC)
+            require(address(this).balance >= bounty.amount, "Insufficient contract balance");
+            (bool success, ) = recipient.call{value: bounty.amount}("");
+            require(success, "Payment failed");
+        } else {
+            // ERC20 token
+            IERC20 tokenContract = IERC20(bounty.token);
+            require(
+                tokenContract.balanceOf(address(this)) >= bounty.amount,
+                "Insufficient token balance"
+            );
+            tokenContract.safeTransfer(recipient, bounty.amount);
+        }
 
         emit BountyPaid(issueNumber, prNumber, recipient, bounty.amount, bounty.token);
     }
@@ -353,9 +354,31 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         }
         require(totalAmount == bounty.amount, "Total amounts must equal bounty amount");
 
-        bounty.status = BountyStatus.Completed;
+        // Effects: finalize all state before any external call so a
+        // re-entering recipient mid-loop can never observe or exploit an
+        // intermediate state (checks-effects-interactions). Any failed
+        // transfer reverts the whole transaction, rolling these back.
+        bounty.status = BountyStatus.Paid;
 
-        // Transfer funds to each recipient
+        // Payment.recipients is address[]; the payable array cannot be assigned directly
+        address[] memory recipientAddrs = new address[](recipients.length);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            recipientAddrs[i] = recipients[i];
+        }
+
+        // Record payment
+        payments[issueNumber] = Payment({
+            issueNumber: issueNumber,
+            prNumber: prNumber,
+            recipients: recipientAddrs,
+            amounts: amounts,
+            paidAt: block.timestamp,
+            txHash: blockhash(block.number - 1)
+        });
+
+        totalPaidOut += totalAmount;
+
+        // Interactions: transfer funds to each recipient
         for (uint256 i = 0; i < recipients.length; i++) {
             address payable recipient = recipients[i];
             uint256 amount = amounts[i];
@@ -371,20 +394,6 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
 
             emit BountyPaid(issueNumber, prNumber, recipient, amount, bounty.token);
         }
-
-        bounty.status = BountyStatus.Paid;
-
-        // Record payment
-        payments[issueNumber] = Payment({
-            issueNumber: issueNumber,
-            prNumber: prNumber,
-            recipients: recipients,
-            amounts: amounts,
-            paidAt: block.timestamp,
-            txHash: blockhash(block.number - 1)
-        });
-
-        totalPaidOut += totalAmount;
     }
 
     // ═══════════════════════════════════════════════════════════════════
