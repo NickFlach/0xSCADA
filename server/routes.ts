@@ -37,6 +37,8 @@ import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
+import { predictiveRoutes } from "./routes/predictive";
+import { predictiveMaintenanceService } from "./services/predictive";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -68,6 +70,7 @@ export async function registerRoutes(
   
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -88,6 +91,11 @@ export async function registerRoutes(
   // WebSocket servers initialize if available
   try { tagStreamServer?.initialize(httpServer, "/ws/tags"); } catch {}
   try { unifiedStreamServer?.initialize(httpServer, "/ws"); } catch {}  // unified endpoint (#255)
+
+  // Feed live tag updates into the predictive maintenance engine (#212)
+  tagStreamServer.onTagUpdate((update) =>
+    predictiveMaintenanceService.ingestTagUpdate(update)
+  );
 
   // WebSocket metrics endpoint
   app.get("/api/ws/metrics", (req, res) => {
