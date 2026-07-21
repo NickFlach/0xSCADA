@@ -45,6 +45,16 @@ gateway:
       cpu: 500m
       memory: 256Mi
 
+# Required in production whenever server.replicaCount > 1: the in-memory
+# rate limiter is per-pod, so callers can multiply their limit by routing
+# to different replicas (issue #447). "redis" gives one shared limit.
+rateLimiter:
+  backend: redis
+
+redis:
+  host: oxscada-redis
+  port: 6379
+
 postgresql:
   enabled: true
   auth:
