@@ -5,6 +5,7 @@ import {
   buildScadaEventWire,
   type ScadaEventWire,
 } from "../../../shared/wire-schema/scada-event";
+import { anchorsToNode } from "../../bridge/anchor-backend";
 
 const sc = StringCodec();
 
@@ -38,8 +39,12 @@ class NatsPublisher {
    * Publish a SCADA event on the canonical `scada.events` wire schema
    * (issue #440). Validation failures are loud: a payload the Rust node
    * cannot parse must never leave this process silently.
+   *
+   * Respects ANCHOR_BACKEND (#443): when the operator pins anchoring to
+   * the legacy L2 path, nothing is published toward the node.
    */
   publishScadaEvent(event: ScadaEventWire) {
+    if (!anchorsToNode()) return;
     let wire: ScadaEventWire;
     try {
       wire = buildScadaEventWire(event);
