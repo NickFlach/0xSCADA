@@ -43,7 +43,7 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
     enum BountyStatus {
         Open,       // Available to claim
         Claimed,    // Claimed by someone, work in progress
-        Completed,  // PR merged, payment processing
+        Completed,  // Reserved: no longer set (payments go Claimed -> Paid atomically); kept to preserve enum indices in the ABI
         Paid,       // Payment successful
         Expired,    // Claim expired, reverted to Open
         Disputed,   // Under dispute resolution
@@ -353,6 +353,14 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
             totalAmount += amounts[i];
         }
         require(totalAmount == bounty.amount, "Total amounts must equal bounty amount");
+        if (bounty.token == address(0)) {
+            require(address(this).balance >= totalAmount, "Insufficient contract balance");
+        } else {
+            require(
+                IERC20(bounty.token).balanceOf(address(this)) >= totalAmount,
+                "Insufficient token balance"
+            );
+        }
 
         // Effects: finalize all state before any external call so a
         // re-entering recipient mid-loop can never observe or exploit an

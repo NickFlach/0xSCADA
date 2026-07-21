@@ -68,6 +68,59 @@ contract ReentrantRecipient {
     }
 }
 
+/// @notice Minimal ERC20 sufficient for SafeERC20 (returns true, reverts on shortfall).
+contract MockERC20 {
+    mapping(address => uint256) public balanceOf;
+
+    function mint(address to, uint256 amount) external {
+        balanceOf[to] += amount;
+    }
+
+    function transfer(address to, uint256 amount) public virtual returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "insufficient balance");
+        balanceOf[msg.sender] -= amount;
+        balanceOf[to] += amount;
+        return true;
+    }
+}
+
+/// @notice ERC20 whose transfer() re-enters BountyPayment, modeling an
+///         ERC777-style recipient hook firing inside safeTransfer.
+contract CallbackToken is MockERC20 {
+    BountyPayment public target;
+    uint256 public reentryIssue;
+    bool public reentryAttempted;
+    bool public reentrySucceeded;
+
+    address payable[] private reentryRecipients;
+    uint256[] private reentryAmounts;
+
+    function armReentry(
+        BountyPayment _target,
+        uint256 issue,
+        address payable[] memory recipients,
+        uint256[] memory amounts
+    ) external {
+        target = _target;
+        reentryIssue = issue;
+        reentryRecipients = recipients;
+        reentryAmounts = amounts;
+    }
+
+    function transfer(address to, uint256 amount) public override returns (bool) {
+        super.transfer(to, amount);
+        if (address(target) != address(0) && !reentryAttempted) {
+            reentryAttempted = true;
+            try target.payBountyMultiple(reentryIssue, 999, reentryRecipients, reentryAmounts) {
+                reentrySucceeded = true;
+            } catch {
+                reentrySucceeded = false;
+            }
+        }
+        return true;
+    }
+}
+
 /// @title BountyPayment re-entrancy and checks-effects-interactions tests (issue #449)
 /// @dev Dependency-free forge tests: the test contract deploys BountyPayment,
 ///      so it holds DEFAULT_ADMIN_ROLE, MAINTAINER_ROLE and PAYOUT_ROLE itself.
@@ -209,6 +262,91 @@ contract BountyPaymentTest {
         require(
             observer.observedTotalPaidOut() == 2 ether,
             "totalPaidOut must be updated before the transfer"
+        );
+        require(
+            observer.observedRecordedRecipients() == 1,
+            "payment record must exist before the transfer"
+        );
+    }
+
+    // ── ERC20 path (SafeERC20 branch, incl. ERC777-style callback re-entry) ──
+
+    function test_payBounty_erc20PaysAndFinalizesState() public {
+        MockERC20 token = new MockERC20();
+        PlainReceiver r1 = new PlainReceiver();
+        token.mint(address(bounty), 10 ether);
+
+        bounty.registerBounty(ISSUE_A, 4 ether, address(token), "ipfs://meta", true);
+        bounty.claimBounty(ISSUE_A, address(r1));
+
+        bounty.payBounty(ISSUE_A, PR, payable(address(r1)));
+
+        require(token.balanceOf(address(r1)) == 4 ether, "recipient token amount wrong");
+        require(token.balanceOf(address(bounty)) == 6 ether, "escrow token balance wrong");
+        require(
+            bounty.getBounty(ISSUE_A).status == BountyPayment.BountyStatus.Paid,
+            "status not Paid"
+        );
+        require(bounty.totalPaidOut() == 4 ether, "totalPaidOut wrong");
+    }
+
+    function test_payBountyMultiple_erc20CallbackCannotReenter() public {
+        CallbackToken token = new CallbackToken();
+        PlainReceiver r1 = new PlainReceiver();
+        PlainReceiver r2 = new PlainReceiver();
+        token.mint(address(bounty), 10 ether);
+
+        bounty.registerBounty(ISSUE_A, 2 ether, address(token), "ipfs://a", true);
+        bounty.claimBounty(ISSUE_A, address(r1));
+        bounty.registerBounty(ISSUE_B, 5 ether, address(token), "ipfs://b", true);
+        bounty.claimBounty(ISSUE_B, address(r2));
+
+        // The token itself holds PAYOUT_ROLE and, from inside safeTransfer,
+        // tries to pay out bounty B while bounty A's payout is mid-loop.
+        bounty.grantRole(bounty.PAYOUT_ROLE(), address(token));
+        (address payable[] memory rr, uint256[] memory ra) =
+            _single(payable(address(r2)), 5 ether);
+        token.armReentry(bounty, ISSUE_B, rr, ra);
+
+        address payable[] memory recipients = new address payable[](2);
+        recipients[0] = payable(address(r1));
+        recipients[1] = payable(address(r2));
+        uint256[] memory amounts = new uint256[](2);
+        amounts[0] = 1 ether;
+        amounts[1] = 1 ether;
+
+        bounty.payBountyMultiple(ISSUE_A, PR, recipients, amounts);
+
+        require(token.reentryAttempted(), "token never attempted re-entry");
+        require(!token.reentrySucceeded(), "re-entrant payout must revert");
+        require(
+            bounty.getBounty(ISSUE_B).status == BountyPayment.BountyStatus.Claimed,
+            "bounty B must be untouched"
+        );
+        require(token.balanceOf(address(r1)) == 1 ether, "r1 token amount wrong");
+        require(token.balanceOf(address(r2)) == 1 ether, "r2 token amount wrong");
+        require(bounty.totalPaidOut() == 2 ether, "only bounty A may be paid");
+    }
+
+    function test_payBountyMultiple_insufficientNativeBalanceRevertsUpfront() public {
+        PlainReceiver r1 = new PlainReceiver();
+        // Escrow holds 100 ether from setUp; bounty demands more
+        _openAndClaim(ISSUE_A, 200 ether, address(r1));
+
+        (address payable[] memory recipients, uint256[] memory amounts) =
+            _single(payable(address(r1)), 200 ether);
+
+        try bounty.payBountyMultiple(ISSUE_A, PR, recipients, amounts) {
+            revert("underfunded payout should revert");
+        } catch Error(string memory reason) {
+            require(
+                keccak256(bytes(reason)) == keccak256("Insufficient contract balance"),
+                "expected upfront balance check"
+            );
+        }
+        require(
+            bounty.getBounty(ISSUE_A).status == BountyPayment.BountyStatus.Claimed,
+            "status must stay Claimed"
         );
     }
 
