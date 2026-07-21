@@ -64,13 +64,15 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         address createdBy;          // Who registered the bounty
     }
 
+    // The paying transaction's own hash is unknowable on-chain; consumers
+    // needing it should read it from the BountyPaid event log. A former
+    // `txHash` field here actually held blockhash(block.number - 1) — see #448.
     struct Payment {
         uint256 issueNumber;
         uint256 prNumber;           // GitHub PR number
         address[] recipients;       // Support multi-recipient payments
         uint256[] amounts;          // Amount per recipient
         uint256 paidAt;             // Timestamp of payment
-        bytes32 txHash;             // Transaction hash for reference
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -303,8 +305,7 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
             prNumber: prNumber,
             recipients: recipients,
             amounts: amounts,
-            paidAt: block.timestamp,
-            txHash: blockhash(block.number - 1) // Approximate tx hash
+            paidAt: block.timestamp
         });
 
         totalPaidOut += bounty.amount;
@@ -380,8 +381,7 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
             prNumber: prNumber,
             recipients: recipientAddrs,
             amounts: amounts,
-            paidAt: block.timestamp,
-            txHash: blockhash(block.number - 1)
+            paidAt: block.timestamp
         });
 
         totalPaidOut += totalAmount;
