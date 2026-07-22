@@ -18,6 +18,8 @@ import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
+import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
+import { alarmCorrelationService } from "./services/alarm-correlation";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -59,6 +61,7 @@ export async function registerRoutes(
 
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -93,6 +96,10 @@ export async function registerRoutes(
   };
   tagStreamServer.initialize(httpServer, "/ws/tags", websocketAuth);
   unifiedStreamServer.initialize(httpServer, "/ws", websocketAuth); // unified endpoint (#255)
+
+  // Start alarm-correlation idle-group sweeps (#213). Registered here rather
+  // than in services/initializeServices(), which no startup path invokes.
+  void alarmCorrelationService.initialize();
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).
