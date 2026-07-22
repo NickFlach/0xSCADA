@@ -15,6 +15,15 @@
  * 7. Fitness evaluator scores the result
  * 8. After N resolutions, evolution cycle runs
  *
+ * COMMIT-ONCE INVARIANT: an approved evolved resolution calls
+ * `resolver.commitResolution(...)`. If you ALSO let the same base resolver
+ * auto-resolve the same conflict inside its own `ingestEvent` (the default
+ * ParadoxResolver behavior), that conflict is committed twice. When driving
+ * events through `ingestEvent` and then routing the conflict here, construct
+ * the base resolver with `externalResolution: true` (the IntegrityService does
+ * this). Calling `resolveConflict(conflict)` directly on a conflict object —
+ * as the unit tests do — never double-commits.
+ *
  * @see ADR-0023
  * @closes #384
  */
