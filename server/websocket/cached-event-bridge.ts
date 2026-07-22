@@ -11,6 +11,7 @@ import { getRedisClient, isRedisHealthy } from '../services/cache/redis-client.j
 import { eventCache, type CachedEvent } from '../services/cache/event-cache.js';
 import { unifiedStreamServer } from './unified-stream.js';
 import { tagStreamServer, type TagUpdate } from './tag-stream.js';
+import { alarmCorrelationService } from '../services/alarm-correlation';
 import type Redis from 'ioredis';
 
 const CHANNEL_EVENTS = '0xscada:ws:events';
@@ -124,14 +125,37 @@ class CachedEventBridge {
 
   /**
    * Publish an alarm — fans out to all instances.
+   *
+   * Every alarm passes through the correlation engine first (#213); the
+   * broadcast payload is enriched with a `correlation` field carrying
+   * group membership, root-cause, and suppression info so consumers can
+   * de-clutter without any alarm being silently dropped.
    */
   async publishAlarm(alarm: Record<string, unknown>): Promise<void> {
-    tagStreamServer.broadcastAlarm(alarm as any);
-    unifiedStreamServer.broadcastAlarm(alarm);
+    let enriched = alarm;
+    try {
+      const outcome = alarmCorrelationService.ingest(alarm);
+      if (outcome) {
+        enriched = {
+          ...alarm,
+          correlation: {
+            action: outcome.result.action,
+            groupId: outcome.result.groupId ?? null,
+            suppressed: outcome.result.suppressed,
+            isRootCause: outcome.result.isRootCause,
+          },
+        };
+      }
+    } catch {
+      // Correlation must never block alarm fan-out
+    }
+
+    tagStreamServer.broadcastAlarm(enriched as any);
+    unifiedStreamServer.broadcastAlarm(enriched);
 
     if (!this.publisher) return;
     try {
-      await this.publisher.publish(CHANNEL_ALARMS, JSON.stringify(alarm));
+      await this.publisher.publish(CHANNEL_ALARMS, JSON.stringify(enriched));
     } catch {
       // Non-fatal
     }
