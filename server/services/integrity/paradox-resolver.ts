@@ -158,6 +158,14 @@ export interface ParadoxResolverConfig {
   qualityWeight: number;
   /** Default minimum quorum for voting strategy */
   defaultVotingQuorum: number;
+  /**
+   * When true, `ingestEvent` detects conflicts but NEVER resolves them —
+   * resolution is driven externally (e.g. by the EvolutionaryResolver via the
+   * IntegrityService, #492). This is a hard master switch that overrides even a
+   * process area's explicit `autoResolveSeverity`, so a conflict is committed
+   * exactly once by the external owner rather than double-committed.
+   */
+  externalResolution: boolean;
 }
 
 const DEFAULT_CONFIG: ParadoxResolverConfig = {
@@ -166,6 +174,7 @@ const DEFAULT_CONFIG: ParadoxResolverConfig = {
   autoResolveLowSeverity: true,
   qualityWeight: 0.7,
   defaultVotingQuorum: 3,
+  externalResolution: false,
 };
 
 /**
@@ -344,6 +353,11 @@ export class ParadoxResolver extends EventEmitter {
   }
 
   private shouldAutoResolve(conflict: ConflictDetection, areaRules: ProcessAreaRules | null): boolean {
+    // Hard master switch (#492): when resolution is owned externally, never
+    // auto-resolve internally — otherwise the conflict is committed twice
+    // (once here, once by the external resolver).
+    if (this.config.externalResolution) return false;
+
     const severityOrder = ['low', 'medium', 'high', 'critical'];
     const conflictLevel = severityOrder.indexOf(conflict.severity);
 
@@ -491,6 +505,18 @@ export class ParadoxResolver extends EventEmitter {
       }
     }
 
+    this.commitResolution(conflict, resolution);
+    return resolution;
+  }
+
+  /**
+   * Record a resolution into the resolver's maps and emit the `resolved` /
+   * `resolved_event` events. Factored out of `resolve()` so an external
+   * strategy (e.g. the EvolutionaryResolver, #492) can commit its own
+   * resolution through the same path — otherwise downstream ADR-0024/0025
+   * listeners never see evolved resolutions.
+   */
+  commitResolution(conflict: ConflictDetection, resolution: Resolution): ResolvedEvent {
     this.resolutions.set(conflict.conflictId, resolution);
     this.enforceMapLimit(this.conflicts, ParadoxResolver.MAX_MAP_SIZE);
     this.enforceMapLimit(this.resolutions, ParadoxResolver.MAX_MAP_SIZE);
@@ -502,7 +528,43 @@ export class ParadoxResolver extends EventEmitter {
 
     this.emit('resolved', resolution);
     this.emit('resolved_event', resolved);
-    return resolution;
+    return resolved;
+  }
+
+  // ─── Read accessors for external resolvers (#492 ConflictContext) ─────────
+
+  /**
+   * Recent readings for a tag (oldest→newest) from the voting window,
+   * optionally excluding a set of event ids (e.g. the conflict's own events).
+   */
+  getRecentReadings(tag: string, excludeIds?: Set<string>): ScadaEvent[] {
+    const window = this.tagEventWindow.get(tag) ?? [];
+    const filtered = excludeIds ? window.filter(e => !excludeIds.has(e.id)) : window;
+    return [...filtered].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  /** Latest known value for a tag, or undefined if never seen. */
+  getLatestValue(tag: string): unknown | undefined {
+    return this.tagLatest.get(tag)?.value;
+  }
+
+  /**
+   * Tags linked to `tag` via a shared physics constraint (global + area) —
+   * a reasonable "neighbor" set for correlation checks.
+   */
+  getNeighborTags(tag: string, area?: string): string[] {
+    const areaRules = this.getRulesForArea(area);
+    const constraints = [
+      ...this.globalPhysicsConstraints,
+      ...(areaRules?.physicsConstraints ?? []),
+    ];
+    const neighbors = new Set<string>();
+    for (const c of constraints) {
+      if (c.tags.includes(tag)) {
+        for (const t of c.tags) if (t !== tag) neighbors.add(t);
+      }
+    }
+    return Array.from(neighbors);
   }
 
   /** Pick the best strategy for simultaneous readings */
