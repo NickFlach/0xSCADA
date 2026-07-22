@@ -5,8 +5,12 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'crypto';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { ResilienceManager } from '../resilience';
 import { MerkleTreeBuilder } from '../merkle';
+import { InMemoryPkcs11Provider } from '../pkcs11-provider';
 import type { EventBatch, HashedEvent } from '../pipeline';
 
 function hashedEvent(i: number): HashedEvent {
@@ -71,6 +75,56 @@ describe('ResilienceManager anchor delegates / fails closed (#489)', () => {
 
     expect(ok).toBe(true);
     expect(calls).toEqual([{ batchId: 'batch_1', merkleRoot: 'deadbeef' }]);
+  });
+
+  it('signs via a primary PKCS#11 signer when configured (#482)', async () => {
+    const emu = new InMemoryPkcs11Provider();
+    emu.setPin('1234');
+    emu.addKey('resilience-key');
+    const mgr = new ResilienceManager(
+      {
+        hsm: {
+          enabled: true,
+          fallbackToSoftware: true,
+          config: { mode: 'pkcs11', algorithm: 'RS256', pkcs11Library: '/emu.so', slot: 0, pin: '1234', keyId: 'resilience-key' },
+        },
+        blockchain: { enabled: true, retryAttempts: 1, retryDelayMs: 10, queueMaxSize: 100, anchor: async () => true },
+      },
+      { pkcs11Provider: emu },
+    );
+    managers.push(mgr);
+    await mgr.initialize();
+
+    const sig = await mgr.signMerkleRoot('0x' + 'ab'.repeat(32));
+    expect(sig.signature).toMatch(/^[0-9a-f]+$/);
+    // Signed by the PKCS#11 token, not the software fallback.
+    expect(sig.keyId).toBe('resilience-key');
+  });
+
+  it('falls back to the software signer when the primary PKCS#11 signer fails to initialize (#482)', async () => {
+    const emu = new InMemoryPkcs11Provider();
+    emu.setPin('1234'); // token expects 1234
+    emu.addKey('resilience-key');
+    const mgr = new ResilienceManager(
+      {
+        hsm: {
+          enabled: true,
+          fallbackToSoftware: true,
+          // Wrong PIN → primary init throws → software fallback engages. Give
+          // the software fallback a tmpdir keyPath so it doesn't write .keys/
+          // into the repo cwd.
+          config: { mode: 'pkcs11', algorithm: 'RS256', pkcs11Library: '/emu.so', slot: 0, pin: 'wrong', keyId: 'resilience-key', keyPath: mkdtempSync(join(tmpdir(), 'res-hsm-')) },
+        },
+        blockchain: { enabled: true, retryAttempts: 1, retryDelayMs: 10, queueMaxSize: 100, anchor: async () => true },
+      },
+      { pkcs11Provider: emu },
+    );
+    managers.push(mgr);
+    await mgr.initialize();
+
+    // Still signs — via the software fallback (a real RSA signature).
+    const sig = await mgr.signMerkleRoot('0x' + 'cd'.repeat(32));
+    expect(sig.signature).toMatch(/^[0-9a-f]+$/);
   });
 
   it('fails closed (returns false, no fake success) when no anchor operation is configured', async () => {

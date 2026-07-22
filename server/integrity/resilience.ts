@@ -7,7 +7,7 @@
  */
 
 import { EventEmitter } from 'events';
-import { MerkleRootSigner, HSMConfig, SignatureResult } from './hsm';
+import { MerkleRootSigner, HSMConfig, SignatureResult, type SignerDeps } from './hsm';
 import { EventBatch } from './pipeline';
 import { MerkleTreeBuilder } from './merkle';
 
@@ -187,9 +187,11 @@ export class ResilienceManager extends EventEmitter {
   private retryTimer?: NodeJS.Timeout;
   private healthStatus: HealthStatus;
   private componentMetrics: Map<string, any> = new Map();
+  private signerDeps: SignerDeps;
 
-  constructor(config: Partial<ResilienceConfig> = {}) {
+  constructor(config: Partial<ResilienceConfig> = {}, signerDeps: SignerDeps = {}) {
     super();
+    this.signerDeps = signerDeps;
     
     this.config = {
       hsm: {
@@ -233,7 +235,7 @@ export class ResilienceManager extends EventEmitter {
     // Initialize primary signer (HSM or software)
     if (this.config.hsm.enabled) {
       try {
-        this.primarySigner = new MerkleRootSigner(this.config.hsm.config);
+        this.primarySigner = new MerkleRootSigner(this.config.hsm.config, this.signerDeps);
         await this.primarySigner.initialize();
         this.updateComponentHealth('hsm', 'healthy');
       } catch (error) {

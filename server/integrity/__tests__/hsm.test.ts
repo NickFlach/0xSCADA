@@ -1,12 +1,10 @@
 /**
- * HSM signing path verification (issue #445).
+ * HSM signing path verification (issues #445, #482).
  *
- * The software signer gets a real round-trip suite (it previously had zero
- * working coverage — the only references lived in the openssl-gated e2e
- * file whose tests are all skipped). The PKCS#11 signer is pinned as
- * not-implemented: if someone lands a real implementation, these tests
- * fail loudly and the provider matrix in docs/security/hsm-signing.md must
- * be updated (#482 tracks the implementation).
+ * The software signer has a real round-trip suite. The PKCS#11 signer (#482) is
+ * now implemented and exercised end-to-end through an in-memory PKCS#11 emulator
+ * (session/login/find-key/sign/extract). Real-hardware validation against
+ * SoftHSMv2 runs in CI (.github/workflows/hsm-pkcs11.yml).
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { mkdtempSync, rmSync } from 'fs';
@@ -19,6 +17,7 @@ import {
   MerkleRootSigner,
   type HSMConfig,
 } from '../hsm';
+import { InMemoryPkcs11Provider } from '../pkcs11-provider';
 
 let keyDir: string;
 
@@ -105,20 +104,141 @@ describe('SoftwareSigner round-trip (#445)', () => {
   });
 });
 
-describe('PKCS#11 signer status pin (#445 → #482)', () => {
-  it('is a stub: every operation throws not-implemented', async () => {
-    const signer = new PKCS11Signer({
+describe('PKCS#11 signer (#482) — via in-memory PKCS#11 emulator', () => {
+  function pkcs11Config(): HSMConfig {
+    return {
       mode: 'pkcs11',
       algorithm: 'RS256',
-      pkcs11Library: '/usr/lib/softhsm/libsofthsm2.so',
+      pkcs11Library: '/emulated/libsofthsm2.so',
       slot: 0,
       pin: '1234',
-    });
+      keyId: 'anchor-key',
+    };
+  }
 
-    await expect(signer.initialize()).rejects.toThrow(/not yet implemented/);
-    await expect(signer.sign('root')).rejects.toThrow(/not yet implemented/);
-    await expect(signer.getPublicKey()).rejects.toThrow(/not yet implemented/);
-    await expect(signer.listKeys()).rejects.toThrow(/not yet implemented/);
+  function provisionedEmulator(): InMemoryPkcs11Provider {
+    const emu = new InMemoryPkcs11Provider();
+    emu.setPin('1234');
+    emu.addKey('anchor-key');
+    return emu;
+  }
+
+  it('signs a merkle root inside the token and verifies with the extracted public key', async () => {
+    const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
+    await signer.initialize();
+
+    const root = 'a'.repeat(64);
+    const result = await signer.sign(root);
+    expect(result.signature).toMatch(/^[0-9a-f]+$/);
+    expect(result.keyId).toBe('anchor-key');
+    expect(result.merkleRoot).toBe(root);
+
+    const verification = await signer.verify(root, result);
+    expect(verification.valid).toBe(true);
+    await signer.cleanup();
+  });
+
+  it('rejects a tampered root and a tampered signature', async () => {
+    const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
+    await signer.initialize();
+    const root = 'b'.repeat(64);
+    const result = await signer.sign(root);
+
+    expect((await signer.verify('c'.repeat(64), result)).valid).toBe(false);
+    expect((await signer.verify(root, { ...result, signature: result.signature.replace(/^../, 'ff') })).valid).toBe(false);
+    await signer.cleanup();
+  });
+
+  it('extracts an SPKI public key and lists keys', async () => {
+    const emu = provisionedEmulator();
+    emu.addKey('second-key');
+    const signer = new PKCS11Signer(pkcs11Config(), emu);
+    await signer.initialize();
+
+    const pem = await signer.getPublicKey('anchor-key');
+    expect(pem).toMatch(/^-----BEGIN PUBLIC KEY-----/);
+
+    const keys = await signer.listKeys();
+    expect(keys.map(k => k.keyId).sort()).toEqual(['anchor-key', 'second-key']);
+    expect(keys.every(k => k.mode === 'pkcs11')).toBe(true);
+    await signer.cleanup();
+  });
+
+  it('handles a DER-padded (leading 0x00) modulus from a vendor-style HSM', async () => {
+    // Emulator normally returns minimal bytes; simulate a module that pads with
+    // a leading zero. getPublicKey strips it to the canonical minimal JWK
+    // encoding (RFC 7518); the signer round-trips either way — a regression
+    // guard for the vendor-HSM padding case the minimal-bytes emulator misses.
+    const emu = provisionedEmulator();
+    emu.simulateDerPaddedModulus();
+    const signer = new PKCS11Signer(pkcs11Config(), emu);
+    await signer.initialize();
+    const root = 'e'.repeat(64);
+    const result = await signer.sign(root);
+    expect((await signer.verify(root, result)).valid).toBe(true);
+    expect(await signer.getPublicKey('anchor-key')).toMatch(/^-----BEGIN PUBLIC KEY-----/);
+    await signer.cleanup();
+  });
+
+  it('honors RS384 end-to-end (no silent RS256 mislabel — #482 review)', async () => {
+    const signer = new PKCS11Signer({ ...pkcs11Config(), algorithm: 'RS384' }, provisionedEmulator());
+    await signer.initialize();
+    const root = 'ab'.repeat(32);
+    const result = await signer.sign(root);
+    expect(result.algorithm).toBe('RS384');
+    // The signature must actually be SHA-384 — verify with the declared alg…
+    expect((await signer.verify(root, result)).valid).toBe(true);
+    // …and it must NOT verify as RS256 (proving it's genuinely SHA-384).
+    const { createVerify } = await import('crypto');
+    const pem = await signer.getPublicKey('anchor-key');
+    const asSha256 = createVerify('RSA-SHA256');
+    asSha256.update(root);
+    asSha256.end();
+    expect(asSha256.verify(pem, result.signature, 'hex')).toBe(false);
+    await signer.cleanup();
+  });
+
+  it('rejects an unsupported algorithm at construction', () => {
+    expect(() => new PKCS11Signer({ ...pkcs11Config(), algorithm: 'ES256' }, provisionedEmulator()))
+      .toThrow(/Unsupported RSA algorithm/);
+  });
+
+  it('throws a clear error when the keyId is not on the token', async () => {
+    const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
+    await signer.initialize();
+    await expect(signer.sign('root', 'no-such-key')).rejects.toThrow(/private key not found/);
+    await signer.cleanup();
+  });
+
+  it('fails login on the wrong PIN', async () => {
+    const emu = provisionedEmulator(); // expects '1234'
+    const signer = new PKCS11Signer({ ...pkcs11Config(), pin: 'wrong' }, emu);
+    await expect(signer.initialize()).rejects.toThrow(/PIN_INCORRECT/);
+  });
+
+  it('round-trips through the MerkleRootSigner facade with mode:pkcs11', async () => {
+    const facade = new MerkleRootSigner(pkcs11Config(), { pkcs11Provider: provisionedEmulator() });
+    const root = 'f'.repeat(64);
+    const signed = await facade.signMerkleRoot(root);
+    expect((await facade.verifyMerkleRootSignature(root, signed)).valid).toBe(true);
+    await facade.cleanup();
+  });
+
+  it('signature is byte-compatible with software RSA-SHA256 verification (interop)', async () => {
+    // A signature produced "in the token" must verify with a plain Node
+    // createVerify against the extracted public key — proving CKM_SHA256_RSA_PKCS
+    // interoperates with the relayer's verification.
+    const { createVerify } = await import('crypto');
+    const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
+    await signer.initialize();
+    const root = 'd'.repeat(64);
+    const result = await signer.sign(root);
+    const pem = await signer.getPublicKey('anchor-key');
+    const v = createVerify('RSA-SHA256');
+    v.update(root);
+    v.end();
+    expect(v.verify(pem, result.signature, 'hex')).toBe(true);
+    await signer.cleanup();
   });
 
   it('factory routes modes correctly and rejects hardware mode', () => {
