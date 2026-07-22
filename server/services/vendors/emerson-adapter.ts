@@ -26,7 +26,6 @@ import {
   MODBUS_EXCEPTION,
   buildModbusReadRequest,
   buildModbusWriteSingleRegister as sharedBuildWriteSingle,
-  buildModbusWriteMultipleRegisters as sharedBuildWriteMultiple,
   ModbusTransactionCounter,
 } from './modbus-utils';
 
@@ -386,11 +385,9 @@ function parseHartCmd3Response(data: Buffer): {
 }
 
 // ─── Modbus TCP Frame Encoding (delegated to shared modbus-utils) ────
-
-/** Alias for backward compatibility */
-const buildModbusTcpRequest = buildModbusReadRequest;
-const buildModbusWriteSingleRegister = sharedBuildWriteSingle;
-const buildModbusWriteMultipleRegisters = sharedBuildWriteMultiple;
+// Modbus requests go through the per-instance wrapper methods (mbRead/mbWriteReg)
+// so transaction IDs are per-instance (#363); the former module-level aliases
+// shared the global counter and are removed.
 
 /** Parse Modbus TCP response */
 function parseModbusTcpResponse(buf: Buffer): { unitId: number; fc: number; data: Buffer; isException: boolean; exceptionCode?: number } {

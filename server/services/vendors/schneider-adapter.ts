@@ -690,6 +690,20 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
   /** Per-instance Modbus transaction-ID counter (#363). */
   private readonly modbusTx = new ModbusTransactionCounter();
 
+  /**
+   * Send an IEC-104 I-frame with k-window enforcement (#363). This stub adapter
+   * has no socket/receive loop to process S-frame acks, so it optimistically
+   * confirms each frame immediately — a real transport removes the immediate ack
+   * and instead calls processIncomingIec104Frame() from the socket's data
+   * handler. This keeps the k-limit enforced (a genuinely lagging peer still
+   * fills the window) without permanently stalling polling in the stub.
+   */
+  private sendIec104(conn: Iec104Connection, asdu: Buffer): Buffer {
+    const packet = sendIec104IFrame(conn, asdu);
+    acknowledgeIec104Frames(conn, 1); // stub: immediate confirmation
+    return packet;
+  }
+
   private mbRead(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
     return buildModbusReadRequest(unitId, fc, startAddress, quantity, this.modbusTx.next());
   }
@@ -775,7 +789,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
 
     // Step 3: Send General Interrogation
     const giAsdu = buildIec104InterrogationAsdu(commonAddress);
-    const giPacket = sendIec104IFrame(conn, giAsdu);
+    const giPacket = this.sendIec104(conn, giAsdu);
     this.messagesProcessed++;
 
     // Start T3 keep-alive (TESTFR)
@@ -932,7 +946,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       readAsdu.writeUInt8((ioa >> 8) & 0xFF, pos); pos += 1;
       readAsdu.writeUInt8((ioa >> 16) & 0xFF, pos);
 
-      const packet = sendIec104IFrame(conn, readAsdu);
+      const packet = this.sendIec104(conn, readAsdu);
       this.messagesProcessed++;
     }
 
@@ -994,7 +1008,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       asdu = buildIec104SingleCommandAsdu(conn.commonAddress, ioa, !!tag.value);
     }
 
-    const packet = sendIec104IFrame(conn, asdu);
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
@@ -1074,7 +1088,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     if (!conn) return;
 
     const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
-    const packet = sendIec104IFrame(conn, asdu);
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
@@ -1084,7 +1098,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     if (!conn) return;
 
     const asdu = buildIec104InterrogationAsdu(conn.commonAddress);
-    const packet = sendIec104IFrame(conn, asdu);
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
