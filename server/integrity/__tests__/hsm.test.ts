@@ -180,6 +180,29 @@ describe('PKCS#11 signer (#482) — via in-memory PKCS#11 emulator', () => {
     await signer.cleanup();
   });
 
+  it('honors RS384 end-to-end (no silent RS256 mislabel — #482 review)', async () => {
+    const signer = new PKCS11Signer({ ...pkcs11Config(), algorithm: 'RS384' }, provisionedEmulator());
+    await signer.initialize();
+    const root = 'ab'.repeat(32);
+    const result = await signer.sign(root);
+    expect(result.algorithm).toBe('RS384');
+    // The signature must actually be SHA-384 — verify with the declared alg…
+    expect((await signer.verify(root, result)).valid).toBe(true);
+    // …and it must NOT verify as RS256 (proving it's genuinely SHA-384).
+    const { createVerify } = await import('crypto');
+    const pem = await signer.getPublicKey('anchor-key');
+    const asSha256 = createVerify('RSA-SHA256');
+    asSha256.update(root);
+    asSha256.end();
+    expect(asSha256.verify(pem, result.signature, 'hex')).toBe(false);
+    await signer.cleanup();
+  });
+
+  it('rejects an unsupported algorithm at construction', () => {
+    expect(() => new PKCS11Signer({ ...pkcs11Config(), algorithm: 'ES256' }, provisionedEmulator()))
+      .toThrow(/Unsupported RSA algorithm/);
+  });
+
   it('throws a clear error when the keyId is not on the token', async () => {
     const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
     await signer.initialize();

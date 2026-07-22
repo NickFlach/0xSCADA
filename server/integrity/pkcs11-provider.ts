@@ -23,6 +23,9 @@ import { generateKeyPairSync, createPublicKey, createSign } from 'crypto';
 /** Opaque handle to a private key object inside the HSM session. */
 export type Pkcs11KeyHandle = unknown;
 
+/** Node signing algorithm the mechanism must match (RS256/384/512 → RSA-SHAxxx). */
+export type NodeRsaAlgorithm = 'RSA-SHA256' | 'RSA-SHA384' | 'RSA-SHA512';
+
 export interface Pkcs11OpenConfig {
   library: string;
   slot: number;
@@ -47,8 +50,8 @@ export interface Pkcs11Provider {
   findPrivateKeyHandle(label: string): Promise<Pkcs11KeyHandle | null>;
   /** Public key material (modulus + exponent) by CKA_LABEL, or null. */
   findPublicKey(label: string): Promise<Pkcs11PublicKey | null>;
-  /** CKM_SHA256_RSA_PKCS signature over `data`. */
-  sign(handle: Pkcs11KeyHandle, data: Buffer): Promise<Buffer>;
+  /** RSA PKCS#1 v1.5 signature over `data` using the given hash algorithm. */
+  sign(handle: Pkcs11KeyHandle, data: Buffer, algorithm: NodeRsaAlgorithm): Promise<Buffer>;
   /** Labels of all key pairs visible in the session. */
   listKeyLabels(): Promise<string[]>;
   /** Log out, close the session, finalize. */
@@ -83,7 +86,14 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
 
     const pkcs11 = new pkcs11js.PKCS11();
     pkcs11.load(config.library);
-    pkcs11.C_Initialize();
+    // C_Initialize is process-global per module: a second provider in the same
+    // process would otherwise throw CKR_CRYPTOKI_ALREADY_INITIALIZED.
+    try {
+      pkcs11.C_Initialize();
+    } catch (err) {
+      const msg = String((err as Error)?.message ?? err);
+      if (!/ALREADY_INITIALIZED/i.test(msg)) throw err;
+    }
     const slots = pkcs11.C_GetSlotList(true);
     const slot = slots[config.slot ?? 0];
     if (slot === undefined) {
@@ -110,9 +120,14 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
       { type: p.CKA_CLASS, value: cls },
       { type: p.CKA_LABEL, value: label },
     ]);
-    const handle = p.C_FindObjects(this.session);
-    p.C_FindObjectsFinal(this.session);
-    return handle ?? null;
+    try {
+      const handle = p.C_FindObjects(this.session);
+      return handle ?? null;
+    } finally {
+      // Always close the find operation, else the session is left with an
+      // active operation (CKR_OPERATION_ACTIVE on the next init).
+      p.C_FindObjectsFinal(this.session);
+    }
   }
 
   async findPrivateKeyHandle(label: string): Promise<Pkcs11KeyHandle | null> {
@@ -131,11 +146,20 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
     return { modulus: Buffer.from(attrs[0].value), exponent: Buffer.from(attrs[1].value) };
   }
 
-  async sign(handle: Pkcs11KeyHandle, data: Buffer): Promise<Buffer> {
+  async sign(handle: Pkcs11KeyHandle, data: Buffer, algorithm: NodeRsaAlgorithm): Promise<Buffer> {
     this.ensureOpen();
-    this.pkcs11.C_SignInit(this.session, { mechanism: this.pkcs11.CKM_SHA256_RSA_PKCS }, handle);
-    // 2048-bit RSA → 256-byte signature; buffer is sized generously.
-    return Buffer.from(this.pkcs11.C_Sign(this.session, data, Buffer.alloc(512)));
+    const mechanism = this.mechanismFor(algorithm);
+    this.pkcs11.C_SignInit(this.session, { mechanism }, handle);
+    // 4096-bit RSA → 512-byte signature; buffer is sized generously.
+    return Buffer.from(this.pkcs11.C_Sign(this.session, data, Buffer.alloc(1024)));
+  }
+
+  private mechanismFor(algorithm: NodeRsaAlgorithm): number {
+    switch (algorithm) {
+      case 'RSA-SHA256': return this.pkcs11.CKM_SHA256_RSA_PKCS;
+      case 'RSA-SHA384': return this.pkcs11.CKM_SHA384_RSA_PKCS;
+      case 'RSA-SHA512': return this.pkcs11.CKM_SHA512_RSA_PKCS;
+    }
   }
 
   async listKeyLabels(): Promise<string[]> {
@@ -143,13 +167,16 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
     const p = this.pkcs11;
     p.C_FindObjectsInit(this.session, [{ type: p.CKA_CLASS, value: p.CKO_PUBLIC_KEY }]);
     const labels: string[] = [];
-    for (;;) {
-      const handle = p.C_FindObjects(this.session);
-      if (!handle) break;
-      const attrs = p.C_GetAttributeValue(this.session, handle, [{ type: p.CKA_LABEL }]);
-      labels.push(Buffer.from(attrs[0].value).toString('utf8'));
+    try {
+      for (;;) {
+        const handle = p.C_FindObjects(this.session);
+        if (!handle) break;
+        const attrs = p.C_GetAttributeValue(this.session, handle, [{ type: p.CKA_LABEL }]);
+        labels.push(Buffer.from(attrs[0].value).toString('utf8'));
+      }
+    } finally {
+      p.C_FindObjectsFinal(this.session);
     }
-    p.C_FindObjectsFinal(this.session);
     return labels;
   }
 
@@ -236,13 +263,13 @@ export class InMemoryPkcs11Provider implements Pkcs11Provider {
     return { modulus: k.modulus, exponent: k.exponent };
   }
 
-  async sign(handle: Pkcs11KeyHandle, data: Buffer): Promise<Buffer> {
+  async sign(handle: Pkcs11KeyHandle, data: Buffer, algorithm: NodeRsaAlgorithm): Promise<Buffer> {
     this.ensureOpen();
     const label = (handle as { label: string }).label;
     const k = this.keys.get(label);
     if (!k) throw new Error(`PKCS#11 (emulated): key handle not found`);
-    // CKM_SHA256_RSA_PKCS ≡ RSA-SHA256 hash-then-sign.
-    return createSign('RSA-SHA256').update(data).sign(k.privateKeyPem);
+    // CKM_SHAxxx_RSA_PKCS ≡ Node RSA-SHAxxx hash-then-sign.
+    return createSign(algorithm).update(data).sign(k.privateKeyPem);
   }
 
   async listKeyLabels(): Promise<string[]> {

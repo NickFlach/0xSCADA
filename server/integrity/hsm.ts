@@ -9,7 +9,18 @@
 import { createSign, createVerify, createPublicKey, generateKeyPairSync } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
-import { Pkcs11jsProvider, type Pkcs11Provider } from './pkcs11-provider';
+import { Pkcs11jsProvider, type Pkcs11Provider, type NodeRsaAlgorithm } from './pkcs11-provider';
+
+/** Map an RS256/384/512 algorithm label to the Node RSA-SHAxxx name. */
+function nodeRsaAlgorithm(algorithm: string): NodeRsaAlgorithm {
+  switch (algorithm) {
+    case 'RS256': return 'RSA-SHA256';
+    case 'RS384': return 'RSA-SHA384';
+    case 'RS512': return 'RSA-SHA512';
+    default:
+      throw new Error(`Unsupported RSA algorithm "${algorithm}" (expected RS256/RS384/RS512)`);
+  }
+}
 
 /** Optional dependency injection for signer construction (e.g. a test PKCS#11 provider). */
 export interface SignerDeps {
@@ -294,6 +305,9 @@ export class PKCS11Signer extends BaseSigner {
   constructor(config: HSMConfig, provider?: Pkcs11Provider) {
     super({ ...config, mode: 'pkcs11' });
     this.provider = provider ?? new Pkcs11jsProvider();
+    // Validate the algorithm up front so a bad config fails at construction,
+    // not with a silently-mislabeled signature later.
+    nodeRsaAlgorithm(this.config.algorithm);
   }
 
   private defaultKeyId(keyId?: string): string {
@@ -315,7 +329,7 @@ export class PKCS11Signer extends BaseSigner {
     if (!handle) {
       throw new Error(`PKCS#11: private key not found for keyId "${id}"`);
     }
-    const signature = await this.provider.sign(handle, Buffer.from(data, 'utf8'));
+    const signature = await this.provider.sign(handle, Buffer.from(data, 'utf8'), nodeRsaAlgorithm(this.config.algorithm));
     return {
       signature: signature.toString('hex'),
       algorithm: this.config.algorithm,
@@ -333,7 +347,9 @@ export class PKCS11Signer extends BaseSigner {
     };
     try {
       const publicKeyPem = await this.getPublicKey(signatureResult.keyId);
-      const verify = createVerify('RSA-SHA256');
+      // Verify with the algorithm the signature declares, so a mismatched
+      // label can't pass.
+      const verify = createVerify(nodeRsaAlgorithm(signatureResult.algorithm));
       verify.update(data);
       verify.end();
       const valid = verify.verify(publicKeyPem, signatureResult.signature, 'hex');

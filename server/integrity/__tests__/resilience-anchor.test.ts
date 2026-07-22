@@ -5,6 +5,9 @@
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import { createHash } from 'crypto';
+import { mkdtempSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { ResilienceManager } from '../resilience';
 import { MerkleTreeBuilder } from '../merkle';
 import { InMemoryPkcs11Provider } from '../pkcs11-provider';
@@ -107,8 +110,10 @@ describe('ResilienceManager anchor delegates / fails closed (#489)', () => {
         hsm: {
           enabled: true,
           fallbackToSoftware: true,
-          // Wrong PIN → primary init throws → software fallback engages.
-          config: { mode: 'pkcs11', algorithm: 'RS256', pkcs11Library: '/emu.so', slot: 0, pin: 'wrong', keyId: 'resilience-key', keyPath: undefined },
+          // Wrong PIN → primary init throws → software fallback engages. Give
+          // the software fallback a tmpdir keyPath so it doesn't write .keys/
+          // into the repo cwd.
+          config: { mode: 'pkcs11', algorithm: 'RS256', pkcs11Library: '/emu.so', slot: 0, pin: 'wrong', keyId: 'resilience-key', keyPath: mkdtempSync(join(tmpdir(), 'res-hsm-')) },
         },
         blockchain: { enabled: true, retryAttempts: 1, retryDelayMs: 10, queueMaxSize: 100, anchor: async () => true },
       },
