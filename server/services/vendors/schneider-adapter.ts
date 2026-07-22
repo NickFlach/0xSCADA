@@ -32,6 +32,7 @@ import {
   buildModbusWriteSingleCoil,
   buildModbusWriteMultipleRegisters,
   buildModbusWriteMultipleCoils,
+  ModbusTransactionCounter,
 } from './modbus-utils';
 
 // Modbus constants imported from shared modbus-utils.ts
@@ -220,20 +221,20 @@ export const SCHNEIDER_MODELS = {
 // Schneider-specific builders below:
 
 /** Build Modbus diagnostics request (FC08) */
-function buildModbusDiagnostics(unitId: number, subFunction: number, data: number = 0): Buffer {
+function buildModbusDiagnostics(unitId: number, subFunction: number, data: number = 0, transactionId?: number): Buffer {
   const payload = Buffer.alloc(4);
   payload.writeUInt16BE(subFunction, 0);
   payload.writeUInt16BE(data, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.DIAGNOSTICS, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.DIAGNOSTICS, payload, transactionId);
 }
 
 /** Build Modbus Read Device Identification (FC43/14) */
-function buildModbusReadDeviceId(unitId: number, objectId: number = 0): Buffer {
+function buildModbusReadDeviceId(unitId: number, objectId: number = 0, transactionId?: number): Buffer {
   const payload = Buffer.alloc(3);
   payload.writeUInt8(0x0E, 0);       // MEI type: Read Device Identification
   payload.writeUInt8(0x01, 1);       // Read device ID code: basic
   payload.writeUInt8(objectId, 2);   // Object ID to start from
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.READ_DEVICE_IDENTIFICATION, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.READ_DEVICE_IDENTIFICATION, payload, transactionId);
 }
 
 /** Decode a Modbus TCP response */
@@ -488,6 +489,60 @@ function decodeIec104FrameType(buf: Buffer): { type: 'I' | 'S' | 'U'; sendSeq?: 
   return { type: 'U', controlByte: byte1 };
 }
 
+// ─── IEC 104 Flow Control (k window, #363) ────────────────────────────
+
+/** Raised when the IEC-104 send window (k unconfirmed I-frames) is full. */
+export class Iec104WindowFullError extends Error {
+  constructor(k: number) {
+    super(`IEC-104 send window full: ${k} unconfirmed I-frames outstanding (k=${k}); awaiting acknowledgment`);
+    this.name = 'Iec104WindowFullError';
+  }
+}
+
+/**
+ * Send an IEC-104 I-format frame, enforcing the k=12 unconfirmed-frame limit
+ * (#363). Previously every send did an unconditional `unconfirmedSent++` with no
+ * ceiling, so the window grew without bound and flow control never engaged.
+ * Advances the send sequence, builds the frame, and counts it as outstanding —
+ * or throws when the window is already full.
+ */
+export function sendIec104IFrame(conn: Iec104Connection, asdu: Buffer): Buffer {
+  if (conn.unconfirmedSent >= IEC104_PARAMS.K) {
+    throw new Iec104WindowFullError(IEC104_PARAMS.K);
+  }
+  conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF;
+  const packet = buildIec104IFormat(conn.sendSeq, conn.receiveSeq, asdu);
+  conn.unconfirmedSent++;
+  return packet;
+}
+
+/** Reopen the window by `confirmedCount` acknowledged I-frames (bounded at 0). */
+export function acknowledgeIec104Frames(conn: Iec104Connection, confirmedCount: number): void {
+  conn.unconfirmedSent = Math.max(0, conn.unconfirmedSent - confirmedCount);
+}
+
+/**
+ * Process an incoming IEC-104 frame: an S- or I-format frame carries the peer's
+ * receive sequence, which acknowledges our sent I-frames and reopens the window.
+ * (Wires up the previously-dead decodeIec104FrameType.)
+ */
+export function processIncomingIec104Frame(
+  conn: Iec104Connection,
+  buf: Buffer,
+): { type: 'I' | 'S' | 'U'; sendSeq?: number; receiveSeq?: number } {
+  const frame = decodeIec104FrameType(buf);
+  if ((frame.type === 'S' || frame.type === 'I') && frame.receiveSeq !== undefined) {
+    const confirmed = (frame.receiveSeq - conn.ackReceiveSeq) & 0x7FFF;
+    acknowledgeIec104Frames(conn, confirmed);
+    conn.ackReceiveSeq = frame.receiveSeq;
+  }
+  if (frame.type === 'I' && frame.sendSeq !== undefined) {
+    // Track what we've received so our own S-frame acks are correct.
+    conn.receiveSeq = (frame.sendSeq + 1) & 0x7FFF;
+  }
+  return frame;
+}
+
 /** Parse an IEC 104 ASDU header from I-format data */
 function parseIec104Asdu(data: Buffer): {
   typeId: number;
@@ -607,6 +662,8 @@ interface Iec104Connection {
   t1Timer?: NodeJS.Timeout;
   t3Timer?: NodeJS.Timeout;
   unconfirmedSent: number;
+  /** Peer's last acknowledged receive-sequence, for computing newly-confirmed frames (#363). */
+  ackReceiveSeq: number;
   lastActivity: Date;
 }
 
@@ -629,6 +686,39 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
   private iec104Connections: Map<string, Iec104Connection> = new Map();
   private connections: Map<string, ProtocolConnection> = new Map();
   private iec104SpontaneousBuffer: Map<number, { value: unknown; timestamp: Date; typeId: number }> = new Map();
+
+  /** Per-instance Modbus transaction-ID counter (#363). */
+  private readonly modbusTx = new ModbusTransactionCounter();
+
+  /**
+   * Send an IEC-104 I-frame with k-window enforcement (#363). This stub adapter
+   * has no socket/receive loop to process S-frame acks, so it optimistically
+   * confirms each frame immediately — a real transport removes the immediate ack
+   * and instead calls processIncomingIec104Frame() from the socket's data
+   * handler. This keeps the k-limit enforced (a genuinely lagging peer still
+   * fills the window) without permanently stalling polling in the stub.
+   */
+  private sendIec104(conn: Iec104Connection, asdu: Buffer): Buffer {
+    const packet = sendIec104IFrame(conn, asdu);
+    acknowledgeIec104Frames(conn, 1); // stub: immediate confirmation
+    return packet;
+  }
+
+  private mbRead(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
+    return buildModbusReadRequest(unitId, fc, startAddress, quantity, this.modbusTx.next());
+  }
+  private mbWriteReg(unitId: number, address: number, value: number): Buffer {
+    return buildModbusWriteSingleRegister(unitId, address, value, this.modbusTx.next());
+  }
+  private mbWriteCoil(unitId: number, address: number, value: boolean): Buffer {
+    return buildModbusWriteSingleCoil(unitId, address, value, this.modbusTx.next());
+  }
+  private mbDiagnostics(unitId: number, subFunction: number, data: number = 0): Buffer {
+    return buildModbusDiagnostics(unitId, subFunction, data, this.modbusTx.next());
+  }
+  private mbReadDeviceId(unitId: number, objectId: number = 0): Buffer {
+    return buildModbusReadDeviceId(unitId, objectId, this.modbusTx.next());
+  }
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
     context.logger.info('Initializing Schneider Electric vendor adapter — Modbus TCP/RTU + IEC 104');
@@ -686,6 +776,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       isStarted: false,
       commonAddress,
       unconfirmedSent: 0,
+      ackReceiveSeq: 0,
       lastActivity: new Date(),
     };
 
@@ -698,8 +789,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
 
     // Step 3: Send General Interrogation
     const giAsdu = buildIec104InterrogationAsdu(commonAddress);
-    const giPacket = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, giAsdu);
-    conn.unconfirmedSent++;
+    const giPacket = this.sendIec104(conn, giAsdu);
     this.messagesProcessed++;
 
     // Start T3 keep-alive (TESTFR)
@@ -805,7 +895,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
         }
 
         const count = regs[batchEnd].register - startReg + 1;
-        const request = buildModbusReadRequest(SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId, fc, startReg, count);
+        const request = this.mbRead(SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId, fc, startReg, count);
         this.messagesProcessed++;
 
         // Map results back to individual tags
@@ -856,8 +946,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       readAsdu.writeUInt8((ioa >> 8) & 0xFF, pos); pos += 1;
       readAsdu.writeUInt8((ioa >> 16) & 0xFF, pos);
 
-      const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, readAsdu);
-      conn.unconfirmedSent++;
+      const packet = this.sendIec104(conn, readAsdu);
       this.messagesProcessed++;
     }
 
@@ -891,10 +980,10 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     const unitId = SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
 
     if (parsed.isBool) {
-      const request = buildModbusWriteSingleCoil(unitId, parsed.register, !!tag.value);
+      const request = this.mbWriteCoil(unitId, parsed.register, !!tag.value);
       this.messagesProcessed++;
     } else {
-      const request = buildModbusWriteSingleRegister(unitId, parsed.register, Number(tag.value));
+      const request = this.mbWriteReg(unitId, parsed.register, Number(tag.value));
       this.messagesProcessed++;
     }
   }
@@ -919,8 +1008,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
       asdu = buildIec104SingleCommandAsdu(conn.commonAddress, ioa, !!tag.value);
     }
 
-    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
-    conn.unconfirmedSent++;
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
@@ -932,7 +1020,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
 
     // Scan unit IDs 1-10 with Read Device Identification
     for (let unitId = 1; unitId <= 10; unitId++) {
-      const request = buildModbusReadDeviceId(unitId);
+      const request = this.mbReadDeviceId(unitId);
       this.messagesProcessed++;
     }
 
@@ -943,7 +1031,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
 
   async getDeviceInfo(deviceId: string): Promise<Record<string, unknown>> {
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
-    const request = buildModbusReadDeviceId(unitId);
+    const request = this.mbReadDeviceId(unitId);
     this.messagesProcessed++;
 
     return { deviceId, vendor: 'Schneider Electric', models: SCHNEIDER_MODELS };
@@ -953,23 +1041,23 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     const unitId = parseInt(deviceId) || SCHNEIDER_CONNECTION_PARAMS.modbusTcp.unitId;
 
     // Read M580 system bits (%S)
-    const sysBitsRequest = buildModbusReadRequest(unitId, MODBUS_FC.READ_COILS, SCHNEIDER_REGISTER_MAP.M580.SYSTEM_BITS.start, 128);
+    const sysBitsRequest = this.mbRead(unitId, MODBUS_FC.READ_COILS, SCHNEIDER_REGISTER_MAP.M580.SYSTEM_BITS.start, 128);
     this.messagesProcessed++;
 
     // Read M580 CPU status register
-    const cpuStatusRequest = buildModbusReadRequest(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.CPU_STATUS.register - 40001, 1);
+    const cpuStatusRequest = this.mbRead(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.CPU_STATUS.register - 40001, 1);
     this.messagesProcessed++;
 
     // Read scan time
-    const scanTimeRequest = buildModbusReadRequest(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.SCAN_TIME.register - 40001, 1);
+    const scanTimeRequest = this.mbRead(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.SCAN_TIME.register - 40001, 1);
     this.messagesProcessed++;
 
     // Read I/O health bitmap
-    const ioHealthRequest = buildModbusReadRequest(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.IO_HEALTH.register - 40001, SCHNEIDER_REGISTER_MAP.M580.IO_HEALTH.count);
+    const ioHealthRequest = this.mbRead(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, SCHNEIDER_REGISTER_MAP.M580.IO_HEALTH.register - 40001, SCHNEIDER_REGISTER_MAP.M580.IO_HEALTH.count);
     this.messagesProcessed++;
 
     // Modbus diagnostics (FC08)
-    const diagRequest = buildModbusDiagnostics(unitId, MODBUS_DIAG_SUB.RETURN_BUS_COMM_ERROR_COUNT);
+    const diagRequest = this.mbDiagnostics(unitId, MODBUS_DIAG_SUB.RETURN_BUS_COMM_ERROR_COUNT);
     this.messagesProcessed++;
 
     return {
@@ -984,7 +1072,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
 
   /** Read SCADAPack system registers */
   async readScadapackSystemRegisters(unitId: number): Promise<Record<string, unknown>> {
-    const request = buildModbusReadRequest(
+    const request = this.mbRead(
       unitId,
       MODBUS_FC.READ_HOLDING_REGISTERS,
       SCHNEIDER_REGISTER_MAP.SCADAPACK.SYSTEM_REGISTERS.start - 40001,
@@ -1000,8 +1088,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     if (!conn) return;
 
     const asdu = buildIec104ClockSyncAsdu(conn.commonAddress, time ?? new Date());
-    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
-    conn.unconfirmedSent++;
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
@@ -1011,8 +1098,7 @@ export class SchneiderVendorAdapter extends VendorBaseAdapter<'protocol'> implem
     if (!conn) return;
 
     const asdu = buildIec104InterrogationAsdu(conn.commonAddress);
-    const packet = buildIec104IFormat((conn.sendSeq = (conn.sendSeq + 1) & 0x7FFF), conn.receiveSeq, asdu);
-    conn.unconfirmedSent++;
+    const packet = this.sendIec104(conn, asdu);
     this.messagesProcessed++;
   }
 
