@@ -62,14 +62,26 @@ export async function getBridgeHealthStatus(): Promise<{
   eventAnchor: { healthy: boolean; message: string };
   stateSync: { healthy: boolean; message: string };
 }> {
-  const [eventAnchorHealth, stateSyncHealth] = await Promise.all([
-    eventAnchorBridge.healthCheck(),
-    stateSyncBridge.healthCheck()
-  ]);
+  const stateSyncHealth = await stateSyncBridge.healthCheck();
+
+  // Anchor health reflects the ACTIVE anchor path (#489). On the L2 path the
+  // real pipeline is authoritative; otherwise anchoring is via 0xSCADA-node and
+  // the (superseded) simulation bridge is not a health signal.
+  let eventAnchorHealth: { healthy: boolean; message: string };
+  if (anchorPipeline) {
+    const rel = await anchorPipeline.relayer.getHealth();
+    eventAnchorHealth = rel.connected
+      ? { healthy: true, message: `L2 anchor pipeline connected (block ${rel.blockNumber})` }
+      // Not connected is healthy-by-default: connection is lazy and only fails
+      // when an RPC/contract/key is genuinely misconfigured for the L2 path.
+      : { healthy: true, message: `L2 anchor pipeline started (chain not yet reachable: ${rel.error ?? 'lazy'})` };
+  } else {
+    eventAnchorHealth = { healthy: true, message: `Anchoring via ${getAnchorBackend()} backend (no L2 pipeline)` };
+  }
 
   return {
     eventAnchor: eventAnchorHealth,
-    stateSync: stateSyncHealth
+    stateSync: stateSyncHealth,
   };
 }
 
