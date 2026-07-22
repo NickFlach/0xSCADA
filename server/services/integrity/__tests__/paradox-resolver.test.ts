@@ -96,6 +96,26 @@ describe('ParadoxResolver voting hardening (#491 B3)', () => {
     expect(res.mergedValue as number).toBeLessThan(150);
   });
 
+  it('a 2-2 vote tie is broken deterministically by insertion order', async () => {
+    const r = new ParadoxResolver({ simultaneousWindowMs: 100000 });
+    r.registerProcessAreaRules(areaRules({ preferredStrategy: 'voting', minVotingQuorum: 4 }));
+    const now = Date.now();
+    // Two devices vote 10, two vote 20 — an even split.
+    await r.ingestEvent(evt({ deviceId: 'd1', value: 10, timestamp: new Date(now) }));
+    await r.ingestEvent(evt({ deviceId: 'd2', value: 10, timestamp: new Date(now + 1) }));
+    await r.ingestEvent(evt({ deviceId: 'd3', value: 20, timestamp: new Date(now + 2) }));
+    await r.ingestEvent(evt({ deviceId: 'd4', value: 20, timestamp: new Date(now + 3) }));
+    const c = conflict([
+      evt({ deviceId: 'd1', value: 10 }),
+      evt({ id: 'e2', deviceId: 'd3', value: 20 }),
+    ]);
+    const res = await r.resolve(c);
+    expect(res.method).toBe('voting');
+    // Strict `>` keeps the first bucket seen (value 10) on a tie.
+    expect(res.mergedValue as number).toBeCloseTo(10, 5);
+    expect(res.confidence).toBeCloseTo(0.5, 5); // 2 of 4
+  });
+
   it('zero-confidence winning readings do not produce a NaN merged value', async () => {
     const r = new ParadoxResolver({ simultaneousWindowMs: 100000, qualityWeight: 1.0 });
     r.registerProcessAreaRules(areaRules({ preferredStrategy: 'voting', minVotingQuorum: 3 }));
@@ -151,6 +171,23 @@ describe('ParadoxResolver auto-resolve config (#491 minor)', () => {
     // The area opted in explicitly → auto-resolution should have fired despite
     // autoResolveLowSeverity=false globally.
     expect(resolvedEvents.length).toBeGreaterThan(0);
+  });
+
+  it('a registered area that OMITS autoResolveSeverity defers to the global switch (off → no auto-resolve)', async () => {
+    // autoResolveSeverity is optional (#451): an area with rules but no explicit
+    // threshold must fall through to the global kill-switch, not auto-resolve.
+    const r = new ParadoxResolver({ autoResolveLowSeverity: false, simultaneousWindowMs: 100000 });
+    r.registerProcessAreaRules(areaRules({
+      processArea: 'deferring-area',
+      preferredStrategy: 'temporal_priority',
+      autoResolveSeverity: undefined, // explicitly no per-area threshold
+    }));
+    const resolved: unknown[] = [];
+    r.on('resolved', res => resolved.push(res));
+    const now = Date.now();
+    await r.ingestEvent(evt({ tag: 'LT-3', deviceId: 'd1', value: 10, timestamp: new Date(now), processArea: 'deferring-area' }));
+    await r.ingestEvent(evt({ tag: 'LT-3', deviceId: 'd2', value: 99, timestamp: new Date(now + 5), processArea: 'deferring-area' }));
+    expect(resolved.length).toBe(0);
   });
 
   it('with the global flag off and no area rule, conflicts are NOT auto-resolved', async () => {

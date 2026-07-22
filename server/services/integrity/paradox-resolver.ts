@@ -136,8 +136,13 @@ export interface ProcessAreaRules {
   physicsConstraints: PhysicsConstraint[];
   /** Sensor priority order (highest first) */
   sensorPriority: string[];
-  /** Auto-resolve threshold: conflicts below this severity auto-resolve */
-  autoResolveSeverity: ConflictDetection['severity'];
+  /**
+   * Auto-resolve threshold: conflicts at/below this severity auto-resolve.
+   * Optional (#451): when omitted, the area defers to the global
+   * `autoResolveLowSeverity` switch, so an operator can flip that off as a
+   * real kill-switch. When set, the area opts in regardless of the global flag.
+   */
+  autoResolveSeverity?: ConflictDetection['severity'];
   /** Custom confidence weight overrides per device */
   deviceConfidenceOverrides: Record<string, number>;
 }

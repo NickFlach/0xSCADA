@@ -320,6 +320,13 @@ export class EvolutionEngine {
       ...p2.slice(cut2).map(p => ({ ...p })),
     ];
 
+    // Empty-child guard: cut1=0 with cut2=p2.length yields no genes at all.
+    // An empty genome evaluates to the constant 0.5 fallback (genome.ts) and
+    // could win selection by doing nothing — inherit a parent instead.
+    if (childPrimitives.length === 0) {
+      return (p1.length >= p2.length ? parent1 : parent2).clone();
+    }
+
     // Deduplicate: if same primitive appears twice, merge weights (average)
     const seen = new Map<string, WeightedPrimitive>();
     for (const wp of childPrimitives) {

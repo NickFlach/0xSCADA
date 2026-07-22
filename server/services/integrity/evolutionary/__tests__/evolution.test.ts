@@ -57,10 +57,12 @@ describe('seedable RNG (#451)', () => {
     for (const x of seqA) expect(x).toBeGreaterThanOrEqual(0), expect(x).toBeLessThan(1);
   });
 
-  it('shuffleInPlace touches every position and preserves the multiset', () => {
+  it('shuffleInPlace preserves the multiset and actually reorders (not a no-op)', () => {
     const src = [1, 2, 3, 4, 5, 6, 7, 8];
     const out = shuffleInPlace([...src], mulberry32(7));
     expect([...out].sort((a, b) => a - b)).toEqual(src);
+    // A `return arr` no-op would leave order unchanged — require movement.
+    expect(out).not.toEqual(src);
   });
 });
 
@@ -156,12 +158,23 @@ describe('EvolutionEngine', () => {
 
   it('selectResolutionGenome explores non-best genomes under exploration pressure (#451 M3)', () => {
     const engine = new EvolutionEngine(registry, fitness, { seed: 9, populationSize: 10, explorationRate: 1.0 });
-    const pop = engine.initializePopulation('a');
-    // With explorationRate 1.0 every pick is random — over many draws we should
-    // touch more than just the single best genome.
+    engine.initializePopulation('a');
+    // With explorationRate 1.0 every pick is random — over 40 draws on a pop of
+    // 10 the exploration should reach most of the population, not just the best.
     const seen = new Set<string>();
     for (let i = 0; i < 40; i++) seen.add(engine.selectResolutionGenome('a')!.id);
-    expect(seen.size).toBeGreaterThan(1);
+    expect(seen.size).toBeGreaterThanOrEqual(5);
+  });
+
+  it('never crosses over into an empty genome (verification-workflow finding)', () => {
+    const engine = new EvolutionEngine(registry, fitness, { seed: 13 });
+    const p1 = new ResolutionGenome({ primitives: [{ primitiveId: 'A', weight: 1 }] });
+    const p2 = new ResolutionGenome({ primitives: [{ primitiveId: 'B', weight: 1 }] });
+    // cut1=0 + cut2=len (=1) is the empty-child case; exercise many draws.
+    for (let i = 0; i < 300; i++) {
+      const child = (engine as any).crossover(p1, p2) as ResolutionGenome;
+      expect(child.primitives.length).toBeGreaterThanOrEqual(1);
+    }
   });
 
   it('crossover can inherit the last gene of parent1 (#451 M6)', () => {
@@ -202,8 +215,44 @@ describe('EvolutionEngine', () => {
     (engine as any).resolutionCounters.set('a', 0);
     expect(() => engine.evolve('a')).not.toThrow();
     const stats = engine.getStats('a')!;
-    expect(stats.diversityScore).toBeGreaterThanOrEqual(0);
+    // Diversity is (unique signatures / population size); post-evolve the pop
+    // is no longer perfectly homogeneous but stays a proper ratio in (0, 1].
+    expect(stats.diversityScore).toBeGreaterThan(0);
     expect(stats.diversityScore).toBeLessThanOrEqual(1);
+  });
+
+  it('computeDiversity reports the concrete ratio for a homogeneous population', () => {
+    const engine = new EvolutionEngine(registry, fitness, { seed: 8 });
+    const g = new ResolutionGenome({ primitives: [{ primitiveId: 'vote', weight: 1 }], processAreaAffinity: 'a' });
+    (engine as any).populations.set('a', Array.from({ length: 6 }, () => g.clone()));
+    (engine as any).generations.set('a', 0);
+    (engine as any).resolutionCounters.set('a', 0);
+    // 1 unique signature across 6 identical genomes → 1/6.
+    expect(engine.getStats('a')!.diversityScore).toBeCloseTo(1 / 6, 5);
+  });
+
+  it('serialize → deserialize round-trips a genome, and evaluate skips unknown primitive ids', () => {
+    const g = new ResolutionGenome({
+      primitives: [{ primitiveId: 'confidence_weight', weight: 1.5 }, { primitiveId: 'DOES_NOT_EXIST', weight: 2 }],
+      generation: 3,
+      ancestry: ['x', 'y'],
+      processAreaAffinity: 'area-1',
+    });
+    g.recordFitness(0.7);
+    const round = ResolutionGenome.deserialize(g.serialize());
+    expect(round.id).toBe(g.id);
+    expect(round.primitives).toEqual(g.primitives);
+    expect(round.generation).toBe(3);
+    expect(round.ancestry).toEqual(['x', 'y']);
+    expect(round.fitnessHistory).toEqual([0.7]);
+
+    // Unknown primitive id is silently skipped, not a crash; the known one still counts.
+    const ev = round.evaluate(
+      { conflict: conflict([evt({ sensorConfidence: 0.9 }), evt({ id: 'e2', value: 101, sensorConfidence: 0.8 })]) } as any,
+      new PrimitiveRegistry().getMap(),
+    );
+    expect(ev.primitivesEvaluated).toBe(1);
+    expect(Number.isFinite(ev.score)).toBe(true);
   });
 });
 
