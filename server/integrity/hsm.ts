@@ -6,9 +6,15 @@
  * Part of the Dual-Time Control Plane (ADR-0021).
  */
 
-import { createSign, createVerify, generateKeyPairSync } from 'crypto';
+import { createSign, createVerify, createPublicKey, generateKeyPairSync } from 'crypto';
 import { promises as fs } from 'fs';
 import { join } from 'path';
+import { Pkcs11jsProvider, type Pkcs11Provider } from './pkcs11-provider';
+
+/** Optional dependency injection for signer construction (e.g. a test PKCS#11 provider). */
+export interface SignerDeps {
+  pkcs11Provider?: Pkcs11Provider;
+}
 
 export interface SignatureResult {
   signature: string;
@@ -257,50 +263,120 @@ export class SoftwareSigner extends BaseSigner {
 }
 
 /**
- * PKCS#11 HSM signer (placeholder for real implementation)
- * This would integrate with actual HSM hardware via PKCS#11
+ * PKCS#11 HSM signer (#482).
+ *
+ * Signs Merkle roots with an RSA key that lives inside a PKCS#11 module (a real
+ * HSM, or SoftHSMv2 in CI) using the CKM_SHA256_RSA_PKCS mechanism. The private
+ * key never leaves the token; signatures are verified with the public key
+ * extracted from the token, and are byte-compatible with SoftwareSigner /
+ * Node's RSA-SHA256, so downstream verification (the relayer) is unchanged.
+ *
+ * The raw PKCS#11 session is owned by an injectable Pkcs11Provider — the
+ * production Pkcs11jsProvider (native `pkcs11js`) by default, or an in-memory
+ * emulator in tests.
  */
 export class PKCS11Signer extends BaseSigner {
-  constructor(config: HSMConfig) {
-    super({
-      ...config,
-      mode: 'pkcs11',
-    });
+  private provider: Pkcs11Provider;
+  /** keyId → cached extracted SPKI public key PEM */
+  private publicKeyCache = new Map<string, string>();
+
+  constructor(config: HSMConfig, provider?: Pkcs11Provider) {
+    super({ ...config, mode: 'pkcs11' });
+    this.provider = provider ?? new Pkcs11jsProvider();
+  }
+
+  private defaultKeyId(keyId?: string): string {
+    const id = keyId ?? this.config.keyId ?? 'default';
+    return id;
   }
 
   async initialize(): Promise<void> {
-    // TODO: Initialize PKCS#11 library
-    // - Load PKCS#11 library (this.config.pkcs11Library)
-    // - Open session with slot (this.config.slot)
-    // - Login with PIN (this.config.pin)
-    throw new Error('PKCS#11 signer not yet implemented');
+    await this.provider.open({
+      library: this.config.pkcs11Library ?? '',
+      slot: this.config.slot ?? 0,
+      pin: this.config.pin ?? '',
+    });
   }
 
   async sign(data: string, keyId?: string): Promise<SignatureResult> {
-    // TODO: Implement PKCS#11 signing
-    // - Find key object by keyId
-    // - Perform cryptographic signing operation
-    // - Return signature result
-    throw new Error('PKCS#11 signing not yet implemented');
+    const id = this.defaultKeyId(keyId);
+    const handle = await this.provider.findPrivateKeyHandle(id);
+    if (!handle) {
+      throw new Error(`PKCS#11: private key not found for keyId "${id}"`);
+    }
+    const signature = await this.provider.sign(handle, Buffer.from(data, 'utf8'));
+    return {
+      signature: signature.toString('hex'),
+      algorithm: this.config.algorithm,
+      keyId: id,
+      timestamp: Date.now(),
+      merkleRoot: data,
+    };
   }
 
-  async verify(data: string, signature: SignatureResult): Promise<SignatureVerification> {
-    // TODO: Implement PKCS#11 verification
-    throw new Error('PKCS#11 verification not yet implemented');
+  async verify(data: string, signatureResult: SignatureResult): Promise<SignatureVerification> {
+    const base = {
+      keyId: signatureResult.keyId,
+      algorithm: signatureResult.algorithm,
+      timestamp: signatureResult.timestamp,
+    };
+    try {
+      const publicKeyPem = await this.getPublicKey(signatureResult.keyId);
+      const verify = createVerify('RSA-SHA256');
+      verify.update(data);
+      verify.end();
+      const valid = verify.verify(publicKeyPem, signatureResult.signature, 'hex');
+      return { valid, ...base };
+    } catch {
+      return { valid: false, ...base };
+    }
   }
 
   async getPublicKey(keyId?: string): Promise<string> {
-    // TODO: Extract public key from HSM
-    throw new Error('PKCS#11 public key extraction not yet implemented');
+    const id = this.defaultKeyId(keyId);
+    const cached = this.publicKeyCache.get(id);
+    if (cached) return cached;
+
+    const pub = await this.provider.findPublicKey(id);
+    if (!pub) {
+      throw new Error(`PKCS#11: public key not found for keyId "${id}"`);
+    }
+    // Build an SPKI PEM from the raw RSA modulus + exponent via JWK import —
+    // avoids hand-rolling DER.
+    const jwk = {
+      kty: 'RSA',
+      n: pub.modulus.toString('base64url'),
+      e: pub.exponent.toString('base64url'),
+    };
+    const pem = createPublicKey({ key: jwk, format: 'jwk' }).export({ type: 'spki', format: 'pem' }) as string;
+    this.publicKeyCache.set(id, pem);
+    return pem;
   }
 
   async listKeys(): Promise<KeyInfo[]> {
-    // TODO: List keys available in HSM
-    throw new Error('PKCS#11 key listing not yet implemented');
+    const labels = await this.provider.listKeyLabels();
+    const keys: KeyInfo[] = [];
+    for (const label of labels) {
+      let publicKey = '';
+      try {
+        publicKey = await this.getPublicKey(label);
+      } catch {
+        // A label without an extractable public key is still listed.
+      }
+      keys.push({
+        keyId: label,
+        algorithm: this.config.algorithm,
+        publicKey,
+        created: Date.now(),
+        mode: 'pkcs11',
+      });
+    }
+    return keys;
   }
 
   async cleanup(): Promise<void> {
-    // TODO: Close PKCS#11 session
+    this.publicKeyCache.clear();
+    await this.provider.close();
   }
 }
 
@@ -308,12 +384,12 @@ export class PKCS11Signer extends BaseSigner {
  * Factory for creating appropriate signer based on configuration
  */
 export class HSMSignerFactory {
-  static createSigner(config: HSMConfig): BaseSigner {
+  static createSigner(config: HSMConfig, deps: SignerDeps = {}): BaseSigner {
     switch (config.mode) {
       case 'software':
         return new SoftwareSigner(config);
       case 'pkcs11':
-        return new PKCS11Signer(config);
+        return new PKCS11Signer(config, deps.pkcs11Provider);
       case 'hardware':
         // Could extend to support other hardware interfaces
         throw new Error('Hardware signer mode not implemented');
@@ -330,8 +406,8 @@ export class MerkleRootSigner {
   private signer: BaseSigner;
   private isInitialized = false;
 
-  constructor(config: HSMConfig) {
-    this.signer = HSMSignerFactory.createSigner(config);
+  constructor(config: HSMConfig, deps: SignerDeps = {}) {
+    this.signer = HSMSignerFactory.createSigner(config, deps);
   }
 
   async initialize(): Promise<void> {
