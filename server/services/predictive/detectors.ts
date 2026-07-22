@@ -19,6 +19,18 @@ import type {
 
 // ── Statistics primitives ─────────────────────────────────────────────────
 
+/**
+ * Relative tolerance treating floating-point rounding residue as zero.
+ * Means/EWMAs of constant decimal series (e.g. 0.4 repeated) land a few ulp
+ * away from the constant; without this guard that residue registers as an
+ * anomaly with score 1 on a perfectly flat signal.
+ */
+const REL_EPS = 1e-9;
+
+function epsFor(...magnitudes: number[]): number {
+  return REL_EPS * Math.max(...magnitudes.map(Math.abs), Number.MIN_VALUE);
+}
+
 export function mean(values: number[]): number {
   if (values.length === 0) return 0;
   return values.reduce((a, b) => a + b, 0) / values.length;
@@ -62,8 +74,9 @@ export function computeZScore(values: number[]): {
   const latest = values[values.length - 1];
   const m = mean(baseline);
   const sd = stdDev(baseline);
-  if (sd === 0) {
-    return { mean: m, stdDev: 0, zScore: latest === m ? 0 : Infinity };
+  const eps = epsFor(m, latest);
+  if (sd <= eps) {
+    return { mean: m, stdDev: 0, zScore: Math.abs(latest - m) <= eps ? 0 : Infinity };
   }
   return { mean: m, stdDev: sd, zScore: Math.abs(latest - m) / sd };
 }
@@ -77,7 +90,14 @@ export function zScoreDetector(series: TimeSeriesPoint[], threshold: number): De
     detector: 'z-score',
     score: Math.min(zScore / threshold, 1),
     anomalous: zScore > threshold,
-    details: { zScore, mean: m, stdDev: sd, threshold },
+    // Infinity is not JSON-representable — report it as an explicit flag
+    details: {
+      zScore: Number.isFinite(zScore) ? zScore : null,
+      zScoreInfinite: !Number.isFinite(zScore),
+      mean: m,
+      stdDev: sd,
+      threshold,
+    },
   };
 }
 
@@ -105,9 +125,10 @@ export function ewmaDetector(series: TimeSeriesPoint[], alpha: number, L: number
   }
 
   const deviation = Math.abs(ewma - processMean);
+  const eps = epsFor(ewma, processMean);
 
-  if (sd === 0) {
-    const anomalous = deviation > 0;
+  if (sd <= eps) {
+    const anomalous = deviation > eps;
     return {
       detector: 'ewma',
       score: anomalous ? 1 : 0,
@@ -116,7 +137,7 @@ export function ewmaDetector(series: TimeSeriesPoint[], alpha: number, L: number
     };
   }
 
-  const controlLimit = L * sd * Math.sqrt(alpha / (2 - alpha));
+  const controlLimit = Math.max(L * sd * Math.sqrt(alpha / (2 - alpha)), eps);
   return {
     detector: 'ewma',
     score: Math.min(deviation / controlLimit, 1),
@@ -140,14 +161,15 @@ export function iqrDetector(series: TimeSeriesPoint[], multiplier: number): Dete
   const upperBound = q3 + multiplier * iqr;
   const outsideRange = latest < lowerBound || latest > upperBound;
 
+  // Score contract: 0 inside the quartiles, exactly 1 at the Tukey fence,
+  // saturating beyond it — same "1.0 == at threshold" semantics as the
+  // other detectors so ensemble weighting stays comparable.
   let score = 0;
-  if (outsideRange) {
-    if (iqr === 0) {
-      score = 1;
-    } else {
-      const distance = latest < lowerBound ? lowerBound - latest : latest - upperBound;
-      score = Math.min(distance / iqr, 1);
-    }
+  if (iqr === 0) {
+    score = outsideRange ? 1 : 0;
+  } else {
+    const displacement = Math.max(0, q1 - latest, latest - q3);
+    score = Math.min(displacement / (multiplier * iqr), 1);
   }
 
   return {
@@ -188,6 +210,10 @@ export function ensembleScore(
   let weightedSum = 0;
 
   for (const r of results) {
+    // An insufficient-data result is an abstention, not a "normal" vote —
+    // renormalize over the detectors that actually ran, otherwise a small
+    // window mathematically caps the ensemble below the top severities.
+    if (r.details.insufficient === true) continue;
     const w = weights[r.detector] ?? 1;
     weightedSum += r.score * w;
     totalWeight += w;

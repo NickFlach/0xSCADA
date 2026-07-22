@@ -97,6 +97,30 @@ export async function registerRoutes(
     predictiveMaintenanceService.ingestTagUpdate(update)
   );
 
+  // Start the periodic analysis sweep here — services/initializeServices()
+  // has no callers at startup, so registering there alone never runs it.
+  void predictiveMaintenanceService.initialize();
+
+  // Surface predictive alerts on the alarm WebSocket channel so they reach
+  // operators, not just the REST API.
+  predictiveMaintenanceService.on("alert", (alert) => {
+    void import("./websocket/cached-event-bridge").then(({ cachedEventBridge }) =>
+      cachedEventBridge.publishAlarm({
+        id: alert.id,
+        name: `Predictive: ${alert.tagId}`,
+        tagId: alert.tagId,
+        severity: alert.severity,
+        state: "active",
+        message: alert.message,
+        tagValue: undefined,
+        triggeredAt: new Date(alert.timestamp).toISOString(),
+        timestamp: new Date(alert.timestamp).toISOString(),
+        source: "predictive-maintenance",
+        recommendation: alert.recommendation,
+      })
+    ).catch(() => { /* alarm fan-out failure must not break alerting */ });
+  });
+
   // WebSocket metrics endpoint
   app.get("/api/ws/metrics", (req, res) => {
     res.json({

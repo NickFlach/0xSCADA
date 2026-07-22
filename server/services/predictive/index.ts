@@ -19,6 +19,8 @@ export interface TagUpdateInput {
   tagName: string;
   value: number | string | boolean;
   timestamp: string | number;
+  /** OPC-style quality flag — only 'good' (or absent) readings are ingested */
+  quality?: 'good' | 'bad' | 'uncertain';
 }
 
 export class PredictiveMaintenanceService extends EventEmitter {
@@ -48,10 +50,13 @@ export class PredictiveMaintenanceService extends EventEmitter {
 
   /**
    * Feed a live tag update into the engine. Non-numeric values are ignored —
-   * the statistical detectors only apply to analog signals.
+   * the statistical detectors only apply to analog signals — and non-good
+   * quality readings are excluded so failed sensors can't poison baselines.
    */
   ingestTagUpdate(update: TagUpdateInput): void {
+    if (update.quality !== undefined && update.quality !== 'good') return;
     if (typeof update.value === 'boolean') return;
+    if (typeof update.value === 'string' && update.value.trim() === '') return;
     const value = typeof update.value === 'number' ? update.value : Number(update.value);
     if (!Number.isFinite(value)) return;
     const timestamp =

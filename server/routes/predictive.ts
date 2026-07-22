@@ -8,6 +8,7 @@
  */
 
 import { Router } from "express";
+import type { Request, Response, NextFunction, RequestHandler } from "express";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
 import { predictiveMaintenanceService } from "../services/predictive";
@@ -16,10 +17,38 @@ import type { SeverityLevel } from "@shared/types/predictive";
 const router = Router();
 const engine = predictiveMaintenanceService.engine;
 
+// Auth middleware placeholder — same pattern as other protected routes
+function requireAuth(req: Request, res: Response, next: NextFunction) {
+  // TODO: implement real auth check (JWT / session validation)
+  next();
+}
+router.use(requireAuth);
+
+/** Express 4 does not catch async rejections — wrap every async handler */
+function asyncHandler(
+  fn: (req: Request, res: Response) => Promise<unknown>
+): RequestHandler {
+  return (req, res) => {
+    fn(req, res).catch((error) => {
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal error" });
+      }
+      console.error("[predictive] handler error:", error);
+    });
+  };
+}
+
 // ── Schemas ────────────────────────────────────────────────────────────────
 
+/** Must match the engine's history window — larger minSamples can never be met */
+const MAX_WINDOW = 1000;
+/** Reject data stamped further than this into the future */
+const MAX_FUTURE_SKEW_MS = 60 * 60 * 1000;
+/** New tags rejected once the engine tracks this many (DoS guard) */
+const MAX_TRACKED_TAGS = 500;
+
 const IngestSchema = z.object({
-  tagId: z.string().min(1),
+  tagId: z.string().min(1).max(256),
   points: z
     .array(
       z.object({
@@ -35,17 +64,19 @@ const SeveritySchema = z.enum(["info", "warning", "critical", "emergency"]);
 
 const ThresholdsSchema = z
   .object({
-    minSamples: z.number().int().min(3).max(100_000),
+    minSamples: z.number().int().min(3).max(MAX_WINDOW),
     zScoreThreshold: z.number().positive(),
     ewmaAlpha: z.number().gt(0).lte(1),
     ewmaL: z.number().positive(),
     iqrMultiplier: z.number().positive(),
-    ensembleWeights: z.record(z.number().min(0)),
-    severityThresholds: z.object({
-      warning: z.number().min(0).max(1),
-      critical: z.number().min(0).max(1),
-      emergency: z.number().min(0).max(1),
-    }),
+    ensembleWeights: z.record(z.number().min(0).finite()),
+    severityThresholds: z
+      .object({
+        warning: z.number().min(0).max(1),
+        critical: z.number().min(0).max(1),
+        emergency: z.number().min(0).max(1),
+      })
+      .partial(),
     failureLimits: z.object({
       low: z.number().optional(),
       high: z.number().optional(),
@@ -63,36 +94,61 @@ const AlertQuerySchema = z.object({
 
 // ── Ingestion & analysis ───────────────────────────────────────────────────
 
-router.post("/ingest", async (req, res) => {
-  const parsed = IngestSchema.safeParse(req.body);
-  if (!parsed.success) {
-    return res.status(400).json({ error: fromZodError(parsed.error).message });
-  }
-  const { tagId, points } = parsed.data;
-  engine.ingestSeries(tagId, points);
-  const assessment = await engine.analyze(tagId);
-  res.json({ ingested: points.length, assessment });
-});
+router.post(
+  "/ingest",
+  asyncHandler(async (req, res) => {
+    const parsed = IngestSchema.safeParse(req.body);
+    if (!parsed.success) {
+      return res.status(400).json({ error: fromZodError(parsed.error).message });
+    }
+    const { tagId, points } = parsed.data;
 
-router.get("/analyze/:tagId", async (req, res) => {
-  const assessment = await engine.analyze(req.params.tagId);
-  if (!assessment) {
-    return res.status(404).json({
-      error: "Insufficient data for analysis",
-      required: engine.getThresholds(req.params.tagId).minSamples,
-      available: engine.getHistory(req.params.tagId).length,
+    const isNewTag = engine.getHistory(tagId).length === 0;
+    if (isNewTag && engine.getStatus().trackedTags >= MAX_TRACKED_TAGS) {
+      return res.status(429).json({
+        error: `Tracked-tag limit (${MAX_TRACKED_TAGS}) reached; new tags rejected`,
+      });
+    }
+
+    const cutoff = Date.now() + MAX_FUTURE_SKEW_MS;
+    const usable = points.filter((p) => p.timestamp <= cutoff);
+    engine.ingestSeries(tagId, usable);
+    const assessment = await engine.analyze(tagId);
+    res.json({
+      ingested: usable.length,
+      rejectedFuturePoints: points.length - usable.length,
+      assessment,
     });
-  }
-  res.json(assessment);
-});
+  })
+);
 
-router.get("/prediction/:tagId", async (req, res) => {
-  const prediction = await engine.predictFailure(req.params.tagId);
-  if (!prediction) {
-    return res.status(404).json({ error: "Insufficient data for prediction" });
-  }
-  res.json(prediction);
-});
+// Read-only analysis — alert generation happens on ingest and in the sweep,
+// never from a GET.
+router.get(
+  "/analyze/:tagId",
+  asyncHandler(async (req, res) => {
+    const assessment = await engine.analyze(req.params.tagId, { generateAlerts: false });
+    if (!assessment) {
+      return res.status(404).json({
+        error: "Insufficient data for analysis",
+        required: engine.getThresholds(req.params.tagId).minSamples,
+        available: engine.getHistory(req.params.tagId).length,
+      });
+    }
+    res.json(assessment);
+  })
+);
+
+router.get(
+  "/prediction/:tagId",
+  asyncHandler(async (req, res) => {
+    const prediction = await engine.predictFailure(req.params.tagId);
+    if (!prediction) {
+      return res.status(404).json({ error: "Insufficient data for prediction" });
+    }
+    res.json(prediction);
+  })
+);
 
 // ── Tags & thresholds ──────────────────────────────────────────────────────
 
@@ -109,8 +165,50 @@ router.put("/thresholds/:tagId", (req, res) => {
   if (!parsed.success) {
     return res.status(400).json({ error: fromZodError(parsed.error).message });
   }
-  const updated = engine.setThresholds(req.params.tagId, parsed.data);
-  res.json(updated);
+  const overrides = parsed.data;
+
+  // Cross-field checks run against the merged result so partial updates
+  // can't sneak an inconsistent final configuration past validation.
+  const current = engine.getThresholds(req.params.tagId);
+  const merged = {
+    ...current,
+    ...overrides,
+    severityThresholds: { ...current.severityThresholds, ...overrides.severityThresholds },
+    failureLimits: overrides.failureLimits ?? current.failureLimits,
+  };
+  const { warning, critical, emergency } = merged.severityThresholds;
+  if (!(warning <= critical && critical <= emergency)) {
+    return res.status(400).json({
+      error: "severityThresholds must satisfy warning <= critical <= emergency",
+    });
+  }
+  if (
+    merged.failureLimits?.low !== undefined &&
+    merged.failureLimits?.high !== undefined &&
+    merged.failureLimits.low >= merged.failureLimits.high
+  ) {
+    return res.status(400).json({ error: "failureLimits.low must be below failureLimits.high" });
+  }
+  if (overrides.ensembleWeights) {
+    const known = new Set(engine.getDetectors().map((d) => d.name));
+    const unknown = Object.keys(overrides.ensembleWeights).filter((k) => !known.has(k));
+    if (unknown.length > 0) {
+      return res.status(400).json({
+        error: `Unknown detectors in ensembleWeights: ${unknown.join(", ")}`,
+      });
+    }
+    const mergedWeights = { ...current.ensembleWeights, ...overrides.ensembleWeights };
+    if (!Object.values(mergedWeights).some((w) => w > 0)) {
+      return res.status(400).json({ error: "ensembleWeights must include a positive weight" });
+    }
+  }
+  if (merged.minSamples > MAX_WINDOW) {
+    return res.status(400).json({
+      error: `minSamples cannot exceed the ${MAX_WINDOW}-point history window`,
+    });
+  }
+
+  res.json(engine.setThresholds(req.params.tagId, overrides));
 });
 
 // ── Alerts ─────────────────────────────────────────────────────────────────
@@ -136,9 +234,12 @@ router.post("/alerts/:alertId/acknowledge", (req, res) => {
 
 // ── Status ─────────────────────────────────────────────────────────────────
 
-router.get("/status", async (_req, res) => {
-  const health = await predictiveMaintenanceService.healthCheck();
-  res.json({ ...engine.getStatus(), ...health });
-});
+router.get(
+  "/status",
+  asyncHandler(async (_req, res) => {
+    const health = await predictiveMaintenanceService.healthCheck();
+    res.json({ ...engine.getStatus(), ...health });
+  })
+);
 
 export { router as predictiveRoutes };

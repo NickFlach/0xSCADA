@@ -103,13 +103,24 @@ class FieldSimulator {
         ...(typeof payload === 'object' ? payload : { value: payload }),
       });
 
-      // Broadcast tag update to live dashboard via WebSocket
+      // Broadcast tag update to live dashboard via WebSocket. Prefer any
+      // numeric measurement in the payload (current, newValue, ...) so
+      // numeric consumers like predictive maintenance receive real data
+      // instead of a JSON blob string (#212).
       try {
+        const numeric =
+          typeof payload === 'object' && payload !== null
+            ? [payload.value, payload.current, payload.newValue].find(
+                (v: unknown) => typeof v === 'number' && Number.isFinite(v)
+              )
+            : undefined;
         tagStreamServer.broadcastTagUpdate({
           tagName: `${asset.nameOrTag}.${eventType}`,
-          value: typeof payload === 'object' && payload !== null
-            ? (payload as any).value ?? JSON.stringify(payload)
-            : payload,
+          value:
+            numeric ??
+            (typeof payload === 'object' && payload !== null
+              ? JSON.stringify(payload)
+              : payload),
           quality: "good",
           timestamp: new Date().toISOString(),
         });
