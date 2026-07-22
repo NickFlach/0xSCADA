@@ -3,7 +3,7 @@
  * ADR-0013 [13.1] — Issue #212
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import type { AnomalyDetector, TimeSeriesPoint } from '@shared/types/predictive';
 import {
   quantile,
@@ -390,5 +390,176 @@ describe('PredictiveMaintenanceService', () => {
     expect((await service.healthCheck()).healthy).toBe(true);
     await service.shutdown();
     expect((await service.healthCheck()).healthy).toBe(false);
+  });
+});
+
+// ── Review regressions (PR #493 adversarial review) ───────────────────────
+
+describe('constant decimal series (float rounding residue)', () => {
+  it('never flags flat non-integer signals at any window size', async () => {
+    for (const value of [0.1, 0.4, 1.3, 1.5]) {
+      for (const n of [10, 15, 20, 50]) {
+        const flat = series(Array(n).fill(value));
+        expect(ewmaDetector(flat, 0.3, 3).anomalous, `ewma v=${value} n=${n}`).toBe(false);
+        expect(ewmaDetector(flat, 0.3, 3).score, `ewma score v=${value} n=${n}`).toBe(0);
+        expect(zScoreDetector(flat, 3).score, `z score v=${value} n=${n}`).toBe(0);
+      }
+    }
+    const engine = new PredictiveMaintenanceEngine();
+    for (let i = 0; i < 40; i++) engine.ingestPoint('flat', i * 1000, 0.4);
+    const result = await engine.analyze('flat');
+    expect(result!.severity).toBe('info');
+    expect(engine.getAlerts()).toHaveLength(0);
+  });
+});
+
+describe('ensemble abstention', () => {
+  it('renormalizes over detectors that actually ran', async () => {
+    // 4 samples: IQR abstains (insufficient); z-score + EWMA both saturate.
+    const engine = new PredictiveMaintenanceEngine();
+    engine.setThresholds('fast', { minSamples: 4 });
+    engine.ingestSeries('fast', series([100, 100, 100, 180]));
+    const result = await engine.analyze('fast');
+    expect(result!.ensembleScore).toBeCloseTo(1);
+    expect(result!.severity).toBe('emergency');
+  });
+});
+
+describe('IQR score contract', () => {
+  it('scores exactly 1 at the Tukey fence and grades inside it', () => {
+    const base = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
+    // q1=12.5, q3=17.5, iqr=5, fence=17.5+7.5=25
+    const atFence = iqrDetector(series([...base, 25]), 1.5);
+    expect(atFence.score).toBeCloseTo(1, 5);
+    const inside = iqrDetector(series([...base, 21]), 1.5);
+    expect(inside.anomalous).toBe(false);
+    expect(inside.score).toBeGreaterThan(0);
+    expect(inside.score).toBeLessThan(1);
+  });
+});
+
+describe('EWMA statistic formulation (drift detection)', () => {
+  it('flags a sustained small shift that no single point would trigger', () => {
+    // Sustained +2 shift: the EWMA statistic accumulates and crosses its
+    // control limit even though the latest point stays well inside 3 sigma
+    // of the (shift-contaminated) process mean — a per-point test misses it.
+    const baseline = Array.from({ length: 40 }, (_, i) => 50 + Math.sin(i));
+    const shifted = Array.from({ length: 8 }, (_, i) => 52 + Math.sin(40 + i));
+    const all = [...baseline, ...shifted];
+    const result = ewmaDetector(series(all), 0.3, 3);
+    expect(result.anomalous).toBe(true);
+
+    const base = all.slice(0, -1);
+    const m = base.reduce((a, b) => a + b, 0) / base.length;
+    const sd = Math.sqrt(
+      base.reduce((s, x) => s + (x - m) ** 2, 0) / (base.length - 1)
+    );
+    expect(Math.abs(all[all.length - 1] - m)).toBeLessThan(3 * sd);
+  });
+});
+
+describe('per-tag threshold overrides drive analysis outcomes', () => {
+  it('a desensitized tag stays info while a default tag alarms on the same data', async () => {
+    const engine = new PredictiveMaintenanceEngine();
+    engine.setThresholds('desensitized', {
+      zScoreThreshold: 100_000,
+      ewmaL: 100_000,
+      iqrMultiplier: 100_000,
+    });
+    const data = [...Array.from({ length: 30 }, (_, i) => 10 + Math.sin(i)), 500];
+    engine.ingestSeries('desensitized', series(data));
+    engine.ingestSeries('default', series(data));
+
+    const desensitized = await engine.analyze('desensitized');
+    const standard = await engine.analyze('default');
+    expect(standard!.severity).not.toBe('info');
+    expect(desensitized!.severity).toBe('info');
+    expect(engine.getAlerts().every((a) => a.tagId === 'default')).toBe(true);
+  });
+});
+
+describe('alert cooldown (wall clock)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('re-alerts after the window and is immune to future-dated data', async () => {
+    vi.useFakeTimers();
+    const engine = new PredictiveMaintenanceEngine({ alertCooldownMs: 60_000 });
+    // Future-dated spike data must not permanently mute the tag
+    const farFuture = Date.now() + 365 * 24 * 3600 * 1000;
+    for (let i = 0; i < 30; i++) engine.ingestPoint('t', farFuture + i * 1000, 10);
+    engine.ingestPoint('t', farFuture + 31_000, 500);
+
+    await engine.analyze('t');
+    await engine.analyze('t');
+    expect(engine.getAlerts()).toHaveLength(1); // within cooldown
+
+    vi.advanceTimersByTime(61_000);
+    await engine.analyze('t');
+    expect(engine.getAlerts()).toHaveLength(2); // wall-clock window elapsed
+  });
+});
+
+describe('bounded state', () => {
+  it('caps retained alerts at maxAlerts', async () => {
+    vi.useFakeTimers();
+    try {
+      const engine = new PredictiveMaintenanceEngine({ maxAlerts: 3, alertCooldownMs: 0 });
+      for (let i = 0; i < 30; i++) engine.ingestPoint('t', i * 1000, 10);
+      for (let k = 0; k < 6; k++) {
+        engine.ingestPoint('t', 31_000 + k, 500 + k);
+        await engine.analyze('t');
+        vi.advanceTimersByTime(1);
+      }
+      expect(engine.getAlerts().length).toBeLessThanOrEqual(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('evicts the least-recently-updated tag beyond maxTrackedTags', () => {
+    const engine = new PredictiveMaintenanceEngine({ maxTrackedTags: 3 });
+    for (const tag of ['a', 'b', 'c']) engine.ingestPoint(tag, 0, 1);
+    engine.ingestPoint('a', 1000, 2); // refresh a — b is now oldest
+    engine.ingestPoint('d', 2000, 1);
+    const tags = engine.getTrackedTags().map((t) => t.tagId);
+    expect(tags).toHaveLength(3);
+    expect(tags).not.toContain('b');
+    expect(tags).toEqual(expect.arrayContaining(['a', 'c', 'd']));
+  });
+});
+
+describe('resilient sweeps', () => {
+  it('keeps analyzing other tags when an alert listener throws', async () => {
+    const engine = new PredictiveMaintenanceEngine();
+    engine.on('alert', () => {
+      throw new Error('listener boom');
+    });
+    const errors: unknown[] = [];
+    engine.on('analyze-error', (e) => errors.push(e));
+
+    // 'a' alarms (listener throws); 'z' must still be analyzed after it
+    engine.ingestSeries('a', series([...Array(30).fill(10), 500]));
+    engine.ingestSeries('z', series(Array(30).fill(10)));
+    const results = await engine.analyzeAll();
+
+    expect(results.map((r) => r.tagId)).toEqual(expect.arrayContaining(['a', 'z']));
+    expect(errors.length).toBeGreaterThan(0);
+  });
+});
+
+describe('ingestion quality guards', () => {
+  it('skips non-good quality readings and empty-string values', () => {
+    const service = new PredictiveMaintenanceService();
+    service.ingestTagUpdate({ tagName: 'q', value: 10, timestamp: 1000, quality: 'bad' });
+    service.ingestTagUpdate({ tagName: 'q', value: 11, timestamp: 2000, quality: 'uncertain' });
+    service.ingestTagUpdate({ tagName: 'q', value: '', timestamp: 3000 });
+    service.ingestTagUpdate({ tagName: 'q', value: '   ', timestamp: 4000 });
+    service.ingestTagUpdate({ tagName: 'q', value: 12, timestamp: 5000, quality: 'good' });
+    service.ingestTagUpdate({ tagName: 'q', value: 13, timestamp: 6000 });
+
+    const history = service.engine.getHistory('q');
+    expect(history.map((p) => p.value)).toEqual([12, 13]);
   });
 });

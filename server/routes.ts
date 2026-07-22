@@ -107,6 +107,28 @@ export async function registerRoutes(
     predictiveMaintenanceService.ingestTagUpdate(update)
   );
 
+  // Start the periodic predictive analysis sweep here —
+  // services/initializeServices() has no callers at startup.
+  void predictiveMaintenanceService.initialize();
+
+  // Surface predictive alerts on the alarm WebSocket channel so they reach
+  // operators, not just the REST API.
+  predictiveMaintenanceService.on("alert", (alert) => {
+    cachedEventBridge.publishAlarm({
+      id: alert.id,
+      name: `Predictive: ${alert.tagId}`,
+      tagId: alert.tagId,
+      severity: alert.severity,
+      state: "active",
+      message: alert.message,
+      tagValue: undefined,
+      triggeredAt: new Date(alert.timestamp).toISOString(),
+      timestamp: new Date(alert.timestamp).toISOString(),
+      source: "predictive-maintenance",
+      recommendation: alert.recommendation,
+    });
+  });
+
   // Start alarm-correlation idle-group sweeps (#213). Registered here rather
   // than in services/initializeServices(), which no startup path invokes.
   void alarmCorrelationService.initialize();
