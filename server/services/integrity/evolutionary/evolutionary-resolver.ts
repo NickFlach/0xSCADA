@@ -26,8 +26,8 @@ import {
   Resolution,
   ScadaEvent,
 } from '../paradox-resolver';
-import { EvolutionEngine } from './evolution-engine';
-import { SafetyGuard } from './safety-guard';
+import { EvolutionEngine, type EvolutionConfig } from './evolution-engine';
+import { SafetyGuard, type SafetyConfig } from './safety-guard';
 import { FitnessEvaluator } from './fitness';
 import { PrimitiveRegistry } from './registry';
 import { ResolutionGenome } from './genome';
@@ -40,6 +40,10 @@ export interface EvolutionaryResolverConfig {
   enabled: boolean;
   /** Process areas where evolution is allowed (empty = all) */
   allowedProcessAreas: string[];
+  /** Evolution-engine overrides (population size, seed, resolutionsPerCycle, …) */
+  evolution?: Partial<EvolutionConfig>;
+  /** Safety-guard overrides (confidence floor, novelty budget, maturity gen, …) */
+  safety?: Partial<SafetyConfig>;
 }
 
 export interface EvolutionaryResolution {
@@ -104,8 +108,8 @@ export class EvolutionaryResolver extends EventEmitter {
     // Initialize sub-components
     this.registry = new PrimitiveRegistry();
     this.fitness = new FitnessEvaluator();
-    this.engine = new EvolutionEngine(this.registry, this.fitness);
-    this.guard = new SafetyGuard(this.fitness);
+    this.engine = new EvolutionEngine(this.registry, this.fitness, this.config.evolution);
+    this.guard = new SafetyGuard(this.fitness, this.config.safety);
   }
 
   // ─── Resolution ─────────────────────────────────────────────────
@@ -134,8 +138,9 @@ export class EvolutionaryResolver extends EventEmitter {
       };
     }
 
-    // Get best genome for this process area
-    const genome = this.engine.getBestGenome(processArea);
+    // Select a genome for this process area (epsilon-greedy — #451 M3 — so the
+    // whole population accrues fitness, not only the incumbent best).
+    const genome = this.engine.selectResolutionGenome(processArea);
     if (!genome) {
       // No population yet — initialize and fall back
       this.engine.initializePopulation(processArea);
@@ -159,13 +164,31 @@ export class EvolutionaryResolver extends EventEmitter {
     // Safety check
     const safetyDecision = this.guard.checkResolution(genome, evaluation, processArea);
 
+    // Every conflict handled here (allowed OR blocked-after-evaluation) counts
+    // toward the evolution cycle (#451 B1). Counting only allowed resolutions
+    // meant the counter never advanced while the novelty budget was blocking,
+    // so genomes never matured and evolution stalled permanently.
+    const shouldEvolve = this.engine.recordResolution(processArea);
+
     if (!safetyDecision.allowed) {
       // Safety guard blocked — fall back to static resolver
       const resolution = await this.resolver.resolve(conflict);
       this.staticFallbackCount++;
 
-      // Still record fitness (low score for blocked genome)
-      this.fitness.evaluate(genome, resolution, evaluation);
+      // Record fitness from the GENOME'S OWN evaluation (#451 B2), NOT the
+      // static fallback's confidence. Crediting a blocked (low-confidence)
+      // genome with the static strategy's high confidence inverted selection
+      // pressure — failing genomes would out-compete good ones.
+      const genomeResolution: Resolution = {
+        conflictId: conflict.conflictId,
+        method: 'confidence_weighted',
+        confidence: evaluation.score,
+        reasoning: `[Evolved-blocked] ${evaluation.reasoning}`,
+        resolvedAt: new Date(),
+      };
+      this.fitness.evaluate(genome, genomeResolution, evaluation);
+
+      if (shouldEvolve) this.evolveAndEmit(processArea);
 
       this.emit('safety_blocked', {
         processArea,
@@ -199,10 +222,7 @@ export class EvolutionaryResolver extends EventEmitter {
     // Record fitness
     this.fitness.evaluate(genome, resolution, evaluation);
 
-    // Check if evolution cycle should trigger
-    if (this.engine.recordResolution(processArea)) {
-      this.evolveAndEmit(processArea);
-    }
+    if (shouldEvolve) this.evolveAndEmit(processArea);
 
     this.emit('evolutionary_resolution', {
       processArea,

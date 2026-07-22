@@ -16,6 +16,7 @@
 import { ResolutionGenome, WeightedPrimitive } from './genome';
 import { PrimitiveRegistry } from './registry';
 import { FitnessEvaluator } from './fitness';
+import { mulberry32, shuffleInPlace, type Rng } from './rng';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -36,6 +37,16 @@ export interface EvolutionConfig {
   minWeight: number;
   /** Number of resolved paradoxes before triggering evolution (default 100) */
   resolutionsPerCycle: number;
+  /**
+   * Fraction of resolutions that pick a random (non-best) genome so the whole
+   * population accrues fitness, not just the incumbent best (#451 M3). Default 0.2.
+   */
+  explorationRate: number;
+  /**
+   * Optional seed for reproducible/auditable evolution (#451). When set, all
+   * randomness draws from a seeded stream; otherwise Math.random is used.
+   */
+  seed?: number;
 }
 
 export interface PopulationStats {
@@ -66,6 +77,7 @@ const DEFAULT_EVOLUTION_CONFIG: EvolutionConfig = {
   maxWeight: 3.0,
   minWeight: 0.1,
   resolutionsPerCycle: 100,
+  explorationRate: 0.2,
 };
 
 // ─── Evolution Engine ───────────────────────────────────────────────────────
@@ -74,6 +86,7 @@ export class EvolutionEngine {
   private config: EvolutionConfig;
   private registry: PrimitiveRegistry;
   private fitnessEval: FitnessEvaluator;
+  private rng: Rng;
 
   /** processArea → population of genomes */
   private populations: Map<string, ResolutionGenome[]> = new Map();
@@ -93,6 +106,7 @@ export class EvolutionEngine {
     this.config = { ...DEFAULT_EVOLUTION_CONFIG, ...config };
     this.registry = registry;
     this.fitnessEval = fitnessEval;
+    this.rng = this.config.seed !== undefined ? mulberry32(this.config.seed) : Math.random;
   }
 
   // ─── Population Management ──────────────────────────────────────
@@ -135,10 +149,10 @@ export class EvolutionEngine {
     if (!pop || pop.length === 0) return null;
 
     let best = pop[0];
-    let bestFitness = this.fitnessEval.getFitness(best.id);
+    let bestFitness = this.fitnessEval.getFitnessForGenome(best);
 
     for (let i = 1; i < pop.length; i++) {
-      const f = this.fitnessEval.getFitness(pop[i].id);
+      const f = this.fitnessEval.getFitnessForGenome(pop[i]);
       if (f > bestFitness) {
         bestFitness = f;
         best = pop[i];
@@ -146,6 +160,20 @@ export class EvolutionEngine {
     }
 
     return best;
+  }
+
+  /**
+   * Select a genome to resolve the next conflict. Epsilon-greedy (#451 M3):
+   * with probability `explorationRate`, return a random population member so
+   * the whole population accrues fitness records; otherwise the current best.
+   */
+  selectResolutionGenome(processArea: string): ResolutionGenome | null {
+    const pop = this.populations.get(processArea);
+    if (!pop || pop.length === 0) return null;
+    if (pop.length > 1 && this.rng() < this.config.explorationRate) {
+      return pop[Math.floor(this.rng() * pop.length)];
+    }
+    return this.getBestGenome(processArea);
   }
 
   /**
@@ -171,8 +199,10 @@ export class EvolutionEngine {
     // 1. Sort by fitness (descending)
     const ranked = this.rankByFitness(population);
 
-    // 2. Elitism: preserve top genomes
-    const elites = ranked.slice(0, this.config.eliteCount).map(g => g.clone());
+    // 2. Elitism: preserve top genomes BY REFERENCE (#451 M2). Keeping the
+    //    same object (and id) means their accumulated fitness records survive
+    //    the pruneInactive below, so ranking is meaningful next generation.
+    const elites = ranked.slice(0, this.config.eliteCount);
     for (const elite of elites) {
       elite.generation = gen;
     }
@@ -184,7 +214,7 @@ export class EvolutionEngine {
     for (let i = 0; i < targetSize; i++) {
       let child: ResolutionGenome;
 
-      if (Math.random() < this.config.crossoverRate && population.length >= 2) {
+      if (this.rng() < this.config.crossoverRate && population.length >= 2) {
         // Crossover
         const parent1 = this.tournamentSelect(ranked);
         const parent2 = this.tournamentSelect(ranked);
@@ -196,7 +226,7 @@ export class EvolutionEngine {
       }
 
       // Mutation
-      if (Math.random() < this.config.mutationRate) {
+      if (this.rng() < this.config.mutationRate) {
         this.mutate(child);
       }
 
@@ -208,7 +238,8 @@ export class EvolutionEngine {
     // 4. Build new population
     const newPopulation = [...elites, ...offspring];
 
-    // 5. Prune fitness records for retired genomes
+    // 5. Prune fitness records for retired genomes (elites' ids are retained
+    //    because they were preserved by reference above)
     const activeIds = new Set(newPopulation.map(g => g.id));
     const pruned = this.fitnessEval.pruneInactive(activeIds);
 
@@ -227,7 +258,7 @@ export class EvolutionEngine {
         elitesPreserved: elites.length,
         offspringCreated: offspring.length,
         genomesPruned: pruned,
-        bestFitness: this.fitnessEval.getFitness(newPopulation[0]?.id ?? ''),
+        bestFitness: newPopulation[0] ? this.fitnessEval.getFitnessForGenome(newPopulation[0]) : 0,
       },
       timestamp: Date.now(),
     });
@@ -248,12 +279,12 @@ export class EvolutionEngine {
     // Pick k random indices without replacement
     const indices = new Set<number>();
     while (indices.size < k) {
-      indices.add(Math.floor(Math.random() * ranked.length));
+      indices.add(Math.floor(this.rng() * ranked.length));
     }
 
     for (const idx of indices) {
       const genome = ranked[idx];
-      const fitness = this.fitnessEval.getFitness(genome.id);
+      const fitness = this.fitnessEval.getFitnessForGenome(genome);
       if (fitness > bestFitness) {
         bestFitness = fitness;
         best = genome;
@@ -277,9 +308,12 @@ export class EvolutionEngine {
       return parent1.clone();
     }
 
-    // Single-point crossover
-    const cut1 = p1.length > 0 ? Math.floor(Math.random() * p1.length) : 0;
-    const cut2 = p2.length > 0 ? Math.floor(Math.random() * p2.length) : 0;
+    // Single-point crossover. Cuts sampled in [0, len] INCLUSIVE (#451 M6) so
+    // every gene position is inheritable — cut=len takes all of p1's head /
+    // none of p2's tail; cut=0 the reverse. Sampling [0, len-1] would make
+    // p1's last gene un-inheritable and p2's last gene always inherited.
+    const cut1 = Math.floor(this.rng() * (p1.length + 1));
+    const cut2 = Math.floor(this.rng() * (p2.length + 1));
 
     const childPrimitives: WeightedPrimitive[] = [
       ...p1.slice(0, cut1).map(p => ({ ...p })),
@@ -314,7 +348,7 @@ export class EvolutionEngine {
    * 3. Reweight a random primitive
    */
   private mutate(genome: ResolutionGenome): void {
-    const roll = Math.random();
+    const roll = this.rng();
     const primitiveIds = this.registry.list().map(p => p.id);
 
     if (roll < 0.33 && genome.primitives.length < primitiveIds.length) {
@@ -322,18 +356,18 @@ export class EvolutionEngine {
       const existing = new Set(genome.primitives.map(p => p.primitiveId));
       const available = primitiveIds.filter(id => !existing.has(id));
       if (available.length > 0) {
-        const newId = available[Math.floor(Math.random() * available.length)];
-        const weight = this.config.minWeight + Math.random() * (this.config.maxWeight - this.config.minWeight);
+        const newId = available[Math.floor(this.rng() * available.length)];
+        const weight = this.config.minWeight + this.rng() * (this.config.maxWeight - this.config.minWeight);
         genome.primitives.push({ primitiveId: newId, weight });
       }
     } else if (roll < 0.66 && genome.primitives.length > 1) {
       // Remove: drop a random primitive
-      const idx = Math.floor(Math.random() * genome.primitives.length);
+      const idx = Math.floor(this.rng() * genome.primitives.length);
       genome.primitives.splice(idx, 1);
     } else if (genome.primitives.length > 0) {
       // Reweight: adjust a random primitive's weight
-      const idx = Math.floor(Math.random() * genome.primitives.length);
-      const delta = (Math.random() - 0.5) * 1.0; // ±0.5
+      const idx = Math.floor(this.rng() * genome.primitives.length);
+      const delta = (this.rng() - 0.5) * 1.0; // ±0.5
       genome.primitives[idx].weight = Math.max(
         this.config.minWeight,
         Math.min(this.config.maxWeight, genome.primitives[idx].weight + delta),
@@ -345,19 +379,19 @@ export class EvolutionEngine {
 
   private rankByFitness(population: ResolutionGenome[]): ResolutionGenome[] {
     return [...population].sort(
-      (a, b) => this.fitnessEval.getFitness(b.id) - this.fitnessEval.getFitness(a.id),
+      (a, b) => this.fitnessEval.getFitnessForGenome(b) - this.fitnessEval.getFitnessForGenome(a),
     );
   }
 
   private createRandomGenome(primitiveIds: string[], processArea: string): ResolutionGenome {
     // Each genome gets 2-5 random primitives with random weights
-    const count = 2 + Math.floor(Math.random() * 4);
-    const shuffled = [...primitiveIds].sort(() => Math.random() - 0.5);
+    const count = 2 + Math.floor(this.rng() * 4);
+    const shuffled = shuffleInPlace([...primitiveIds], this.rng);
     const selected = shuffled.slice(0, Math.min(count, shuffled.length));
 
     const primitives: WeightedPrimitive[] = selected.map(id => ({
       primitiveId: id,
-      weight: this.config.minWeight + Math.random() * (this.config.maxWeight - this.config.minWeight),
+      weight: this.config.minWeight + this.rng() * (this.config.maxWeight - this.config.minWeight),
     }));
 
     return new ResolutionGenome({
@@ -386,7 +420,7 @@ export class EvolutionEngine {
     const pop = this.populations.get(processArea);
     if (!pop) return null;
 
-    const fitnesses = pop.map(g => this.fitnessEval.getFitness(g.id));
+    const fitnesses = pop.map(g => this.fitnessEval.getFitnessForGenome(g));
 
     return {
       processArea,
