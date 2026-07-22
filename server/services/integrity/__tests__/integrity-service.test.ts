@@ -190,6 +190,37 @@ describe('IntegrityService wiring (#492)', () => {
     expect(outcome.resolution.winner?.id).toBe('near');
   });
 
+  it('does NOT double-commit when a process area has an explicit autoResolveSeverity', async () => {
+    // Regression: base ingestEvent must not auto-resolve (which would commit
+    // once) and then have the evolutionary resolver commit again. The
+    // externalResolution master switch suppresses base auto-resolution even
+    // for an area that opted in via autoResolveSeverity.
+    const svc = new IntegrityService({
+      resolver: { simultaneousWindowMs: 100000 },
+      evolutionary: { evolution: { seed: 6, populationSize: 1 }, safety: { confidenceFloor: 0.3, maturityGeneration: 5 } },
+    });
+    svc.registerProcessAreaRules({
+      processArea: 'area-1',
+      preferredStrategy: 'confidence_weighted',
+      minVotingQuorum: 3,
+      physicsConstraints: [],
+      sensorPriority: [],
+      autoResolveSeverity: 'critical', // would auto-resolve everything if honored
+      deviceConfidenceOverrides: {},
+    });
+    forceGenome(svc.evolutionary, 'strong4', 0.9);
+
+    const resolvedEvents: unknown[] = [];
+    svc.on('resolved_event', e => resolvedEvents.push(e));
+
+    const now = Date.now();
+    await svc.ingestEvent(evt({ deviceId: 'd1', value: 100, timestamp: new Date(now) }));
+    await svc.ingestEvent(evt({ id: 'e2', deviceId: 'd2', value: 150, timestamp: new Date(now + 5) }));
+
+    // Exactly ONE resolved_event for the one conflict — no double commit.
+    expect(resolvedEvents.length).toBe(1);
+  });
+
   it('without a monitor, resolveConflict still works (governance/audit are no-ops)', async () => {
     const base = new ParadoxResolver();
     const resolver = new EvolutionaryResolver(base, {

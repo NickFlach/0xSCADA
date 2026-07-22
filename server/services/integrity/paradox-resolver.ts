@@ -158,6 +158,14 @@ export interface ParadoxResolverConfig {
   qualityWeight: number;
   /** Default minimum quorum for voting strategy */
   defaultVotingQuorum: number;
+  /**
+   * When true, `ingestEvent` detects conflicts but NEVER resolves them —
+   * resolution is driven externally (e.g. by the EvolutionaryResolver via the
+   * IntegrityService, #492). This is a hard master switch that overrides even a
+   * process area's explicit `autoResolveSeverity`, so a conflict is committed
+   * exactly once by the external owner rather than double-committed.
+   */
+  externalResolution: boolean;
 }
 
 const DEFAULT_CONFIG: ParadoxResolverConfig = {
@@ -166,6 +174,7 @@ const DEFAULT_CONFIG: ParadoxResolverConfig = {
   autoResolveLowSeverity: true,
   qualityWeight: 0.7,
   defaultVotingQuorum: 3,
+  externalResolution: false,
 };
 
 /**
@@ -344,6 +353,11 @@ export class ParadoxResolver extends EventEmitter {
   }
 
   private shouldAutoResolve(conflict: ConflictDetection, areaRules: ProcessAreaRules | null): boolean {
+    // Hard master switch (#492): when resolution is owned externally, never
+    // auto-resolve internally — otherwise the conflict is committed twice
+    // (once here, once by the external resolver).
+    if (this.config.externalResolution) return false;
+
     const severityOrder = ['low', 'medium', 'high', 'critical'];
     const conflictLevel = severityOrder.indexOf(conflict.severity);
 

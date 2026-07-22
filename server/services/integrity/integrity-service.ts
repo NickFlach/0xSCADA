@@ -32,8 +32,11 @@ import { EvolutionaryResolver, type EvolutionaryResolverConfig } from './evoluti
 import { ExplainabilityMonitor, type GovernanceGate } from './explainability-monitor';
 
 export interface IntegrityServiceConfig {
-  /** ParadoxResolver overrides. `autoResolveLowSeverity` is forced false. */
-  resolver?: Partial<Omit<ParadoxResolverConfig, 'autoResolveLowSeverity'>>;
+  /**
+   * ParadoxResolver overrides. `autoResolveLowSeverity` and
+   * `externalResolution` are forced (the evolutionary resolver owns resolution).
+   */
+  resolver?: Partial<Omit<ParadoxResolverConfig, 'autoResolveLowSeverity' | 'externalResolution'>>;
   /** EvolutionaryResolver overrides (evolution/safety/governanceAction, …) */
   evolutionary?: Partial<EvolutionaryResolverConfig>;
   /**
@@ -68,10 +71,14 @@ export class IntegrityService extends EventEmitter {
   constructor(config: IntegrityServiceConfig = {}) {
     super();
 
-    // Auto-resolve OFF: the evolutionary resolver owns resolution.
+    // Resolution is owned by the evolutionary resolver. `externalResolution`
+    // is the hard switch that suppresses base auto-resolution even for process
+    // areas registered with an explicit autoResolveSeverity, so each conflict
+    // is committed exactly once (by the evolved-or-static path below).
     this.resolver = new ParadoxResolver({
       ...config.resolver,
       autoResolveLowSeverity: false,
+      externalResolution: true,
     });
 
     this.monitor = new ExplainabilityMonitor();
