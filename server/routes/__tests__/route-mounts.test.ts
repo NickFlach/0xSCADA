@@ -1,7 +1,8 @@
 /**
  * Mount-path tests for the modules extracted from server/routes.ts (#446):
- * every public URL must survive the decomposition unchanged, and the
- * endpoints whose implementations were deleted (#479) must answer 501.
+ * every public URL must survive the decomposition unchanged. The generator
+ * endpoints whose implementations were deleted are restored and wired to the
+ * server/blueprints modules (#479); only the DB-backed /seed remains a 501.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import express from 'express';
@@ -80,18 +81,20 @@ describe('blueprint routes keep their public paths', () => {
     expect(body.vendors).toBe(1);
   });
 
-  it('POST /api/blueprints/import answers 501 referencing the lost modules (#479)', async () => {
+  it('POST /api/blueprints/import runs the restored parser/validator (#479)', async () => {
+    // Empty body carries neither cmTypePackage nor designSpec: the restored
+    // handler rejects it with 400, proving it is no longer a 501 stub.
     const res = await fetch(`${base}/api/blueprints/import`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toMatch(/#479/);
+    expect(body.error).toMatch(/blueprint package/i);
   });
 
-  it('POST /api/blueprints/seed answers 501', async () => {
+  it('POST /api/blueprints/seed still answers 501 (needs the blueprint DB layer)', async () => {
     const res = await fetch(`${base}/api/blueprints/seed`, { method: 'POST' });
     expect(res.status).toBe(501);
   });
@@ -127,20 +130,45 @@ describe('codegen routes keep their public paths', () => {
     expect(res.status).toBe(200);
   });
 
-  it('POST /api/generate/control-module/:id answers 501, not a lying 500', async () => {
+  it('POST /api/generate/control-module/:id 400s without a definition (#479)', async () => {
     const res = await fetch(`${base}/api/generate/control-module/cm-1`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(400);
     const body = await res.json();
-    expect(body.message).toMatch(/6f9d9219c/);
+    expect(body.error).toMatch(/definition/i);
   });
 
-  it('GET /api/ladder-logic/instructions answers 501', async () => {
+  it('POST /api/generate/control-module/:id generates Siemens SCL from a body definition (#479)', async () => {
+    const res = await fetch(`${base}/api/generate/control-module/cm-1`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        vendor: 'siemens',
+        name: 'MotorValve',
+        inputs: [{ name: 'OpenCmd', dataType: 'BOOL' }],
+        outputs: [{ name: 'Opened', dataType: 'BOOL' }],
+        inOuts: [],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.language).toBe('SCL');
+    expect(body.code).toContain('FUNCTION_BLOCK');
+    expect(body.code).toMatch(/OpenCmd\s*:\s*Bool/);
+    expect(body.codeHash).toMatch(/^[0-9a-f]{64}$/);
+  });
+
+  it('GET /api/ladder-logic/instructions returns the restored instruction library (#479)', async () => {
     const res = await fetch(`${base}/api/ladder-logic/instructions`);
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    // The full library is keyed by instruction mnemonic (a non-empty object).
+    expect(typeof body).toBe('object');
+    expect(Object.keys(body).length).toBeGreaterThan(0);
   });
 });
 
