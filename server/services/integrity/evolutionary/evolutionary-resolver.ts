@@ -30,8 +30,9 @@ import { EvolutionEngine, type EvolutionConfig } from './evolution-engine';
 import { SafetyGuard, type SafetyConfig } from './safety-guard';
 import { FitnessEvaluator } from './fitness';
 import { PrimitiveRegistry } from './registry';
-import { ResolutionGenome } from './genome';
+import { ResolutionGenome, type GenomeEvaluation } from './genome';
 import { ConflictContext } from './primitives';
+import type { ExplainabilityMonitor } from '../explainability-monitor';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,11 @@ export interface EvolutionaryResolverConfig {
   evolution?: Partial<EvolutionConfig>;
   /** Safety-guard overrides (confidence floor, novelty budget, maturity gen, …) */
   safety?: Partial<SafetyConfig>;
+  /**
+   * Action string used for governance gates + explainability decisions
+   * (ADR-0023 / CFR 21 Part 11). Default 'evolved_resolution'.
+   */
+  governanceAction?: string;
 }
 
 export interface EvolutionaryResolution {
@@ -76,11 +82,15 @@ export interface EvolutionaryResolverStatus {
   safetyStats: ReturnType<SafetyGuard['getStats']>;
   totalEvolutionaryResolutions: number;
   totalStaticFallbacks: number;
+  totalGovernanceBlocked: number;
+  /** Whether a CFR-21-Part-11 compliance monitor is wired */
+  complianceMonitorActive: boolean;
 }
 
 const DEFAULT_CONFIG: EvolutionaryResolverConfig = {
   enabled: true,
   allowedProcessAreas: [],
+  governanceAction: 'evolved_resolution',
 };
 
 // ─── Evolutionary Resolver ──────────────────────────────────────────────────
@@ -92,18 +102,23 @@ export class EvolutionaryResolver extends EventEmitter {
   private guard: SafetyGuard;
   private fitness: FitnessEvaluator;
   private registry: PrimitiveRegistry;
+  /** Optional CFR-21-Part-11 compliance layer (governance gates + audit). */
+  private monitor?: ExplainabilityMonitor;
 
   /** Counters for status tracking */
   private evolutionaryCount = 0;
   private staticFallbackCount = 0;
+  private governanceBlockedCount = 0;
 
   constructor(
     resolver: ParadoxResolver,
     config: Partial<EvolutionaryResolverConfig> = {},
+    monitor?: ExplainabilityMonitor,
   ) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
     this.resolver = resolver;
+    this.monitor = monitor;
 
     // Initialize sub-components
     this.registry = new PrimitiveRegistry();
@@ -205,7 +220,7 @@ export class EvolutionaryResolver extends EventEmitter {
       };
     }
 
-    // Evolved strategy approved — build resolution from genome evaluation
+    // SafetyGuard approved — build the evolved resolution from the evaluation.
     const resolution: Resolution = {
       conflictId: conflict.conflictId,
       method: 'confidence_weighted', // closest static equivalent
@@ -217,10 +232,37 @@ export class EvolutionaryResolver extends EventEmitter {
       resolvedAt: new Date(),
     };
 
+    // Governance gate (#492 M7): ADR-0023 requires evolved strategies to pass a
+    // gate before production use. A blocking gate failure demotes to static.
+    const govBlockReason = this.checkGovernance(resolution);
+    if (govBlockReason) {
+      const staticResolution = await this.resolver.resolve(conflict);
+      this.staticFallbackCount++;
+      this.governanceBlockedCount++;
+      this.fitness.evaluate(genome, this.genomeSelfResolution(conflict, evaluation), evaluation);
+      this.recordExplainability(resolution, genome, evaluation, processArea, false, govBlockReason);
+      if (shouldEvolve) this.evolveAndEmit(processArea);
+      this.emit('governance_blocked', { processArea, genomeId: genome.id, reason: govBlockReason });
+      return {
+        resolution: staticResolution,
+        usedEvolved: false,
+        genomeId: genome.id,
+        generation: genome.generation,
+        safetyDecision: { allowed: false, reason: `Governance gate: ${govBlockReason}` },
+      };
+    }
+
     this.evolutionaryCount++;
 
     // Record fitness
     this.fitness.evaluate(genome, resolution, evaluation);
+
+    // Commit through the base resolver (#492 M1) so its maps update and
+    // downstream `resolved` / `resolved_event` listeners (ADR-0024/0025) fire.
+    this.resolver.commitResolution(conflict, resolution);
+
+    // Explainability audit for the approved evolved decision (#492 M7).
+    this.recordExplainability(resolution, genome, evaluation, processArea, true);
 
     if (shouldEvolve) this.evolveAndEmit(processArea);
 
@@ -283,12 +325,109 @@ export class EvolutionaryResolver extends EventEmitter {
   }
 
   private buildConflictContext(conflict: ConflictDetection): ConflictContext {
+    // #492 M5: populate the context from the base resolver's state so the
+    // history_bias / rate_filter (recentReadings) and neighbor_correlation
+    // (neighborValues) primitives actually run instead of returning neutral.
+    const tag = conflict.events[0]?.tag;
+    let recentReadings: ScadaEvent[] | undefined;
+    let neighborValues: Map<string, unknown> | undefined;
+
+    if (tag) {
+      const conflictIds = new Set(conflict.events.map(e => e.id));
+      const readings = this.resolver.getRecentReadings(tag, conflictIds);
+      if (readings.length > 0) recentReadings = readings;
+
+      const neighborTags = this.resolver.getNeighborTags(tag, conflict.processArea);
+      if (neighborTags.length > 0) {
+        const values = new Map<string, unknown>();
+        for (const nt of neighborTags) {
+          const v = this.resolver.getLatestValue(nt);
+          if (v !== undefined) values.set(nt, v);
+        }
+        if (values.size > 0) neighborValues = values;
+      }
+    }
+
     return {
       conflict,
-      recentReadings: undefined, // Could be populated from resolver's event history
-      neighborValues: undefined, // Could be populated from tag correlations
+      recentReadings,
+      neighborValues,
       physicsValid: conflict.type !== 'physics_violation' ? undefined : false,
     };
+  }
+
+  /** A resolution carrying the genome's OWN score, for fitness on demoted paths. */
+  private genomeSelfResolution(conflict: ConflictDetection, evaluation: GenomeEvaluation): Resolution {
+    return {
+      conflictId: conflict.conflictId,
+      method: 'confidence_weighted',
+      confidence: evaluation.score,
+      reasoning: `[Evolved-demoted] ${evaluation.reasoning}`,
+      resolvedAt: new Date(),
+    };
+  }
+
+  /**
+   * Run the evolved resolution through the compliance governance gates.
+   * Returns a block reason if any applicable gate with `block` enforcement
+   * fails, otherwise null (including when no monitor is wired).
+   */
+  private checkGovernance(resolution: Resolution): string | null {
+    if (!this.monitor) return null;
+    const results = this.monitor.checkGovernanceGates(
+      this.config.governanceAction ?? 'evolved_resolution',
+      resolution.confidence,
+      false, // evolved resolutions are automated — no electronic signature
+    );
+    const blocking = results.find(r => !r.passed && r.enforcement === 'block');
+    return blocking ? blocking.reason : null;
+  }
+
+  /**
+   * Record a CFR-21-Part-11 explainability decision + tamper-evident audit
+   * entry for an evolved-resolution decision (#492 M7). No-op without a monitor.
+   */
+  private recordExplainability(
+    resolution: Resolution,
+    genome: ResolutionGenome,
+    evaluation: GenomeEvaluation,
+    processArea: string,
+    approved: boolean,
+    blockReason?: string,
+  ): void {
+    if (!this.monitor) return;
+    const decision = this.monitor.recordDecision({
+      source: 'EvolutionaryResolver',
+      action: this.config.governanceAction ?? 'evolved_resolution',
+      ruleApplied: `evolved-genome:${genome.id} gen=${genome.generation}`,
+      reasoning: approved ? resolution.reasoning : `Gated: ${blockReason}. ${resolution.reasoning}`,
+      inputs: {
+        conflictId: resolution.conflictId,
+        processArea,
+        primitivesEvaluated: evaluation.primitivesEvaluated,
+        genomeId: genome.id,
+        generation: genome.generation,
+      },
+      output: {
+        method: resolution.method,
+        winner: resolution.winner?.id,
+        mergedValue: resolution.mergedValue,
+        applied: approved,
+      },
+      confidence: resolution.confidence,
+      verificationLayers: [
+        { layer: 'safety_guard', passed: true, score: resolution.confidence, timestamp: new Date() },
+        { layer: 'governance_gate', passed: approved, score: resolution.confidence, details: blockReason, timestamp: new Date() },
+      ],
+    });
+
+    this.monitor.addAuditEntry({
+      userId: 'system:evolutionary-resolver',
+      action: approved ? 'approve' : 'reject',
+      resource: 'evolved_resolution',
+      resourceId: decision.id,
+      reason: approved ? 'Evolved strategy applied' : `Evolved strategy gated: ${blockReason}`,
+    });
   }
 
   private evolveAndEmit(processArea: string): void {
@@ -326,6 +465,8 @@ export class EvolutionaryResolver extends EventEmitter {
       safetyStats: this.guard.getStats(),
       totalEvolutionaryResolutions: this.evolutionaryCount,
       totalStaticFallbacks: this.staticFallbackCount,
+      totalGovernanceBlocked: this.governanceBlockedCount,
+      complianceMonitorActive: this.monitor !== undefined,
     };
   }
 
