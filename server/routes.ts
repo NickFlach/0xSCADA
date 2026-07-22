@@ -18,6 +18,7 @@ import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
+import { nlQueryService } from "./services/nlquery";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -80,6 +81,11 @@ export async function registerRoutes(
   // WebSocket servers initialize if available
   try { tagStreamServer?.initialize(httpServer, "/ws/tags"); } catch {}
   try { unifiedStreamServer?.initialize(httpServer, "/ws"); } catch {}  // unified endpoint (#255)
+
+  // Feed live tag updates into the NL query store and start the service
+  // here — services/initializeServices() has no callers at startup (#216).
+  tagStreamServer.onTagUpdate((update) => nlQueryService.ingestTagUpdate(update));
+  void nlQueryService.initialize();
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).

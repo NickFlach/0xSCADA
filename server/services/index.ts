@@ -66,6 +66,10 @@ export { spcService } from './spc';
 export * from './l2-rollup';
 export { l2RollupService } from './l2-rollup';
 
+// ── NL Query Service (ADR-0013 [13.5], #216) ─────────────────────────────────
+export * from './nlquery';
+export { nlQueryService } from './nlquery';
+
 /**
  * Initialize all services
  * 
@@ -80,7 +84,8 @@ export async function initializeServices(): Promise<void> {
     { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
     { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
-    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) }
+    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
+    { name: 'NL Query', service: () => import('./nlquery').then(m => m.nlQueryService.initialize()) }
   ];
 
   for (const { name, service } of services) {
@@ -171,6 +176,14 @@ export async function getServicesHealthStatus(): Promise<{
         return await spcService.healthCheck();
       } catch {
         return { healthy: false, message: 'SPC service not available' };
+      }
+    },
+    nlquery: async () => {
+      try {
+        const { nlQueryService } = await import('./nlquery');
+        return await nlQueryService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'NL query service not available' };
       }
     }
   };

@@ -1,11 +1,12 @@
 import { Router } from "express";
 import { z } from "zod";
+import { nlQueryService } from "../services/nlquery";
 
 const router = Router();
 
 // Schema definitions for intelligence modules
 const NLQuerySchema = z.object({
-  query: z.string().min(1),
+  query: z.string().min(1).max(1000),
   context: z.string().optional(),
   filters: z.record(z.any()).optional(),
 });
@@ -31,44 +32,39 @@ const MLPipelineSchema = z.object({
   data: z.array(z.record(z.any())),
 });
 
-// NL Query Engine endpoints
+// NL Query Engine endpoints (ADR-0013 [13.5], #216 — real implementation)
 router.post("/nlquery", async (req, res) => {
+  const parsed = NLQuerySchema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: "Invalid NL query request" });
+  }
   try {
-    const { query, context, filters } = NLQuerySchema.parse(req.body);
-    
-    // Basic NL query processing (placeholder implementation)
-    const results = {
-      query,
-      interpretation: `Processed query: ${query}`,
-      results: [],
-      suggestions: [
-        "Try refining your query with more specific terms",
-        "Consider adding time filters",
-      ],
-    };
-    
-    res.json(results);
+    const result = await nlQueryService.engine.execute(parsed.data.query);
+    res.json({
+      query: result.query,
+      interpretation: result.interpretation,
+      intent: result.intent.type,
+      success: result.success,
+      answer: result.answer,
+      results: [result.data],
+      suggestions: result.suggestions,
+      parsedBy: result.parsedBy,
+    });
   } catch (error) {
-    res.status(400).json({ error: "Invalid NL query request" });
+    console.error("[nlquery] execution error:", error);
+    if (!res.headersSent) res.status(500).json({ error: "Query execution failed" });
   }
 });
 
-router.get("/nlquery/history", async (req, res) => {
-  try {
-    // Mock query history
-    const history = [
-      {
-        id: "1",
-        query: "Show me pump efficiency trends",
-        timestamp: new Date().toISOString(),
-        results: 15,
-      },
-    ];
-    
-    res.json({ history });
-  } catch (error) {
-    res.status(500).json({ error: "Failed to fetch query history" });
-  }
+router.get("/nlquery/history", async (_req, res) => {
+  const history = nlQueryService.engine.getHistory().map((r) => ({
+    id: r.id,
+    query: r.query,
+    timestamp: new Date(r.timestamp).toISOString(),
+    results: r.success ? 1 : 0,
+    answer: r.answer,
+  }));
+  res.json({ history });
 });
 
 // Predictive Maintenance endpoints
