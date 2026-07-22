@@ -9,6 +9,18 @@
 import { EventEmitter } from 'events';
 import { MerkleRootSigner, HSMConfig, SignatureResult } from './hsm';
 import { EventBatch } from './pipeline';
+import { MerkleTreeBuilder } from './merkle';
+
+/**
+ * Real blockchain anchor operation: submit a signed Merkle root and resolve
+ * true once it is anchored. Injected (e.g. wrapping the AnchorRelayerService)
+ * so the resilience layer performs a real submission instead of a simulation.
+ */
+export type AnchorFn = (
+  batchId: string,
+  merkleRoot: string,
+  signature: SignatureResult,
+) => Promise<boolean>;
 
 export interface CircuitBreakerConfig {
   failureThreshold: number; // Number of failures before opening circuit
@@ -28,6 +40,11 @@ export interface ResilienceConfig {
     retryAttempts: number;
     retryDelayMs: number;
     queueMaxSize: number;
+    /**
+     * Real anchor operation. When absent, anchoring fails closed (returns false
+     * and emits a warning) rather than the former Math.random() simulation.
+     */
+    anchor?: AnchorFn;
   };
   merkle: {
     continueOnFailure: boolean;
@@ -534,23 +551,31 @@ export class ResilienceManager extends EventEmitter {
    * Perform blockchain anchor operation (placeholder)
    */
   private async performBlockchainAnchor(batchId: string, merkleRoot: string, signature: SignatureResult): Promise<boolean> {
-    // Simulate blockchain anchoring
-    // In real implementation, this would:
-    // 1. Connect to blockchain node
-    // 2. Submit anchoring transaction
-    // 3. Wait for confirmation
-    // 4. Return success/failure
-    
-    await this.sleep(100); // Simulate network delay
-    return Math.random() > 0.1; // 90% success rate for simulation
+    // Real anchor via the injected operation (e.g. the AnchorRelayerService).
+    // No operation configured → fail closed (do NOT fake success), so the
+    // circuit breaker + retry queue treat it as a genuine anchoring outage.
+    if (!this.config.blockchain.anchor) {
+      this.emit('warning', {
+        component: 'blockchain',
+        message: 'No anchor operation configured — anchoring is a no-op (failing closed)',
+        batchId,
+      });
+      return false;
+    }
+    return this.config.blockchain.anchor(batchId, merkleRoot, signature);
   }
 
   /**
-   * Simulate Merkle tree building (placeholder)
+   * Build the Merkle root for a batch from its event hashes (real tree).
    */
   private buildMerkleTreeSync(eventBatch: EventBatch): string {
-    // In real implementation, this would use the MerkleTreeBuilder
-    return `merkle_root_${eventBatch.id}_${eventBatch.batchHash}`;
+    if (eventBatch.events.length === 0) {
+      // Empty batch: MerkleTreeBuilder rejects empty input; the batchHash
+      // (SHA-256 over zero event hashes) is the deterministic stand-in.
+      return eventBatch.batchHash;
+    }
+    const eventHashes = eventBatch.events.map(e => e.hash);
+    return MerkleTreeBuilder.buildFromEventHashes(eventHashes).root;
   }
 
   /**
