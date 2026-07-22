@@ -25,7 +25,7 @@ import {
   cmTypeToAOI,
   generateL5X,
   ladderLogicAgent,
-  batchRungGenerator,
+  BatchRungGenerator,
   routineToLadderDiagram,
   type ParsedCMType,
   type ParsedPhaseType,
@@ -297,6 +297,10 @@ router.post("/ladder-logic/batch", (req, res) => {
     if (!template) {
       return res.status(400).json({ error: "Template is required" });
     }
+    // Fresh instance per request: BatchRungGenerator holds the loaded template
+    // in instance state, so a shared singleton would race across concurrent
+    // requests (one request's CSV generated against another's template).
+    const batchRungGenerator = new BatchRungGenerator();
     batchRungGenerator.loadTemplate(template);
     const templateValidation = batchRungGenerator.validateTemplate();
     if (!templateValidation.valid) {

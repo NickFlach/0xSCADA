@@ -4,6 +4,7 @@
  */
 
 import type { ParsedCMType, ParsedPhaseType, CMTypeInput, CMTypeOutput } from "./types";
+import { escapeXml, escapeCdata } from "./xml-utils";
 
 // Siemens-specific data type mappings
 export const siemensDataTypes: Record<string, string> = {
@@ -145,11 +146,8 @@ const siemensDataTypesByUpper: Record<string, string> = Object.fromEntries(
 );
 
 export function translateToSiemens(canonicalType: string): string {
-  return (
-    siemensDataTypesByUpper[canonicalType.toUpperCase()] ||
-    siemensDataTypes[canonicalType] ||
-    canonicalType
-  );
+  const t = String(canonicalType ?? "");
+  return siemensDataTypesByUpper[t.toUpperCase()] || siemensDataTypes[t] || t;
 }
 
 /**
@@ -342,7 +340,7 @@ export function generateTIAXML(fb: SiemensFB): string {
   lines.push(`  </DocumentInfo>`);
   lines.push(`  <SW.Blocks.FB ID="0">`);
   lines.push(`    <AttributeList>`);
-  lines.push(`      <Name>${fb.name}</Name>`);
+  lines.push(`      <Name>${escapeXml(fb.name)}</Name>`);
   lines.push(`      <Number>1</Number>`);
   lines.push(`      <ProgrammingLanguage>SCL</ProgrammingLanguage>`);
   lines.push(`    </AttributeList>`);
@@ -355,9 +353,9 @@ export function generateTIAXML(fb: SiemensFB): string {
   if (fb.inputs.length > 0) {
     lines.push(`        <Section Name="Input">`);
     for (const v of fb.inputs) {
-      lines.push(`          <Member Name="${v.name}" Datatype="${v.dataType}">`);
+      lines.push(`          <Member Name="${escapeXml(v.name)}" Datatype="${escapeXml(v.dataType)}">`);
       if (v.comment) {
-        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${v.comment}</MultiLanguageText></Comment>`);
+        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${escapeXml(v.comment)}</MultiLanguageText></Comment>`);
       }
       lines.push(`          </Member>`);
     }
@@ -368,9 +366,9 @@ export function generateTIAXML(fb: SiemensFB): string {
   if (fb.outputs.length > 0) {
     lines.push(`        <Section Name="Output">`);
     for (const v of fb.outputs) {
-      lines.push(`          <Member Name="${v.name}" Datatype="${v.dataType}">`);
+      lines.push(`          <Member Name="${escapeXml(v.name)}" Datatype="${escapeXml(v.dataType)}">`);
       if (v.comment) {
-        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${v.comment}</MultiLanguageText></Comment>`);
+        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${escapeXml(v.comment)}</MultiLanguageText></Comment>`);
       }
       lines.push(`          </Member>`);
     }
@@ -381,9 +379,9 @@ export function generateTIAXML(fb: SiemensFB): string {
   if (fb.inOuts.length > 0) {
     lines.push(`        <Section Name="InOut">`);
     for (const v of fb.inOuts) {
-      lines.push(`          <Member Name="${v.name}" Datatype="${v.dataType}">`);
+      lines.push(`          <Member Name="${escapeXml(v.name)}" Datatype="${escapeXml(v.dataType)}">`);
       if (v.comment) {
-        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${v.comment}</MultiLanguageText></Comment>`);
+        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${escapeXml(v.comment)}</MultiLanguageText></Comment>`);
       }
       lines.push(`          </Member>`);
     }
@@ -394,9 +392,9 @@ export function generateTIAXML(fb: SiemensFB): string {
   if (fb.statics.length > 0) {
     lines.push(`        <Section Name="Static">`);
     for (const v of fb.statics) {
-      lines.push(`          <Member Name="${v.name}" Datatype="${v.dataType}">`);
+      lines.push(`          <Member Name="${escapeXml(v.name)}" Datatype="${escapeXml(v.dataType)}">`);
       if (v.comment) {
-        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${v.comment}</MultiLanguageText></Comment>`);
+        lines.push(`            <Comment><MultiLanguageText Lang="en-US">${escapeXml(v.comment)}</MultiLanguageText></Comment>`);
       }
       lines.push(`          </Member>`);
     }
@@ -412,7 +410,7 @@ export function generateTIAXML(fb: SiemensFB): string {
   lines.push(`        </AttributeList>`);
   lines.push(`        <ObjectList>`);
   lines.push(`          <SW.Blocks.CompileUnit.ProgramCode>`);
-  lines.push(`            <StructuredText><![CDATA[${fb.code}]]></StructuredText>`);
+  lines.push(`            <StructuredText><![CDATA[${escapeCdata(fb.code)}]]></StructuredText>`);
   lines.push(`          </SW.Blocks.CompileUnit.ProgramCode>`);
   lines.push(`        </ObjectList>`);
   lines.push(`      </SW.Blocks.CompileUnit>`);

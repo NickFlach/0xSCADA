@@ -4,6 +4,7 @@
  */
 
 import type { ParsedCMType, CMTypeInput, CMTypeOutput, CMTypeInOut } from "./types";
+import { escapeXml, escapeCdata } from "./xml-utils";
 
 // Rockwell-specific data type mappings
 export const rockwellDataTypes: Record<string, string> = {
@@ -118,8 +119,16 @@ export function cmTypeToAOI(cmType: ParsedCMType): RockwellAOI {
 /**
  * Translate canonical data type to Rockwell type
  */
+// Look up case-insensitively so the uppercase canonical types the parsers emit
+// (BOOL/WORD/TIME) map to their Studio 5000 atomic types (BOOL/INT/TIMER)
+// rather than falling through as invalid literals. Mirrors translateToSiemens.
+const rockwellDataTypesByUpper: Record<string, string> = Object.fromEntries(
+  Object.entries(rockwellDataTypes).map(([canonical, rockwell]) => [canonical.toUpperCase(), rockwell]),
+);
+
 export function translateToRockwell(canonicalType: string): string {
-  return rockwellDataTypes[canonicalType] || canonicalType.toUpperCase();
+  const t = String(canonicalType ?? "");
+  return rockwellDataTypesByUpper[t.toUpperCase()] || rockwellDataTypes[t] || t.toUpperCase();
 }
 
 /**
@@ -161,50 +170,53 @@ export function generateL5X(aoi: RockwellAOI): string {
   const lines: string[] = [];
   
   lines.push(`<?xml version="1.0" encoding="UTF-8"?>`);
-  lines.push(`<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="32.00" TargetName="${aoi.name}" TargetType="AddOnInstructionDefinition" ContainsContext="true" Owner="0xSCADA" ExportDate="{{EXPORT_DATE}}">`);
+  lines.push(`<RSLogix5000Content SchemaRevision="1.0" SoftwareRevision="32.00" TargetName="${escapeXml(aoi.name)}" TargetType="AddOnInstructionDefinition" ContainsContext="true" Owner="0xSCADA" ExportDate="{{EXPORT_DATE}}">`);
   lines.push(`  <Controller Use="Context" Name="0xSCADA_Export">`);
   lines.push(`    <AddOnInstructionDefinitions Use="Context">`);
-  lines.push(`      <AddOnInstructionDefinition Name="${aoi.name}" Revision="${aoi.revision}" RevisionExtension="0" Vendor="0xSCADA" ExecutePrescan="false" ExecutePostscan="false" ExecuteEnableInFalse="false" CreatedDate="{{CREATED_DATE}}" CreatedBy="0xSCADA" EditedDate="{{EDITED_DATE}}" EditedBy="0xSCADA">`);
-  
+  lines.push(`      <AddOnInstructionDefinition Name="${escapeXml(aoi.name)}" Revision="${escapeXml(aoi.revision)}" RevisionExtension="0" Vendor="0xSCADA" ExecutePrescan="false" ExecutePostscan="false" ExecuteEnableInFalse="false" CreatedDate="{{CREATED_DATE}}" CreatedBy="0xSCADA" EditedDate="{{EDITED_DATE}}" EditedBy="0xSCADA">`);
+
   // Description
   if (aoi.description) {
-    lines.push(`        <Description><![CDATA[${aoi.description}]]></Description>`);
+    lines.push(`        <Description><![CDATA[${escapeCdata(aoi.description)}]]></Description>`);
   }
-  
+
   // Parameters
   lines.push(`        <Parameters>`);
   for (const param of aoi.parameters) {
     const required = param.required ? "true" : "false";
     const visible = param.visible ? "true" : "false";
-    lines.push(`          <Parameter Name="${param.name}" TagType="Base" DataType="${param.dataType}" Usage="${param.usage}" Radix="Decimal" Required="${required}" Visible="${visible}" ExternalAccess="Read/Write">`);
+    lines.push(`          <Parameter Name="${escapeXml(param.name)}" TagType="Base" DataType="${escapeXml(param.dataType)}" Usage="${escapeXml(param.usage)}" Radix="Decimal" Required="${required}" Visible="${visible}" ExternalAccess="Read/Write">`);
     if (param.description) {
-      lines.push(`            <Description><![CDATA[${param.description}]]></Description>`);
+      lines.push(`            <Description><![CDATA[${escapeCdata(param.description)}]]></Description>`);
     }
     if (param.default) {
-      lines.push(`            <DefaultData Format="Decorated"><DataValue DataType="${param.dataType}" Value="${param.default}"/></DefaultData>`);
+      lines.push(`            <DefaultData Format="Decorated"><DataValue DataType="${escapeXml(param.dataType)}" Value="${escapeXml(param.default)}"/></DefaultData>`);
     }
     lines.push(`          </Parameter>`);
   }
   lines.push(`        </Parameters>`);
-  
+
   // Local Tags
   lines.push(`        <LocalTags>`);
   for (const tag of aoi.localTags) {
-    lines.push(`          <LocalTag Name="${tag.name}" DataType="${tag.dataType}" ExternalAccess="None">`);
+    lines.push(`          <LocalTag Name="${escapeXml(tag.name)}" DataType="${escapeXml(tag.dataType)}" ExternalAccess="None">`);
     if (tag.description) {
-      lines.push(`            <Description><![CDATA[${tag.description}]]></Description>`);
+      lines.push(`            <Description><![CDATA[${escapeCdata(tag.description)}]]></Description>`);
     }
     lines.push(`          </LocalTag>`);
   }
   lines.push(`        </LocalTags>`);
-  
+
   // Routines
   lines.push(`        <Routines>`);
   for (const routine of aoi.routines) {
-    lines.push(`          <Routine Name="${routine.name}" Type="${routine.type === "ST" ? "ST" : "RLL"}">`);
+    lines.push(`          <Routine Name="${escapeXml(routine.name)}" Type="${routine.type === "ST" ? "ST" : "RLL"}">`);
     if (routine.type === "ST") {
       lines.push(`            <STContent>`);
-      lines.push(`              <Line Number="0"><![CDATA[${routine.content.split("\n").join("]]></Line>\n              <Line Number=\"0\"><![CDATA[")}]]></Line>`);
+      const stLines = routine.content.split("\n")
+        .map(l => `              <Line Number="0"><![CDATA[${escapeCdata(l)}]]></Line>`)
+        .join("\n");
+      lines.push(stLines);
       lines.push(`            </STContent>`);
     }
     lines.push(`          </Routine>`);

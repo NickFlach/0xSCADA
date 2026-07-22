@@ -33,8 +33,18 @@ export function importBlueprints(files: BlueprintFiles): BlueprintImportResult {
   const unitInstances: ParsedUnitInstances[] = [];
   const phaseTypes: ParsedPhaseType[] = [];
 
+  // A package may carry cmTypePackage and/or designSpec (and a designSpec need
+  // not carry every section), so normalize missing sections to empty arrays
+  // rather than dereferencing them blindly.
+  const cmTypePackage = files.cmTypePackage ?? [];
+  const designSpec = files.designSpec ?? {} as BlueprintFiles["designSpec"];
+  const designUnitTypes = designSpec.unitTypes ?? [];
+  const designPhaseTypes = designSpec.phaseTypes ?? [];
+  const designCmInstances = designSpec.cmInstances ?? [];
+  const designUnitInstances = designSpec.unitInstances ?? [];
+
   // Parse CM Types
-  for (const file of files.cmTypePackage) {
+  for (const file of cmTypePackage) {
     if (file.name.startsWith("cm-type-") && file.name.endsWith(".md")) {
       try {
         const parsed = parseCMTypeMarkdown(file.content, file.name);
@@ -50,7 +60,7 @@ export function importBlueprints(files: BlueprintFiles): BlueprintImportResult {
   }
 
   // Parse Unit Types
-  for (const file of files.designSpec.unitTypes) {
+  for (const file of designUnitTypes) {
     if (file.name.startsWith("unit-type-") && file.name.endsWith(".md")) {
       try {
         const parsed = parseUnitTypeMarkdown(file.content, file.name);
@@ -66,7 +76,7 @@ export function importBlueprints(files: BlueprintFiles): BlueprintImportResult {
   }
 
   // Parse Phase Types
-  for (const file of files.designSpec.phaseTypes) {
+  for (const file of designPhaseTypes) {
     if (file.name.startsWith("phase-type-") && file.name.endsWith(".md")) {
       try {
         const parsed = parsePhaseTypeMarkdown(file.content, file.name);
@@ -82,7 +92,7 @@ export function importBlueprints(files: BlueprintFiles): BlueprintImportResult {
   }
 
   // Parse CM Instances
-  for (const file of files.designSpec.cmInstances) {
+  for (const file of designCmInstances) {
     if (file.name.endsWith(".csv")) {
       try {
         const cmTypeName = extractCMTypeFromFilename(file.name);
@@ -97,7 +107,7 @@ export function importBlueprints(files: BlueprintFiles): BlueprintImportResult {
   }
 
   // Parse Unit Instances
-  for (const file of files.designSpec.unitInstances) {
+  for (const file of designUnitInstances) {
     if (file.name.endsWith(".csv")) {
       try {
         const unitTypeName = extractUnitTypeFromFilename(file.name);

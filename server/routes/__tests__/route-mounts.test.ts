@@ -94,6 +94,20 @@ describe('blueprint routes keep their public paths', () => {
     expect(body.error).toMatch(/blueprint package/i);
   });
 
+  it('POST /api/blueprints/import accepts a partial package without a 500 (#509)', async () => {
+    // A cmTypePackage with no designSpec is a valid partial package: it must
+    // parse to 200, not throw a 500 dereferencing the absent designSpec.
+    const res = await fetch(`${base}/api/blueprints/import`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ cmTypePackage: [] }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.persisted).toBe(false);
+  });
+
   it('POST /api/blueprints/seed still answers 501 (needs the blueprint DB layer)', async () => {
     const res = await fetch(`${base}/api/blueprints/seed`, { method: 'POST' });
     expect(res.status).toBe(501);
