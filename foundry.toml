@@ -12,6 +12,7 @@ optimizer_runs = 200
 remappings = [
     "@openzeppelin/=node_modules/@openzeppelin/",
 ]
-# contracts/test/fuzz imports contracts/SiteRegistry.sol, which no longer
-# exists in this repo — those files cannot compile until restored or removed.
-skip = ["contracts/test/fuzz/**"]
+# SiteRegistry.fuzz.t.sol imports hardhat/console.sol and contracts/SiteRegistry.sol,
+# neither of which exists in this repo — it cannot compile until restored (#490).
+# EventAnchor.fuzz.t.sol was rewritten against the real EventAnchor ABI and runs.
+skip = ["contracts/test/fuzz/SiteRegistry.fuzz.t.sol"]
