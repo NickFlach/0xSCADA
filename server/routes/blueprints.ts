@@ -9,6 +9,13 @@
 import { Router, type Response } from "express";
 import { storage } from "../storage";
 import { logError } from "../logger";
+import {
+  importBlueprints,
+  validateCMReferences,
+  validateUnitReferences,
+  validatePhaseReferences,
+  type BlueprintFiles,
+} from "../blueprints";
 
 const router = Router();
 
@@ -139,14 +146,52 @@ router.get("/design-specs", async (req, res) => {
   }
 });
 
-// Import Blueprints Package — parser + reference validators were deleted (#479)
+// Parse + validate a blueprint package (#479). Restored parser + reference
+// validators. This parses and validates only — persisting the parsed entities
+// needs the blueprint DB layer, which was never restored (separate follow-up),
+// so the parsed result is returned rather than stored.
 router.post("/import", (req, res) => {
-  lostModule501(res, "Blueprint package import (parser + reference validation)");
+  try {
+    const files = req.body as BlueprintFiles;
+    if (!files || (!files.cmTypePackage && !files.designSpec)) {
+      return res.status(400).json({
+        error: "Invalid blueprint package. Expected cmTypePackage and/or designSpec.",
+      });
+    }
+    const parsed = importBlueprints(files);
+    if (!parsed.success) {
+      return res.status(400).json({ error: "Failed to parse blueprints", errors: parsed.errors, warnings: parsed.warnings });
+    }
+    const refErrors = [
+      ...validateCMReferences(parsed.cmTypes, parsed.cmInstances),
+      ...validateUnitReferences(parsed.unitTypes, parsed.unitInstances),
+      ...validatePhaseReferences(parsed.cmTypes, parsed.phaseTypes),
+    ];
+    if (refErrors.length > 0) {
+      return res.status(400).json({ error: "Reference validation failed", errors: refErrors, warnings: parsed.warnings });
+    }
+    res.json({
+      success: true,
+      persisted: false,
+      parsed: {
+        cmTypes: parsed.cmTypes.length,
+        cmInstances: parsed.cmInstances.length,
+        unitTypes: parsed.unitTypes.length,
+        unitInstances: parsed.unitInstances.length,
+        phaseTypes: parsed.phaseTypes.length,
+      },
+      warnings: parsed.warnings,
+    });
+  } catch (error) {
+    logError(error, "Error importing blueprints:");
+    res.status(500).json({ error: "Failed to import blueprints" });
+  }
 });
 
-// Seed database with default vendors — seeder was deleted (#479)
+// Seed database with default vendors — needs the blueprint DB layer (storage
+// CRUD + tables) which was never restored; tracked as a #479 follow-up.
 router.post("/seed", (req, res) => {
-  lostModule501(res, "Blueprint database seeding");
+  lostModule501(res, "Blueprint database seeding (needs the blueprint DB layer)");
 });
 
 // Blueprints Summary
