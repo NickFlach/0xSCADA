@@ -179,6 +179,13 @@ export class InMemoryPkcs11Provider implements Pkcs11Provider {
   private keys = new Map<string, EmulatedKey>();
   private opened = false;
   private expectedPin?: string;
+  /** Emulate a module that returns CKA_MODULUS DER-padded with a leading 0x00. */
+  private derPadModulus = false;
+
+  /** Simulate a vendor HSM that returns modulus/exponent with a leading 0x00. */
+  simulateDerPaddedModulus(): void {
+    this.derPadModulus = true;
+  }
 
   /** Provision a key pair under a label (as `softhsm2-util --init-token` + keygen would). */
   addKey(label: string): void {
@@ -219,7 +226,14 @@ export class InMemoryPkcs11Provider implements Pkcs11Provider {
   async findPublicKey(label: string): Promise<Pkcs11PublicKey | null> {
     this.ensureOpen();
     const k = this.keys.get(label);
-    return k ? { modulus: k.modulus, exponent: k.exponent } : null;
+    if (!k) return null;
+    if (this.derPadModulus) {
+      return {
+        modulus: Buffer.concat([Buffer.from([0x00]), k.modulus]),
+        exponent: Buffer.concat([Buffer.from([0x00]), k.exponent]),
+      };
+    }
+    return { modulus: k.modulus, exponent: k.exponent };
   }
 
   async sign(handle: Pkcs11KeyHandle, data: Buffer): Promise<Buffer> {

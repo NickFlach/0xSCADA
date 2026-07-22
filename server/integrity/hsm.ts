@@ -16,6 +16,17 @@ export interface SignerDeps {
   pkcs11Provider?: Pkcs11Provider;
 }
 
+/**
+ * Strip leading zero bytes to produce the minimal big-endian encoding a JWK
+ * requires, keeping at least one byte. PKCS#11 CKA_MODULUS/CKA_PUBLIC_EXPONENT
+ * may arrive DER-padded with a leading 0x00 on some modules.
+ */
+function stripLeadingZeros(buf: Buffer): Buffer {
+  let i = 0;
+  while (i < buf.length - 1 && buf[i] === 0) i++;
+  return buf.subarray(i);
+}
+
 export interface SignatureResult {
   signature: string;
   algorithm: string;
@@ -342,11 +353,15 @@ export class PKCS11Signer extends BaseSigner {
       throw new Error(`PKCS#11: public key not found for keyId "${id}"`);
     }
     // Build an SPKI PEM from the raw RSA modulus + exponent via JWK import —
-    // avoids hand-rolling DER.
+    // avoids hand-rolling DER. JWK base64url requires the MINIMAL big-endian
+    // encoding (no leading zeros); some PKCS#11 modules return CKA_MODULUS with
+    // a DER-style leading 0x00, so strip it — otherwise the JWK import produces
+    // a corrupt key (SoftHSM returns minimal bytes, so this only bites vendor
+    // HSMs and would be missed by the emulator).
     const jwk = {
       kty: 'RSA',
-      n: pub.modulus.toString('base64url'),
-      e: pub.exponent.toString('base64url'),
+      n: stripLeadingZeros(pub.modulus).toString('base64url'),
+      e: stripLeadingZeros(pub.exponent).toString('base64url'),
     };
     const pem = createPublicKey({ key: jwk, format: 'jwk' }).export({ type: 'spki', format: 'pem' }) as string;
     this.publicKeyCache.set(id, pem);

@@ -164,6 +164,22 @@ describe('PKCS#11 signer (#482) — via in-memory PKCS#11 emulator', () => {
     await signer.cleanup();
   });
 
+  it('handles a DER-padded (leading 0x00) modulus from a vendor-style HSM', async () => {
+    // Emulator normally returns minimal bytes; simulate a module that pads with
+    // a leading zero. getPublicKey strips it to the canonical minimal JWK
+    // encoding (RFC 7518); the signer round-trips either way — a regression
+    // guard for the vendor-HSM padding case the minimal-bytes emulator misses.
+    const emu = provisionedEmulator();
+    emu.simulateDerPaddedModulus();
+    const signer = new PKCS11Signer(pkcs11Config(), emu);
+    await signer.initialize();
+    const root = 'e'.repeat(64);
+    const result = await signer.sign(root);
+    expect((await signer.verify(root, result)).valid).toBe(true);
+    expect(await signer.getPublicKey('anchor-key')).toMatch(/^-----BEGIN PUBLIC KEY-----/);
+    await signer.cleanup();
+  });
+
   it('throws a clear error when the keyId is not on the token', async () => {
     const signer = new PKCS11Signer(pkcs11Config(), provisionedEmulator());
     await signer.initialize();
