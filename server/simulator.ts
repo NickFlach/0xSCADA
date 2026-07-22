@@ -2,6 +2,7 @@ import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { getFluxPublisher } from "./services/flux";
 import { natsPublisher } from "./services/nats";
+import { getAnchorPipeline } from "./bridge";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -128,6 +129,22 @@ class FieldSimulator {
           details: details,
         });
       } catch { /* NATS not connected — that's fine */ }
+
+      // Feed the real L2 anchor chain (#489), when active. getAnchorPipeline()
+      // is null unless ANCHOR_BACKEND=l2|both, so this is a no-op on the default
+      // node path. The pipeline hashes → batches → merkle → signs → anchors.
+      try {
+        const anchor = getAnchorPipeline();
+        if (anchor) {
+          await anchor.ingestEvent({
+            id: `${asset.id}-${eventType}-${Date.now()}`,
+            timestamp: Date.now(),
+            type: eventType,
+            source: asset.nameOrTag,
+            data: { siteId: asset.siteId, assetType: asset.assetType, details, ...(typeof payload === 'object' && payload ? payload : { value: payload }) },
+          });
+        }
+      } catch { /* anchor pipeline not started — that's fine */ }
     } catch (error) {
       logError("❌ Failed to generate event", error as any);
     }

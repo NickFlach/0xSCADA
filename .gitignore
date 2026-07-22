@@ -36,3 +36,6 @@ dev-database.sqlite
 
 # test coverage output
 coverage/
+
+# HSM software-signer key material (never commit)
+.keys/
