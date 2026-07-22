@@ -171,16 +171,10 @@ export class PIDAutoTuner extends EventEmitter {
     if (this.recommendations.length > 50) this.recommendations.shift();
 
     this.emit('recommendation', rec);
-
-    if (this.mode === 'automatic') {
-      const applied = this.controller.applyGains(rec.gains);
-      if (applied) {
-        this.emit('gains-applied', rec);
-        this.controller.resetMetrics();
-      } else {
-        this.emit('gains-rejected', rec);
-      }
-    }
+    // Note: gains are never self-applied here, regardless of mode. Every
+    // application goes through the human-approval gate in the tuning
+    // service (ADR-0013 [13.4], issue #215). 'automatic' mode now only
+    // controls how aggressively recommendations are generated.
 
     return rec;
   }
@@ -309,11 +303,7 @@ export class PIDAutoTuner extends EventEmitter {
       };
       this.recommendations.push(rec);
       this.emit('relay-complete', rec);
-
-      if (this.mode === 'automatic') {
-        const applied = this.controller.applyGains(gains);
-        this.emit(applied ? 'gains-applied' : 'gains-rejected', rec);
-      }
+      // No self-apply — see evaluatePerformance (ADR-0013 [13.4], #215)
     } else {
       this.emit('relay-failed', 'Insufficient oscillation data');
     }

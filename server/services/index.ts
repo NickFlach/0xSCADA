@@ -66,6 +66,10 @@ export { spcService } from './spc';
 export * from './l2-rollup';
 export { l2RollupService } from './l2-rollup';
 
+// ── PID Tuning Service (ADR-0013 [13.4], #215) ───────────────────────────────
+export * from './tuning';
+export { tuningService } from './tuning';
+
 /**
  * Initialize all services
  * 
@@ -80,7 +84,8 @@ export async function initializeServices(): Promise<void> {
     { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
     { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
-    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) }
+    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
+    { name: 'PID Tuning', service: () => import('./tuning').then(m => m.tuningService.initialize()) }
   ];
 
   for (const { name, service } of services) {
@@ -171,6 +176,14 @@ export async function getServicesHealthStatus(): Promise<{
         return await spcService.healthCheck();
       } catch {
         return { healthy: false, message: 'SPC service not available' };
+      }
+    },
+    tuning: async () => {
+      try {
+        const { tuningService } = await import('./tuning');
+        return await tuningService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'Tuning service not available' };
       }
     }
   };
