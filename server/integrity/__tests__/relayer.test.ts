@@ -139,6 +139,35 @@ describe('AnchorRelayerService construction (#489)', () => {
   });
 });
 
+describe('AnchorRelayerService fail-closed default (#489)', () => {
+  it('with NO verifier configured, refuses to anchor (fail closed)', async () => {
+    const { contract, provider } = mockChain();
+    const r = new AnchorRelayerService(
+      { maxRetries: 1, confirmationBlocks: 2, batchWindowMs: 999999 },
+      { contract, provider }, // no signatureVerifier, no allowUnverified
+    );
+    relayers.push(r);
+    const outcome = awaitOutcome(r);
+    // A well-formed-but-unverified signature must NOT be anchored.
+    await r.submitAnchor('0x' + 'aa'.repeat(32), 1, 1, { signature: 'x', merkleRoot: '0x' + 'aa'.repeat(32), timestamp: 1, algorithm: 'RS256', keyId: 'k' } as SignatureResult, 'urgent');
+    expect(await outcome).toBe('failed');
+  });
+
+  it('allowUnverified:true permits the structural-check-only path', async () => {
+    const record: { anchorArgs?: any[] } = {};
+    const { contract, provider } = mockChain(record);
+    const r = new AnchorRelayerService(
+      { maxRetries: 1, confirmationBlocks: 2, batchWindowMs: 999999 },
+      { contract, provider, allowUnverified: true },
+    );
+    relayers.push(r);
+    const root = '0x' + 'bb'.repeat(32);
+    const outcome = awaitOutcome(r);
+    await r.submitAnchor(root, 1, 1, { signature: 'x', merkleRoot: root, timestamp: 1, algorithm: 'RS256', keyId: 'k' } as SignatureResult, 'urgent');
+    expect(await outcome).toBe('success');
+  });
+});
+
 /** Wrap a lazily-resolved MerkleRootSigner as a SignatureVerifier. */
 function signerVerifier(get: () => MerkleRootSigner): SignatureVerifier {
   return { verifyMerkleRootSignature: (root, sig) => get().verifyMerkleRootSignature(root, sig) };

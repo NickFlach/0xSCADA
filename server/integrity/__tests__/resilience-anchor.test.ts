@@ -42,10 +42,11 @@ describe('ResilienceManager real Merkle tree (#489)', () => {
     const result = await mgr.buildMerkleTree(batch(events));
 
     expect(result.success).toBe(true);
-    const expected = MerkleTreeBuilder.buildFromEventHashes(events.map(e => e.hash)).root;
+    // bytes32 (0x-prefixed) — the SAME normalization the anchor pipeline uses,
+    // so the same batch can't produce two different root strings (#489).
+    const expected = '0x' + MerkleTreeBuilder.buildFromEventHashes(events.map(e => e.hash)).root;
     expect(result.merkleRoot).toBe(expected);
-    // The old fake was `merkle_root_batch_1_<batchHash>` — assert it's a hex root.
-    expect(result.merkleRoot).toMatch(/^[0-9a-f]{64}$/);
+    expect(result.merkleRoot).toMatch(/^0x[0-9a-f]{64}$/);
     expect(result.merkleRoot!.startsWith('merkle_root_')).toBe(false);
   });
 });

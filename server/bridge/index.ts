@@ -14,7 +14,7 @@ import { eventAnchorBridge } from './event-anchor';
 import { stateSyncBridge } from './state-sync';
 import { anchorsToL2, getAnchorBackend } from './anchor-backend';
 import { AnchorPipeline } from '../integrity/anchor-pipeline';
-import { log } from '../logger';
+import { log, logError } from '../logger';
 
 /**
  * The real L2 anchor chain (#489), started only on the ANCHOR_BACKEND=l2|both
@@ -31,11 +31,20 @@ export function getAnchorPipeline(): AnchorPipeline | null {
  * Initialize all bridge modules
  */
 export async function initializeBridges(): Promise<void> {
-  if (anchorsToL2()) {
+  // Idempotent: a second call without a shutdown must not orphan the previous
+  // pipeline's timers.
+  if (anchorsToL2() && !anchorPipeline) {
     // Real integrity chain: pipeline → merkle → sign → relayer. Connection is
     // lazy, so this is safe to start even before the RPC/contract/key exist;
     // anchoring fails closed at submit time if they're unset.
-    anchorPipeline = new AnchorPipeline({
+    const pipeline = new AnchorPipeline({
+      // The l2 signing key is a software HSM key on local disk. Configure its
+      // location explicitly (a real HSM/PKCS#11 provider is #482).
+      hsm: {
+        mode: 'software',
+        algorithm: 'RS256',
+        keyPath: process.env.ANCHOR_HSM_KEY_PATH || undefined,
+      },
       relayer: {
         rpcUrl: process.env.ANCHOR_RPC_URL || 'http://localhost:8545',
         chainId: process.env.ANCHOR_CHAIN_ID ? Number(process.env.ANCHOR_CHAIN_ID) : 31337,
@@ -43,10 +52,19 @@ export async function initializeBridges(): Promise<void> {
         privateKey: process.env.ANCHOR_PRIVATE_KEY || '',
       },
     });
-    anchorPipeline.on('error', e => log(`⚠️ anchor pipeline error: ${JSON.stringify(e)}`, 'anchor'));
-    await anchorPipeline.start();
-    log(`⛓️  Real L2 anchor pipeline started (ANCHOR_BACKEND=${getAnchorBackend()})`, 'anchor');
-  } else {
+    pipeline.on('error', e => log(`⚠️ anchor pipeline error: ${JSON.stringify(e)}`, 'anchor'));
+    try {
+      await pipeline.start();
+      anchorPipeline = pipeline;
+      log(`⛓️  Real L2 anchor pipeline started (ANCHOR_BACKEND=${getAnchorBackend()})`, 'anchor');
+    } catch (err) {
+      // Never crash boot on anchor-startup failure — stop the partial pipeline
+      // and continue; the /health bridges check will report it.
+      logError(err as any, 'Failed to start L2 anchor pipeline');
+      await pipeline.stop().catch(() => {});
+      anchorPipeline = null;
+    }
+  } else if (!anchorsToL2()) {
     log(`Anchor pipeline not started (ANCHOR_BACKEND=${getAnchorBackend()}); anchoring via 0xSCADA-node`, 'anchor');
   }
 

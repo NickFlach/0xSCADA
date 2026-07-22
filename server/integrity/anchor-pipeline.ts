@@ -79,19 +79,19 @@ export class AnchorPipeline extends EventEmitter {
    * Exposed for tests and for callers that batch externally.
    */
   async anchorBatch(batch: EventBatch): Promise<{ batchId: number; merkleRoot: string; eventCount: number }> {
-    const root = batch.events.length > 0
-      ? MerkleTreeBuilder.buildFromEventHashes(batch.events.map(e => e.hash)).root
-      : batch.batchHash;
     // bytes32 form for the on-chain anchor + the signed payload (same string on
-    // both sides so the relayer's structural check matches).
-    const merkleRoot = root.startsWith('0x') ? root : `0x${root}`;
+    // both sides so the relayer's structural check matches). Normalized via the
+    // shared MerkleTreeBuilder.rootBytes32 so it can't drift from resilience.ts.
+    const merkleRoot = MerkleTreeBuilder.rootBytes32(batch.events.map(e => e.hash), batch.batchHash);
 
     const signature = await this.signer.signMerkleRoot(merkleRoot);
     const batchId = ++this.batchCounter;
 
     await this.relayer.submitAnchor(merkleRoot, batchId, batch.events.length, signature, 'urgent');
+    // 'enqueued' not 'confirmed': submitAnchor queues the request; on-chain
+    // confirmation is signalled by the relayer's 'anchorSuccess' event.
     const info = { batchId, merkleRoot, eventCount: batch.events.length };
-    this.emit('anchor-submitted', info);
+    this.emit('anchor-enqueued', info);
     return info;
   }
 

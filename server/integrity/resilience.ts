@@ -566,16 +566,13 @@ export class ResilienceManager extends EventEmitter {
   }
 
   /**
-   * Build the Merkle root for a batch from its event hashes (real tree).
+   * Build the bytes32 Merkle root for a batch from its event hashes (real tree).
+   * Uses the shared MerkleTreeBuilder.rootBytes32 so this is byte-identical to
+   * the anchor pipeline's root for the same batch (#489) — a non-0x root would
+   * be rejected by ethers if this feeds the relayer.
    */
   private buildMerkleTreeSync(eventBatch: EventBatch): string {
-    if (eventBatch.events.length === 0) {
-      // Empty batch: MerkleTreeBuilder rejects empty input; the batchHash
-      // (SHA-256 over zero event hashes) is the deterministic stand-in.
-      return eventBatch.batchHash;
-    }
-    const eventHashes = eventBatch.events.map(e => e.hash);
-    return MerkleTreeBuilder.buildFromEventHashes(eventHashes).root;
+    return MerkleTreeBuilder.rootBytes32(eventBatch.events.map(e => e.hash), eventBatch.batchHash);
   }
 
   /**

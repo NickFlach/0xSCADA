@@ -40,6 +40,12 @@ export interface RelayerDeps {
   contract?: AnchorContractLike;
   /** Cryptographic verifier for HSM signatures (e.g. the MerkleRootSigner). */
   signatureVerifier?: SignatureVerifier;
+  /**
+   * Explicitly permit anchoring with only the structural signature check when
+   * no cryptographic verifier is wired. Default false → fail closed: without a
+   * verifier, nothing is anchored. An integrity chain must not fail open.
+   */
+  allowUnverified?: boolean;
 }
 
 export interface RelayerConfig {
@@ -110,9 +116,9 @@ export class AnchorRelayerService extends EventEmitter {
   private provider!: ethers.JsonRpcProvider;
   private wallet!: ethers.Wallet;
   private contract!: AnchorContractLike;
-  private connected = false;
   private injectedDeps: RelayerDeps;
   private signatureVerifier?: SignatureVerifier;
+  private allowUnverified: boolean;
   private queue: AnchorRequest[] = [];
   private processing = false;
   private stats: RelayerStats;
@@ -132,6 +138,7 @@ export class AnchorRelayerService extends EventEmitter {
     super();
     this.injectedDeps = deps;
     this.signatureVerifier = deps.signatureVerifier;
+    this.allowUnverified = deps.allowUnverified ?? false;
 
     this.config = {
       // Default configuration
@@ -165,41 +172,41 @@ export class AnchorRelayerService extends EventEmitter {
     };
 
     // Connection is lazy: `new ethers.Wallet('')` throws, so we don't build the
-    // provider/wallet/contract until first use (or use injected deps for tests).
-    if (deps.provider || deps.wallet || deps.contract) {
-      this.applyInjectedConnection();
-    }
+    // provider/wallet/contract until first use. Injected deps (tests) are stored
+    // and any gaps are filled from config by ensureConnection.
+    if (deps.provider) this.provider = deps.provider;
+    if (deps.wallet) this.wallet = deps.wallet;
+    if (deps.contract) this.contract = deps.contract;
     this.startBatchTimer();
   }
 
-  private applyInjectedConnection(): void {
-    const d = this.injectedDeps;
-    if (d.provider) this.provider = d.provider;
-    if (d.wallet) this.wallet = d.wallet;
-    if (d.contract) this.contract = d.contract;
-    this.connected = true;
-  }
-
   /**
-   * Ensure the blockchain connection + contract interface exist. Built lazily
-   * from config on first use; a real signing key is required at this point.
+   * Ensure the provider + contract exist, building any missing piece lazily
+   * from config. Idempotent and gap-filling: a partial dep injection (e.g. only
+   * a contract) still gets a real provider rather than crashing on undefined.
    */
   private ensureConnection(): void {
-    if (this.connected) return;
-    if (!this.config.privateKey) {
-      throw new Error('AnchorRelayerService: no privateKey configured — cannot submit anchors');
+    if (this.provider && this.contract) return;
+
+    if (!this.provider) {
+      this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
     }
-    if (!this.config.contractAddress) {
-      throw new Error('AnchorRelayerService: no contractAddress configured — cannot submit anchors');
+    if (!this.contract) {
+      if (!this.config.privateKey) {
+        throw new Error('AnchorRelayerService: no privateKey configured — cannot submit anchors');
+      }
+      if (!this.config.contractAddress) {
+        throw new Error('AnchorRelayerService: no contractAddress configured — cannot submit anchors');
+      }
+      if (!this.wallet) {
+        this.wallet = new ethers.Wallet(this.config.privateKey, this.provider);
+      }
+      this.contract = new ethers.Contract(
+        this.config.contractAddress,
+        AnchorRelayerService.CONTRACT_ABI,
+        this.wallet,
+      ) as unknown as AnchorContractLike;
     }
-    this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
-    this.wallet = new ethers.Wallet(this.config.privateKey, this.provider);
-    this.contract = new ethers.Contract(
-      this.config.contractAddress,
-      AnchorRelayerService.CONTRACT_ABI,
-      this.wallet,
-    ) as unknown as AnchorContractLike;
-    this.connected = true;
   }
 
   /**
@@ -462,8 +469,18 @@ export class AnchorRelayerService extends EventEmitter {
       }
     }
 
-    // No cryptographic verifier wired — structural check only. The production
-    // AnchorPipeline always injects one; this path is for callers that haven't.
+    // No cryptographic verifier wired. Fail CLOSED by default — an integrity
+    // chain must never anchor a root it cannot cryptographically verify. Only
+    // the explicit allowUnverified opt-out permits the structural-check-only
+    // path. The production AnchorPipeline always injects a verifier.
+    if (!this.allowUnverified) {
+      this.emit('signatureRejected', {
+        batchId: request.batchId,
+        merkleRoot: request.merkleRoot,
+        error: 'no signature verifier configured (fail-closed)',
+      });
+      return false;
+    }
     return true;
   }
 
