@@ -18,6 +18,8 @@ import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
+import { marketplaceRoutes } from "./routes/marketplace";
+import { marketplaceService } from "./services/marketplace";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -52,6 +54,7 @@ export async function registerRoutes(
 
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -80,6 +83,10 @@ export async function registerRoutes(
   // WebSocket servers initialize if available
   try { tagStreamServer?.initialize(httpServer, "/ws/tags"); } catch {}
   try { unifiedStreamServer?.initialize(httpServer, "/ws"); } catch {}  // unified endpoint (#255)
+
+  // Start the marketplace service here — services/initializeServices()
+  // has no callers at startup (#217).
+  void marketplaceService.initialize();
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).
