@@ -88,8 +88,14 @@ export async function registerRoutes(
 
   // Feed live tag updates into the digital twin and start its step timer
   // here — services/initializeServices() has no callers at startup (#214).
-  tagStreamServer.onTagUpdate((update) => digitalTwinService.ingestTagUpdate(update));
+  const unsubscribeTwin = tagStreamServer.onTagUpdate(
+    (update) => digitalTwinService.ingestTagUpdate(update)
+  );
   void digitalTwinService.initialize();
+  httpServer.once("close", () => {
+    unsubscribeTwin();
+    void digitalTwinService.shutdown();
+  });
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).

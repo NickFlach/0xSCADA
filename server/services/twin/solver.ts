@@ -61,8 +61,8 @@ function clamp(value: number, min: number, max: number): number {
  * Pass 1 — sources: valves/pumps compute currentFlow from config + state.
  * Pass 2 — controllers: P-control output drives connected actuators
  *          (valve position / pump speed) inside the simulation.
- * Pass 3 — aggregation: tank inflow = Σ currentFlow of components that
- *          connect into it (recomputed from zero every tick).
+ * Pass 3 — aggregation: propagate source flow through the pipe DAG, then
+ *          sum it into tanks (recomputed from zero every tick).
  * Pass 4 — integration: tank levels and heater temperatures advance by dt.
  */
 export const basicFlowStep: StepFunction = (model, states, dtMs, warnings) => {
@@ -133,17 +133,34 @@ export const basicFlowStep: StepFunction = (model, states, dtMs, warnings) => {
     }
   }
 
-  // Pass 3 — aggregate flows into tanks (inflow recomputed from zero)
+  // Pass 3 — aggregate flows into tanks (inflow recomputed from zero).
+  // Sources are applied first, then pipes are processed topologically so
+  // valve→pipe→…→tank flow never depends on component declaration order.
   for (const comp of model.components) {
     if (comp.type === 'tank') next[comp.id].inflow = 0;
+    if (comp.type === 'pipe') next[comp.id].currentFlow = 0;
   }
-  for (const comp of model.components) {
-    if (comp.type !== 'valve' && comp.type !== 'pump' && comp.type !== 'pipe') continue;
-    const flow = next[comp.id].currentFlow ?? 0;
-    for (const targetId of comp.connections) {
+
+  const pipeIds = new Set(
+    model.components.filter((component) => component.type === 'pipe').map((component) => component.id)
+  );
+  const pipeIndegree = new Map<string, number>(
+    [...pipeIds].map((pipeId) => [pipeId, 0])
+  );
+  for (const component of model.components) {
+    if (component.type !== 'pipe') continue;
+    for (const targetId of component.connections) {
+      if (pipeIds.has(targetId)) {
+        pipeIndegree.set(targetId, (pipeIndegree.get(targetId) ?? 0) + 1);
+      }
+    }
+  }
+
+  const forwardFlow = (source: ProcessComponent, flow: number) => {
+    for (const targetId of source.connections) {
       const target = byId.get(targetId);
       if (!target) {
-        warnings.push(`component "${comp.id}" connects to unknown component "${targetId}"`);
+        warnings.push(`component "${source.id}" connects to unknown component "${targetId}"`);
         continue;
       }
       if (target.type === 'tank') {
@@ -152,6 +169,32 @@ export const basicFlowStep: StepFunction = (model, states, dtMs, warnings) => {
         next[targetId].currentFlow = (next[targetId].currentFlow ?? 0) + flow;
       }
     }
+  };
+
+  for (const comp of model.components) {
+    if (comp.type === 'valve' || comp.type === 'pump') {
+      forwardFlow(comp, next[comp.id].currentFlow ?? 0);
+    }
+  }
+
+  const pipeQueue = [...pipeIndegree.entries()]
+    .filter(([, degree]) => degree === 0)
+    .map(([pipeId]) => pipeId);
+  let visitedPipes = 0;
+  while (pipeQueue.length > 0) {
+    const pipeId = pipeQueue.shift()!;
+    visitedPipes++;
+    const pipe = byId.get(pipeId)!;
+    forwardFlow(pipe, next[pipeId].currentFlow ?? 0);
+    for (const targetId of pipe.connections) {
+      if (!pipeIds.has(targetId)) continue;
+      const degree = (pipeIndegree.get(targetId) ?? 0) - 1;
+      pipeIndegree.set(targetId, degree);
+      if (degree === 0) pipeQueue.push(targetId);
+    }
+  }
+  if (visitedPipes !== pipeIds.size) {
+    warnings.push('pipe flow graph contains a cycle');
   }
 
   // Pass 4 — integrate tank levels and heater temperatures

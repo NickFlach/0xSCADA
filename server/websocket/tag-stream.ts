@@ -46,15 +46,16 @@ export class TagStreamServer {
   private totalUpdates = 0;
   private startTime = Date.now();
   private pingInterval?: ReturnType<typeof setInterval>;
-  private updateListeners: Array<(update: TagUpdate) => void> = [];
+  private updateListeners = new Set<(update: TagUpdate) => void>();
 
   /**
    * Register a server-side listener for every tag update flowing through the
    * stream (e.g. predictive maintenance ingestion). Listener errors are
    * swallowed so a consumer can never break broadcasting.
    */
-  onTagUpdate(listener: (update: TagUpdate) => void): void {
-    this.updateListeners.push(listener);
+  onTagUpdate(listener: (update: TagUpdate) => void): () => void {
+    this.updateListeners.add(listener);
+    return () => this.updateListeners.delete(listener);
   }
 
   private notifyListeners(update: TagUpdate): void {
@@ -258,6 +259,7 @@ export class TagStreamServer {
     }
     this.clients.clear();
     this.wss?.close();
+    this.updateListeners.clear();
   }
 }
 

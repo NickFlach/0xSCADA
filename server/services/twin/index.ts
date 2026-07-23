@@ -29,7 +29,7 @@ export class DigitalTwinService extends EventEmitter {
   private stepTimer: NodeJS.Timeout | null = null;
   private readonly stepIntervalMs: number;
 
-  constructor(stepIntervalMs = 1000) {
+  constructor(stepIntervalMs = 100) {
     super();
     this.stepIntervalMs = stepIntervalMs;
     this.runtime.on('model-error', (e) => this.emit('model-error', e));
@@ -42,12 +42,8 @@ export class DigitalTwinService extends EventEmitter {
     this.stepTimer = setInterval(() => {
       try {
         const now = Date.now();
-        for (const { model, state } of this.runtime.listModels()) {
-          if (state.status === 'running') {
-            this.runtime.syncFromLive(model.id, now);
-          }
-        }
-        this.runtime.stepRunning();
+        this.runtime.syncRunningFromLive(now);
+        this.runtime.stepRunning(now);
       } catch {
         /* per-model errors surface via 'model-error' */
       }

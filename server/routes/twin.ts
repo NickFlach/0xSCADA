@@ -11,7 +11,7 @@
 import { Router } from "express";
 import type { Request, Response, NextFunction } from "express";
 import { z } from "zod";
-import { fromZodError } from "zod-validation-error";
+import { fromZodError } from "zod-validation-error/v3";
 import { digitalTwinService, listStepFunctions } from "../services/twin";
 import type { ProcessModel, WhatIfScenario } from "@shared/types/digital-twin";
 
@@ -40,12 +40,24 @@ function handle(fn: (req: Request, res: Response) => void) {
 
 // ── Schemas ────────────────────────────────────────────────────────────────
 
+const ParameterRecordSchema = z
+  .record(z.number().finite())
+  .refine(
+    (parameters) => Object.keys(parameters).every(
+      (parameter) => parameter.length >= 1 && parameter.length <= 64
+    ),
+    { message: "component parameter names must contain 1..64 characters" }
+  )
+  .refine((parameters) => Object.keys(parameters).length <= 128, {
+    message: "component parameter records may contain at most 128 fields",
+  });
+
 const ComponentSchema = z.object({
   id: z.string().min(1).max(128),
   type: z.enum(["tank", "pipe", "valve", "pump", "controller", "sensor", "heater", "mixer"]),
   name: z.string().min(1).max(256),
-  config: z.record(z.number().finite()).default({}),
-  initialState: z.record(z.number().finite()).default({}),
+  config: ParameterRecordSchema.default({}),
+  initialState: ParameterRecordSchema.default({}),
   connections: z.array(z.string().min(1)).max(64).default([]),
   pvSource: z.string().min(1).optional(),
 });
