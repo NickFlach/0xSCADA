@@ -10,7 +10,7 @@
     "dev:db": "echo 'Setting up development database...' && node -e \"console.log('Database will be created automatically on first run')\"",
     "start": "node dist/server/index.js",
     "test": "vitest",
-    "test:integration": "vitest test/integration",
+    "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

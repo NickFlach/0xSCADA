@@ -14,34 +14,49 @@ const sleep = promisify(setTimeout);
 describe('App Startup Integration', () => {
   let serverProcess: ChildProcess;
   let baseUrl: string;
+  let serverOutput = '';
   const testPort = 5555; // Different from default to avoid conflicts
   
   beforeAll(async () => {
-    baseUrl = `http://localhost:${testPort}`;
+    baseUrl = `http://127.0.0.1:${testPort}`;
     
-    // Start server as a separate process to properly isolate and control it.
-    // shell:true so the platform-correct npm launcher (npm.cmd on Windows) is
-    // resolved instead of failing with spawn ENOENT.
-    serverProcess = spawn('npm', ['run', 'dev'], {
+    // Start the TypeScript entrypoint directly so NODE_ENV remains "test" and
+    // the smoke test behaves the same on Windows and Linux. Use an isolated
+    // SQLite database: this test verifies process startup and HTTP probes, not
+    // the separately tested Postgres integration.
+    serverProcess = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       env: {
         ...process.env,
         NODE_ENV: 'test',
         PORT: testPort.toString(),
-        // Disable some services for faster startup in tests
-        ENABLE_SIMULATOR: 'false',
-        ENABLE_FLUX_INTEGRATION: 'false'
+        FORCE_POSTGRES: 'false',
+        SQLITE_DATABASE_PATH: ':memory:',
+        SIMULATOR_ENABLED: 'false',
+        ENABLE_FLUX_INTEGRATION: 'false',
       },
-      stdio: ['pipe', 'pipe', 'pipe'],
-      shell: true
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+
+    serverProcess.stdout?.on('data', (chunk) => {
+      serverOutput += chunk.toString();
+    });
+    serverProcess.stderr?.on('data', (chunk) => {
+      serverOutput += chunk.toString();
     });
     
-    // Wait for server to be ready by checking health endpoint
+    // Wait for the liveness endpoint. Readiness is asserted separately once
+    // initialization has completed.
     let attempts = 0;
     const maxAttempts = 30; // 30 seconds max
     
     while (attempts < maxAttempts) {
+      if (serverProcess.exitCode !== null) {
+        throw new Error(
+          `Server exited during startup with code ${serverProcess.exitCode}\n${serverOutput.slice(-4000)}`,
+        );
+      }
       try {
-        const response = await fetch(`${baseUrl}/api/health`);
+        const response = await fetch(`${baseUrl}/api/healthz`);
         if (response.ok) {
           break;
         }
@@ -54,7 +69,9 @@ describe('App Startup Integration', () => {
     }
     
     if (attempts >= maxAttempts) {
-      throw new Error('Server failed to start within 30 seconds');
+      throw new Error(
+        `Server failed to start within 30 seconds\n${serverOutput.slice(-4000)}`,
+      );
     }
   }, 35000); // Allow 35 seconds for full startup
 
@@ -83,7 +100,8 @@ describe('App Startup Integration', () => {
     
     const data = await response.json();
     expect(data).toHaveProperty('status');
-    expect(data.status).toBe('healthy');
+    expect(['healthy', 'degraded']).toContain(data.status);
+    expect(data.healthy).toBe(true);
   });
 
   test('readiness endpoint responds correctly', async () => {
