@@ -34,7 +34,7 @@ jobs:
 
       - name: Validate OpenAPI Specification
         run: |
-          node --loader tsx --no-warnings -e "
+          npx tsx --no-warnings -e "
           import { openApiSpec } from './server/openapi/openapi-spec.js';
           import { validateSpec } from './server/openapi/openapi-validator.js';
           
@@ -71,7 +71,7 @@ jobs:
           git show origin/main:server/openapi/openapi-spec.ts > /tmp/old-spec.ts 2>/dev/null || echo "No previous spec found"
           
           if [ -f /tmp/old-spec.ts ]; then
-            node --loader tsx --no-warnings -e "
+            npx tsx --no-warnings -e "
             import { openApiSpec as newSpec } from './server/openapi/openapi-spec.js';
             import { diffSpecs } from './server/openapi/openapi-validator.js';
             
@@ -88,7 +88,7 @@ jobs:
       - name: Export OpenAPI Spec
         run: |
           mkdir -p artifacts
-          node --loader tsx --no-warnings -e "
+          npx tsx --no-warnings -e "
           import { openApiSpec } from './server/openapi/openapi-spec.js';
           import fs from 'fs';
           
@@ -125,7 +125,7 @@ jobs:
       - name: Export OpenAPI Spec
         run: |
           mkdir -p artifacts
-          node --loader tsx --no-warnings -e "
+          npx tsx --no-warnings -e "
           import { openApiSpec } from './server/openapi/openapi-spec.js';
           import fs from 'fs';
           fs.writeFileSync('artifacts/openapi.json', JSON.stringify(openApiSpec, null, 2));
