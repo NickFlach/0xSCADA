@@ -61,6 +61,20 @@ function scadaEvent(index: number, timestamp: number): SCADAEvent {
   };
 }
 
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize);
+  }
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.entries(value)
+        .sort(([left], [right]) => left.localeCompare(right))
+        .map(([key, nested]) => [key, canonicalize(nested)]),
+    );
+  }
+  return value;
+}
+
 function expectedMerkleRoot(events: SCADAEvent[]): string {
   const hashes = events.map((event) => {
     const canonical = JSON.stringify({
@@ -68,7 +82,7 @@ function expectedMerkleRoot(events: SCADAEvent[]): string {
       timestamp: event.timestamp,
       type: event.type,
       source: event.source,
-      data: event.data,
+      data: canonicalize(event.data),
     });
     return createHash('sha256').update(canonical, 'utf8').digest('hex');
   });
