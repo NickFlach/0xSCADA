@@ -99,7 +99,7 @@ router.post(
   asyncHandler(async (req, res) => {
     const parsed = IngestSchema.safeParse(req.body);
     if (!parsed.success) {
-      return res.status(400).json({ error: fromZodError(parsed.error).message });
+      return res.status(400).json({ error: fromZodError(parsed.error as any).message });
     }
     const { tagId, points } = parsed.data;
 
@@ -163,7 +163,7 @@ router.get("/thresholds/:tagId", (req, res) => {
 router.put("/thresholds/:tagId", (req, res) => {
   const parsed = ThresholdsSchema.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: fromZodError(parsed.error).message });
+    return res.status(400).json({ error: fromZodError(parsed.error as any).message });
   }
   const overrides = parsed.data;
 
@@ -216,7 +216,7 @@ router.put("/thresholds/:tagId", (req, res) => {
 router.get("/alerts", (req, res) => {
   const parsed = AlertQuerySchema.safeParse(req.query);
   if (!parsed.success) {
-    return res.status(400).json({ error: fromZodError(parsed.error).message });
+    return res.status(400).json({ error: fromZodError(parsed.error as any).message });
   }
   const { severity, acknowledged } = parsed.data;
   res.json({
