@@ -19,7 +19,9 @@ describe('App Startup Integration', () => {
   beforeAll(async () => {
     baseUrl = `http://localhost:${testPort}`;
     
-    // Start server as a separate process to properly isolate and control it
+    // Start server as a separate process to properly isolate and control it.
+    // shell:true so the platform-correct npm launcher (npm.cmd on Windows) is
+    // resolved instead of failing with spawn ENOENT.
     serverProcess = spawn('npm', ['run', 'dev'], {
       env: {
         ...process.env,
@@ -29,7 +31,8 @@ describe('App Startup Integration', () => {
         ENABLE_SIMULATOR: 'false',
         ENABLE_FLUX_INTEGRATION: 'false'
       },
-      stdio: ['pipe', 'pipe', 'pipe']
+      stdio: ['pipe', 'pipe', 'pipe'],
+      shell: true
     });
     
     // Wait for server to be ready by checking health endpoint

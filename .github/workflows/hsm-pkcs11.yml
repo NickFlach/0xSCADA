@@ -1,0 +1,66 @@
+name: HSM PKCS#11 (SoftHSMv2)
+
+# Real-hardware validation of the PKCS#11 signer (#482) against a live
+# SoftHSMv2 token. The unit tests in server/integrity/__tests__/hsm.test.ts
+# cover the signer logic via an in-memory emulator; this job proves the
+# production `pkcs11js` binding works end-to-end.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'server/integrity/hsm.ts'
+      - 'server/integrity/pkcs11-provider.ts'
+      - 'server/integrity/__tests__/pkcs11-softhsm.test.ts'
+      - '.github/workflows/hsm-pkcs11.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'server/integrity/hsm.ts'
+      - 'server/integrity/pkcs11-provider.ts'
+      - 'server/integrity/__tests__/pkcs11-softhsm.test.ts'
+      - '.github/workflows/hsm-pkcs11.yml'
+  workflow_dispatch:
+
+jobs:
+  softhsm:
+    name: PKCS#11 round-trip on SoftHSMv2
+    runs-on: ubuntu-latest
+    env:
+      SOFTHSM2_CONF: ${{ github.workspace }}/.softhsm2.conf
+      SOFTHSM_LIB: /usr/lib/softhsm/libsofthsm2.so
+      SOFTHSM_PIN: '1234'
+      SOFTHSM_KEY_LABEL: anchor-key
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install SoftHSMv2 + OpenSC
+        run: sudo apt-get update && sudo apt-get install -y softhsm2 opensc
+
+      - name: Provision a SoftHSM token + RSA key
+        run: |
+          mkdir -p "${{ github.workspace }}/.softhsm2/tokens"
+          cat > "$SOFTHSM2_CONF" <<EOF
+          directories.tokendir = ${{ github.workspace }}/.softhsm2/tokens
+          objectstore.backend = file
+          log.level = INFO
+          EOF
+          softhsm2-util --init-token --free --label test-token --pin "$SOFTHSM_PIN" --so-pin 5678
+          pkcs11-tool --module "$SOFTHSM_LIB" --login --pin "$SOFTHSM_PIN" \
+            --keypairgen --key-type rsa:2048 --label "$SOFTHSM_KEY_LABEL" --id 01
+          # Sanity: the key is visible
+          pkcs11-tool --module "$SOFTHSM_LIB" --login --pin "$SOFTHSM_PIN" --list-objects
+
+      - name: Install deps + pkcs11js
+        run: |
+          npm ci
+          npm install --no-save pkcs11js
+
+      - name: Run the SoftHSM PKCS#11 round-trip test
+        env:
+          PKCS11_SOFTHSM: '1'
+        run: npx vitest run server/integrity/__tests__/pkcs11-softhsm.test.ts --project node
