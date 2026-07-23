@@ -26,6 +26,13 @@ export {
   BridgeAnchorBackend,
   DrizzleSafeStateAuditSink,
 } from "./safe-state-adapters";
+export {
+  BLUEPRINT_PRODUCTION_HOLD_CODE,
+  BLUEPRINT_PRODUCTION_HOLD_REASON,
+  createBlueprintProductionHoldMiddleware,
+  getBlueprintProductionSafetyStatus,
+  type BlueprintProductionSafetyStatus,
+} from "./production-safety";
 
 /**
  * Registry of active blueprint watchdogs. One {@link Watchdog} is created per
@@ -65,8 +72,8 @@ export class WatchdogRegistry {
     return [...this.watchdogs.values()].map((w) => w.getStatus());
   }
 
-  /** Only the blueprints currently running in safe state. */
+  /** Blueprints in safe-state handling, including degraded recovery states. */
   getSafeStateStatuses(): SafeStateStatus[] {
-    return this.getAllStatuses().filter((s) => s.runState === "SAFE_STATE");
+    return this.getAllStatuses().filter((s) => s.runState !== "RUNNING");
   }
 }

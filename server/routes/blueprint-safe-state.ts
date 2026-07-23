@@ -12,26 +12,24 @@
 
 import { Router } from "express";
 import { z } from "zod";
-import { fromZodError } from "zod-validation-error";
 import {
   WatchdogRegistry,
   BridgeAnchorBackend,
   DrizzleSafeStateAuditSink,
 } from "../blueprint";
 import { logError } from "../logger";
+import {
+  controlPlanePrincipal,
+  requireControlPlaneAccess,
+} from "../middleware/control-plane-auth";
 
 const router = Router();
 
-// Auth middleware placeholder — same pattern as other protected routes.
-function requireAuth(
-  req: import("express").Request,
-  res: import("express").Response,
-  next: import("express").NextFunction,
-) {
-  // TODO: implement real auth check (JWT / session validation).
-  next();
-}
-router.use(requireAuth);
+router.use(requireControlPlaneAccess({ roles: ["operator"] }));
+const requireSafetyResume = requireControlPlaneAccess({
+  roles: ["operator"],
+  scopes: ["safety.resume"],
+});
 
 // Shared registry, composed with the production anchor + audit adapters. The
 // runtime imports `safeStateRegistry` to register watchdogs and report ticks.
@@ -41,8 +39,6 @@ export const safeStateRegistry = new WatchdogRegistry(
 );
 
 const resumeBodySchema = z.object({
-  /** Operator identity performing the resume (audited + anchored). */
-  operator: z.string().min(1),
   /** Optional reason recorded with the SafeStateExited event. */
   reason: z.string().optional(),
 });
@@ -71,7 +67,7 @@ router.get("/:blueprintId", (req, res) => {
  * POST /api/blueprint-safe-state/:blueprintId/resume
  * Explicit operator action required to leave a safe state.
  */
-router.post("/:blueprintId/resume", async (req, res) => {
+router.post("/:blueprintId/resume", requireSafetyResume, async (req, res) => {
   const watchdog = safeStateRegistry.get(req.params.blueprintId);
   if (!watchdog) {
     res.status(404).json({ error: "blueprint watchdog not registered" });
@@ -80,12 +76,21 @@ router.post("/:blueprintId/resume", async (req, res) => {
 
   const parsed = resumeBodySchema.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: fromZodError(parsed.error).message });
+    const error = parsed.error.issues
+      .map((issue) => {
+        const path = issue.path.join(".");
+        return path ? `${path}: ${issue.message}` : issue.message;
+      })
+      .join("; ");
+    res.status(400).json({ error });
     return;
   }
 
   try {
-    const status = await watchdog.resume(parsed.data.operator, parsed.data.reason);
+    const status = await watchdog.resume(
+      controlPlanePrincipal(req).name,
+      parsed.data.reason,
+    );
     res.json({ status });
   } catch (error) {
     logError(error, `Failed to resume blueprint ${req.params.blueprintId}`);

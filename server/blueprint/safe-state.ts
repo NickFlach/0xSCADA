@@ -82,13 +82,19 @@ export interface SafeStateAuditSink {
 export interface SafeStateAuditEntry {
   blueprintId: string;
   siteId?: string;
-  transition: "ENTERED" | "EXITED";
+  transition:
+    | "ENTERED"
+    | "EXIT_REQUESTED"
+    | "EXITED"
+    | "RESUME_FAILED"
+    | "EXIT_ABORTED"
+    | "RECOVERY_FAILED";
   safeState: SafeStateAction;
   tickBudgetMs: number;
   consecutiveMisses?: number;
   operator?: string;
   reason: string;
-  anchorHash?: string;
+  anchorHash: string;
   anchorTxHash?: string;
   timestamp: string;
 }
@@ -118,7 +124,12 @@ export interface BlueprintRuntime {
 // ─── Safe-state lifecycle ────────────────────────────────────────────────────
 
 /** Operational state of a blueprint with respect to the watchdog. */
-export type BlueprintRunState = "RUNNING" | "SAFE_STATE";
+export type BlueprintRunState =
+  | "RUNNING"
+  | "SAFE_STATE"
+  | "RESUMING"
+  | "RECOVERING"
+  | "RECOVERY_FAILED";
 
 /** Public, serialisable view of a blueprint's safe-state status (for the UI). */
 export interface SafeStateStatus {
@@ -135,6 +146,10 @@ export interface SafeStateStatus {
   consecutiveMisses?: number;
   /** Content hash of the anchored SafeStateEntered event, if any. */
   anchorHash?: string;
+  /** Whether the active safe-state entry has a durable audit row. */
+  entryAuditStatus?: "pending" | "durable";
+  /** Compensation failures that prevent the controller from claiming safety. */
+  recoveryErrors?: string[];
 }
 
 /** A short, human-readable label for a {@link SafeStateAction}. */
@@ -170,6 +185,16 @@ export function computeAnchorHash(event: AnchorEvent): string {
  */
 export class SafeStateController {
   private status: SafeStateStatus;
+  /** Entry that must become durable before any resume can be attempted. */
+  private pendingEntryAudit?: SafeStateAuditEntry;
+  /** Exact exit-request record retained across an ambiguous write failure. */
+  private pendingExitRequestAudit?: SafeStateAuditEntry;
+  /**
+   * Serialises entry and exit transitions for this blueprint. The queue is
+   * always normalised back to a resolved promise so one failed transition does
+   * not prevent a later operator action from being evaluated.
+   */
+  private transitionTail: Promise<void> = Promise.resolve();
 
   constructor(
     private readonly runtime: BlueprintRuntime,
@@ -193,7 +218,7 @@ export class SafeStateController {
 
   /** True once the blueprint has been halted into its safe state. */
   isInSafeState(): boolean {
-    return this.status.runState === "SAFE_STATE";
+    return this.status.runState !== "RUNNING";
   }
 
   /**
@@ -204,8 +229,18 @@ export class SafeStateController {
    * @param reason            why the watchdog tripped
    * @param consecutiveMisses over-budget tick count at the trip
    */
-  async enterSafeState(reason: string, consecutiveMisses: number): Promise<SafeStateStatus> {
+  enterSafeState(reason: string, consecutiveMisses: number): Promise<SafeStateStatus> {
+    return this.runSerializedTransition(() =>
+      this.enterSafeStateLocked(reason, consecutiveMisses),
+    );
+  }
+
+  private async enterSafeStateLocked(
+    reason: string,
+    consecutiveMisses: number,
+  ): Promise<SafeStateStatus> {
     if (this.status.runState === "SAFE_STATE") {
+      await this.persistPendingEntryAudit();
       return this.getStatus();
     }
 
@@ -243,9 +278,10 @@ export class SafeStateController {
       reason,
       consecutiveMisses,
       anchorHash: receipt.hash,
+      entryAuditStatus: "pending",
     };
 
-    await this.audit.record({
+    this.pendingEntryAudit = {
       blueprintId: this.runtime.blueprintId,
       siteId: this.runtime.siteId,
       transition: "ENTERED",
@@ -256,7 +292,8 @@ export class SafeStateController {
       anchorHash: receipt.hash,
       anchorTxHash: receipt.txHash,
       timestamp,
-    });
+    };
+    await this.persistPendingEntryAudit();
 
     return this.getStatus();
   }
@@ -268,7 +305,16 @@ export class SafeStateController {
    *
    * @throws if the blueprint is not currently in safe state.
    */
-  async resume(operator: string, reason = "Operator resume"): Promise<SafeStateStatus> {
+  resume(operator: string, reason = "Operator resume"): Promise<SafeStateStatus> {
+    return this.runSerializedTransition(() =>
+      this.resumeLocked(operator, reason),
+    );
+  }
+
+  private async resumeLocked(
+    operator: string,
+    reason: string,
+  ): Promise<SafeStateStatus> {
     if (!operator || operator.trim() === "") {
       throw new Error("resume() requires an operator identity");
     }
@@ -278,18 +324,22 @@ export class SafeStateController {
       );
     }
 
-    this.runtime.resume();
-    const timestamp = this.now().toISOString();
+    // A safe state with an undurable ENTERED record may never be cleared.
+    // Retrying this exact entry is idempotent in the production audit sink.
+    await this.persistPendingEntryAudit();
+    // Reconcile an earlier request whose database result was ambiguous using
+    // the exact same hash before accepting a new operator request.
+    await this.persistPendingExitRequestAudit();
 
-    const event: AnchorEvent = {
+    const requestedAt = this.now().toISOString();
+
+    const requestEvent: AnchorEvent = {
       id: randomUUID(),
-      timestamp,
-      eventType: "SafeStateExited",
-      // Exiting safe state is itself a notable control-integrity event; recorded
-      // as WARNING (return to nominal) rather than CRITICAL.
+      timestamp: requestedAt,
+      eventType: "SafeStateExitRequested",
       severity: "WARNING",
       siteId: this.runtime.siteId,
-      message: `Blueprint ${this.runtime.blueprintId} resumed from safe state by ${operator}: ${reason}`,
+      message: `Blueprint ${this.runtime.blueprintId} safe-state exit requested by ${operator}: ${reason}`,
       data: {
         blueprintId: this.runtime.blueprintId,
         operator,
@@ -297,29 +347,218 @@ export class SafeStateController {
         previousSafeState: this.config.safeState,
       },
     };
-    const receipt = await this.safeAnchor(event);
+    const requestReceipt = await this.safeAnchor(requestEvent);
 
-    await this.audit.record({
+    // Persist authorisation before touching the runtime. This record is an
+    // intent, not a claim that the control loop has resumed.
+    this.pendingExitRequestAudit = {
       blueprintId: this.runtime.blueprintId,
       siteId: this.runtime.siteId,
-      transition: "EXITED",
+      transition: "EXIT_REQUESTED",
       safeState: this.config.safeState,
       tickBudgetMs: this.config.tickBudgetMs,
       operator,
       reason,
-      anchorHash: receipt.hash,
-      anchorTxHash: receipt.txHash,
-      timestamp,
-    });
+      anchorHash: requestReceipt.hash,
+      anchorTxHash: requestReceipt.txHash,
+      timestamp: requestedAt,
+    };
+    await this.persistPendingExitRequestAudit();
+
+    let runtimeResumed = false;
+    try {
+      this.runtime.resume();
+      runtimeResumed = true;
+      // Do not claim SAFE_STATE while the control loop is live and the durable
+      // EXITED record is still pending.
+      this.status = {
+        ...this.status,
+        runState: "RESUMING",
+        recoveryErrors: undefined,
+      };
+
+      const exitedAt = this.now().toISOString();
+      const exitedEvent: AnchorEvent = {
+        id: randomUUID(),
+        timestamp: exitedAt,
+        eventType: "SafeStateExited",
+        severity: "WARNING",
+        siteId: this.runtime.siteId,
+        message: `Blueprint ${this.runtime.blueprintId} resumed from safe state by ${operator}: ${reason}`,
+        data: {
+          blueprintId: this.runtime.blueprintId,
+          operator,
+          reason,
+          previousSafeState: this.config.safeState,
+        },
+      };
+      const exitReceipt = await this.safeAnchor(exitedEvent);
+
+      // EXITED is written only after runtime.resume() succeeds. If this write
+      // fails, the catch path immediately re-applies the declared safe state.
+      await this.audit.record({
+        blueprintId: this.runtime.blueprintId,
+        siteId: this.runtime.siteId,
+        transition: "EXITED",
+        safeState: this.config.safeState,
+        tickBudgetMs: this.config.tickBudgetMs,
+        operator,
+        reason,
+        anchorHash: exitReceipt.hash,
+        anchorTxHash: exitReceipt.txHash,
+        timestamp: exitedAt,
+      });
+
+      this.status = {
+        blueprintId: this.runtime.blueprintId,
+        siteId: this.runtime.siteId,
+        runState: "RUNNING",
+        safeState: this.config.safeState,
+      };
+
+      return this.getStatus();
+    } catch (error) {
+      // A partially-failed runtime resume or post-resume audit must converge
+      // back to the safe state. Halt and safe-output application are attempted
+      // independently so one failure never prevents the other.
+      const recoveryErrors = this.recoverToSafeState();
+      const transition = recoveryErrors.length > 0
+        ? "RECOVERY_FAILED"
+        : runtimeResumed
+          ? "EXIT_ABORTED"
+          : "RESUME_FAILED";
+      await this.recordRecoveryOutcome(
+        transition,
+        operator,
+        reason,
+        error,
+        recoveryErrors,
+      );
+      if (recoveryErrors.length > 0) {
+        throw new AggregateError(
+          [
+            error,
+            ...recoveryErrors.map((message) => new Error(message)),
+          ],
+          `Blueprint ${this.runtime.blueprintId} resume failed and safety recovery was incomplete`,
+        );
+      }
+      throw error;
+    }
+  }
+
+  private async persistPendingEntryAudit(): Promise<void> {
+    if (!this.pendingEntryAudit) return;
+    await this.audit.record(this.pendingEntryAudit);
+    this.pendingEntryAudit = undefined;
+    this.status = { ...this.status, entryAuditStatus: "durable" };
+  }
+
+  private async persistPendingExitRequestAudit(): Promise<void> {
+    if (!this.pendingExitRequestAudit) return;
+    await this.audit.record(this.pendingExitRequestAudit);
+    this.pendingExitRequestAudit = undefined;
+  }
+
+  private recoverToSafeState(): string[] {
+    this.status = {
+      ...this.status,
+      runState: "RECOVERING",
+      recoveryErrors: undefined,
+    };
+    const errors: string[] = [];
+    try {
+      this.runtime.halt();
+    } catch (error) {
+      errors.push(
+        `halt failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    try {
+      this.applyAction(this.config.safeState);
+    } catch (error) {
+      errors.push(
+        `safe-output application failed: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
 
     this.status = {
-      blueprintId: this.runtime.blueprintId,
-      siteId: this.runtime.siteId,
-      runState: "RUNNING",
-      safeState: this.config.safeState,
+      ...this.status,
+      runState: errors.length === 0 ? "SAFE_STATE" : "RECOVERY_FAILED",
+      recoveryErrors: errors.length > 0 ? [...errors] : undefined,
     };
+    return errors;
+  }
 
-    return this.getStatus();
+  private async recordRecoveryOutcome(
+    transition: "RESUME_FAILED" | "EXIT_ABORTED" | "RECOVERY_FAILED",
+    operator: string,
+    reason: string,
+    cause: unknown,
+    recoveryErrors: string[],
+  ): Promise<void> {
+    const timestamp = this.now().toISOString();
+    const detail = cause instanceof Error ? cause.message : String(cause);
+    const outcome =
+      transition === "RESUME_FAILED"
+        ? "resume attempt failed and the declared safe state was re-applied"
+        : transition === "EXIT_ABORTED"
+          ? "runtime resumed temporarily, but exit durability failed and the declared safe state was re-applied"
+          : "resume/exit failed and the declared safe state could not be fully restored";
+    const event: AnchorEvent = {
+      id: randomUUID(),
+      timestamp,
+      eventType: transition === "EXIT_ABORTED"
+        ? "SafeStateExitAborted"
+        : transition === "RECOVERY_FAILED"
+          ? "SafeStateRecoveryFailed"
+          : "SafeStateResumeFailed",
+      severity: "CRITICAL",
+      siteId: this.runtime.siteId,
+      message: `Blueprint ${this.runtime.blueprintId}: ${outcome}: ${detail}`,
+      data: {
+        blueprintId: this.runtime.blueprintId,
+        operator,
+        reason,
+        failure: detail,
+        recoveryErrors,
+        safeState: this.config.safeState,
+      },
+    };
+    const receipt = await this.safeAnchor(event);
+    try {
+      await this.audit.record({
+        blueprintId: this.runtime.blueprintId,
+        siteId: this.runtime.siteId,
+        transition,
+        safeState: this.config.safeState,
+        tickBudgetMs: this.config.tickBudgetMs,
+        operator,
+        reason: `${reason}; ${outcome}: ${detail}`,
+        anchorHash: receipt.hash,
+        anchorTxHash: receipt.txHash,
+        timestamp,
+      });
+    } catch {
+      // Preserve the original resume/audit failure for the caller. Physical
+      // outputs are already back in the safe state.
+    }
+  }
+
+  /**
+   * Run one state transition at a time. In particular, a second resume waits
+   * for the first transition to finish and then re-checks runState, so it cannot
+   * duplicate the audit or race the physical runtime state.
+   */
+  private runSerializedTransition<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.transitionTail.then(operation);
+    this.transitionTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   /** Drive the runtime into the configured safe state. */

@@ -359,7 +359,9 @@ export class ApiKeyManager {
     for (const entry of raw.split(',')) {
       const [key, name, scopeStr] = entry.trim().split(':');
       if (key && name) {
-        const scopes = scopeStr ? scopeStr.split('+') : ['*'];
+        // Missing scopes must never silently create an all-powerful key.
+        // Operators can grant `*` explicitly when that is truly intended.
+        const scopes = scopeStr ? scopeStr.split('+').filter(Boolean) : [];
         this.keys.set(key, {
           key,
           name,

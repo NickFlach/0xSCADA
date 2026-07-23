@@ -362,7 +362,7 @@ export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
   id: uuid("id").defaultRandom().primaryKey(),
   blueprintId: varchar("blueprint_id", { length: 64 }).notNull(),
   siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
-  // "ENTERED" when the watchdog trips, "EXITED" when an operator resumes.
+  // ENTERED/EXIT_REQUESTED/EXITED plus compensating failure transitions.
   transition: varchar("transition", { length: 16 }).notNull(),
   // Serialized SafeStateAction that was applied.
   safeState: jsonb("safe_state").notNull(),
@@ -370,9 +370,9 @@ export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
   consecutiveMisses: integer("consecutive_misses"),
   // Operator who acknowledged / resumed (null for an automatic ENTERED event).
   operator: varchar("operator", { length: 255 }),
-  reason: text("reason"),
+  reason: text("reason").notNull(),
   // Hash anchored to the canonical anchor backend for this transition.
-  anchorHash: varchar("anchor_hash", { length: 255 }),
+  anchorHash: varchar("anchor_hash", { length: 255 }).notNull(),
   anchorTxHash: varchar("anchor_tx_hash", { length: 255 }),
   metadata: jsonb("metadata"),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
@@ -380,6 +380,7 @@ export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
   blueprintIdIdx: index("idx_safe_state_log_blueprint_id").on(table.blueprintId),
   transitionIdx: index("idx_safe_state_log_transition").on(table.transition),
   createdAtIdx: index("idx_safe_state_log_created_at").on(table.createdAt),
+  anchorHashIdx: uniqueIndex("idx_safe_state_log_anchor_hash").on(table.anchorHash),
 }));
 
 export type BlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferSelect;

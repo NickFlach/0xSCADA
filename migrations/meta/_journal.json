@@ -15,6 +15,13 @@
       "when": 1739782801000,
       "tag": "0002_seed_rbac_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784780402000,
+      "tag": "0005_blueprint_safe_state_log",
+      "breakpoints": true
     }
   ]
 }

@@ -7,6 +7,7 @@ import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
 import { setupApiGateway } from "./middleware/api-gateway";
+import { createBlueprintProductionHoldMiddleware } from "./blueprint/production-safety";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -51,6 +52,14 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// The watchdog library is not yet bound to a verified deployed-blueprint and
+// field-I/O actuator path. Fail closed instead of presenting an empty registry
+// as proof that production safety handling is active.
+app.use(
+  "/api/blueprint-safe-state",
+  createBlueprintProductionHoldMiddleware(),
+);
 
 app.use((req, res, next) => {
   const start = Date.now();

@@ -10,7 +10,7 @@
  * tests with in-memory fakes, while production code composes the real backends.
  */
 
-import { getDatabase } from "../storage";
+import { getDatabase, getDatabaseType } from "../storage";
 import { eventAnchorBridge } from "../bridge/event-anchor";
 import { log, logError } from "../logger";
 import { blueprintSafeStateLog } from "@shared/schema";
@@ -56,29 +56,55 @@ export class BridgeAnchorBackend implements AnchorBackend {
  * convention.
  */
 export class DrizzleSafeStateAuditSink implements SafeStateAuditSink {
+  constructor(
+    private readonly dependencies: {
+      getDatabase: typeof getDatabase;
+      getDatabaseType: typeof getDatabaseType;
+    } = { getDatabase, getDatabaseType },
+  ) {}
+
   async record(entry: SafeStateAuditEntry): Promise<void> {
     try {
-      const db = getDatabase();
-      await db.insert(blueprintSafeStateLog).values({
-        blueprintId: entry.blueprintId,
-        siteId: entry.siteId,
-        transition: entry.transition,
-        safeState: entry.safeState as unknown as Record<string, unknown>,
-        tickBudgetMs: entry.tickBudgetMs,
-        consecutiveMisses: entry.consecutiveMisses,
-        operator: entry.operator,
-        reason: entry.reason,
-        anchorHash: entry.anchorHash,
-        anchorTxHash: entry.anchorTxHash,
-      });
+      // The development SQLite "Drizzle-compatible" wrapper intentionally
+      // implements only a subset of tables and its generic insert is a no-op.
+      // Refuse that path so an operator can never mistake a discarded audit
+      // transition for a durable write.
+      if (this.dependencies.getDatabaseType() !== "postgres") {
+        throw new Error(
+          "blueprint safe-state audit requires PostgreSQL; the SQLite fallback has no durable audit-table adapter",
+        );
+      }
+
+      await this.dependencies
+        .getDatabase()
+        .insert(blueprintSafeStateLog)
+        .values({
+          blueprintId: entry.blueprintId,
+          siteId: entry.siteId,
+          transition: entry.transition,
+          safeState: entry.safeState as unknown as Record<string, unknown>,
+          tickBudgetMs: entry.tickBudgetMs,
+          consecutiveMisses: entry.consecutiveMisses,
+          operator: entry.operator,
+          reason: entry.reason,
+          anchorHash: entry.anchorHash,
+          anchorTxHash: entry.anchorTxHash,
+          createdAt: new Date(entry.timestamp),
+        })
+        .onConflictDoNothing({ target: blueprintSafeStateLog.anchorHash });
       log(
         `Safe-state ${entry.transition} audited for blueprint ${entry.blueprintId} ` +
           `(anchor ${entry.anchorHash ?? "n/a"})`,
       );
     } catch (error) {
-      // Auditing must never throw into the control path — the safe state has
-      // already been physically applied. Surface the failure loudly instead.
       logError(error, `Failed to persist safe-state audit for ${entry.blueprintId}`);
+      // The physical safe state has already been applied on ENTERED. Propagate
+      // persistence failure so callers/health cannot report an audited
+      // transition that was silently discarded.
+      const detail = error instanceof Error ? error.message : String(error);
+      throw new Error(
+        `Safe-state audit persistence failed for ${entry.blueprintId}: ${detail}`,
+      );
     }
   }
 }

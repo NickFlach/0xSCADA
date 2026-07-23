@@ -17,7 +17,12 @@ import React from "react";
 import type { SafeStateAction } from "@shared/schema";
 
 /** Run state of a watched blueprint, as reported by the server. */
-export type BlueprintRunState = "RUNNING" | "SAFE_STATE";
+export type BlueprintRunState =
+  | "RUNNING"
+  | "SAFE_STATE"
+  | "RESUMING"
+  | "RECOVERING"
+  | "RECOVERY_FAILED";
 
 /** Serialisable safe-state status delivered to the client over the API. */
 export interface SafeStateStatus {
@@ -29,6 +34,8 @@ export interface SafeStateStatus {
   reason?: string;
   consecutiveMisses?: number;
   anchorHash?: string;
+  entryAuditStatus?: "pending" | "durable";
+  recoveryErrors?: string[];
 }
 
 export interface SafeStateBadgeProps {
@@ -62,12 +69,26 @@ export const SafeStateBadge: React.FC<SafeStateBadgeProps> = ({
   resuming = false,
   className,
 }) => {
-  if (status.runState !== "SAFE_STATE") {
+  if (status.runState === "RUNNING") {
     return null;
   }
 
+  const canResume = status.runState === "SAFE_STATE";
+  const transitionPending =
+    status.runState === "RESUMING" || status.runState === "RECOVERING";
+  const title = status.runState === "SAFE_STATE"
+    ? "SAFE STATE ACTIVE"
+    : status.runState === "RESUMING"
+      ? "RESUME AUDIT PENDING"
+      : status.runState === "RECOVERING"
+        ? "RE-APPLYING SAFE STATE"
+        : "SAFETY RECOVERY FAILED";
+  const borderColor = transitionPending ? "#b45309" : "#b91c1c";
+  const background = transitionPending ? "#fffbeb" : "#fef2f2";
+  const foreground = transitionPending ? "#78350f" : "#7f1d1d";
+
   const handleResume = () => {
-    if (resuming || !onResume) return;
+    if (resuming || !onResume || !canResume) return;
     const ok = window.confirm(
       `Resume blueprint "${status.blueprintId}" from SAFE STATE?\n\n` +
         `The control loop was halted because: ${status.reason ?? "watchdog trip"}.\n` +
@@ -86,9 +107,9 @@ export const SafeStateBadge: React.FC<SafeStateBadgeProps> = ({
       // Inline fallback styling guarantees prominence even without a stylesheet;
       // the class names above remain the theming hook for design-system CSS.
       style={{
-        border: "2px solid #b91c1c",
-        background: "#fef2f2",
-        color: "#7f1d1d",
+        border: `2px solid ${borderColor}`,
+        background,
+        color: foreground,
         borderRadius: 6,
         padding: "12px 16px",
         margin: "8px 0",
@@ -102,7 +123,7 @@ export const SafeStateBadge: React.FC<SafeStateBadgeProps> = ({
         <span className="safe-state-badge-icon" aria-hidden="true">
           {"⚠"}
         </span>
-        <span className="safe-state-badge-title">RUNNING IN SAFE STATE</span>
+        <span className="safe-state-badge-title">{title}</span>
       </div>
 
       <dl className="safe-state-badge-details">
@@ -147,9 +168,15 @@ export const SafeStateBadge: React.FC<SafeStateBadgeProps> = ({
             </dd>
           </div>
         ) : null}
+        {status.recoveryErrors?.length ? (
+          <div>
+            <dt>Recovery errors</dt>
+            <dd>{status.recoveryErrors.join("; ")}</dd>
+          </div>
+        ) : null}
       </dl>
 
-      {onResume ? (
+      {onResume && canResume ? (
         <button
           type="button"
           className="safe-state-badge-resume"

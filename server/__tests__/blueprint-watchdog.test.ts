@@ -39,6 +39,11 @@ class FakeRuntime implements BlueprintRuntime {
   heldLast = false;
   forcedZero = false;
   appliedRecipe: string | null = null;
+  resumeCalls = 0;
+  failResume = false;
+  failHalt = false;
+  failSafeAction = false;
+  safeActionCalls = 0;
 
   constructor(blueprintId = "bp-test", siteId = "site-1") {
     this.blueprintId = blueprintId;
@@ -46,19 +51,32 @@ class FakeRuntime implements BlueprintRuntime {
   }
 
   halt(): void {
+    if (this.failHalt) {
+      throw new Error("runtime halt failed");
+    }
     this.halted = true;
   }
   resume(): void {
+    this.resumeCalls += 1;
+    if (this.failResume) {
+      throw new Error("runtime resume failed");
+    }
     this.resumed = true;
     this.halted = false;
   }
   holdLastOutputs(): void {
+    this.safeActionCalls += 1;
+    if (this.failSafeAction) throw new Error("safe output failed");
     this.heldLast = true;
   }
   forceZeroOutputs(): void {
+    this.safeActionCalls += 1;
+    if (this.failSafeAction) throw new Error("safe output failed");
     this.forcedZero = true;
   }
   applySafeRecipe(recipe: string): void {
+    this.safeActionCalls += 1;
+    if (this.failSafeAction) throw new Error("safe output failed");
     this.appliedRecipe = recipe;
   }
 }
@@ -79,8 +97,74 @@ class FakeAnchor implements AnchorBackend {
 
 class FakeAudit implements SafeStateAuditSink {
   entries: SafeStateAuditEntry[] = [];
+  failNext = false;
+
   async record(entry: SafeStateAuditEntry): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false;
+      throw new Error("audit database unavailable");
+    }
     this.entries.push(entry);
+  }
+}
+
+class BlockingExitAudit extends FakeAudit {
+  readonly exitWriteStarted: Promise<void>;
+  exitWriteAttempts = 0;
+  private markExitWriteStarted!: () => void;
+  private releaseExitWrite!: () => void;
+  private readonly exitWriteReleased: Promise<void>;
+
+  constructor() {
+    super();
+    this.exitWriteStarted = new Promise<void>((resolve) => {
+      this.markExitWriteStarted = resolve;
+    });
+    this.exitWriteReleased = new Promise<void>((resolve) => {
+      this.releaseExitWrite = resolve;
+    });
+  }
+
+  allowExitWrite(): void {
+    this.releaseExitWrite();
+  }
+
+  override async record(entry: SafeStateAuditEntry): Promise<void> {
+    if (entry.transition === "EXIT_REQUESTED") {
+      this.exitWriteAttempts += 1;
+      this.markExitWriteStarted();
+      await this.exitWriteReleased;
+    }
+    await super.record(entry);
+  }
+}
+
+class BlockingExitedAudit extends FakeAudit {
+  readonly exitedWriteStarted: Promise<void>;
+  private markStarted!: () => void;
+  private release!: () => void;
+  private readonly released: Promise<void>;
+
+  constructor() {
+    super();
+    this.exitedWriteStarted = new Promise<void>((resolve) => {
+      this.markStarted = resolve;
+    });
+    this.released = new Promise<void>((resolve) => {
+      this.release = resolve;
+    });
+  }
+
+  allowExitedWrite(): void {
+    this.release();
+  }
+
+  override async record(entry: SafeStateAuditEntry): Promise<void> {
+    if (entry.transition === "EXITED") {
+      this.markStarted();
+      await this.released;
+    }
+    await super.record(entry);
   }
 }
 
@@ -239,6 +323,40 @@ describe("SafeStateController — safe state actions", () => {
     expect(status.anchorHash).toBeTruthy();
     expect(audit.entries[0].anchorHash).toBe(status.anchorHash);
   });
+
+  it("fails loudly while leaving physical outputs safe when audit persistence fails", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new FakeAudit();
+    audit.failNext = true;
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+
+    await expect(ctl.enterSafeState("trip", 3)).rejects.toThrow(
+      /audit database unavailable/,
+    );
+
+    expect(runtime.halted).toBe(true);
+    expect(runtime.forcedZero).toBe(true);
+    expect(ctl.getStatus().runState).toBe("SAFE_STATE");
+    expect(ctl.getStatus().entryAuditStatus).toBe("pending");
+
+    // An undurable entry blocks resume. Once the same entry is persisted, the
+    // controller may proceed without duplicating the physical trip.
+    audit.failNext = true;
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /audit database unavailable/,
+    );
+    expect(runtime.resumeCalls).toBe(0);
+    await expect(ctl.resume("operator-a")).resolves.toMatchObject({
+      runState: "RUNNING",
+    });
+    expect(audit.entries.filter((entry) => entry.transition === "ENTERED"))
+      .toHaveLength(1);
+  });
 });
 
 // ─── Operator resume ─────────────────────────────────────────────────────────
@@ -294,6 +412,227 @@ describe("SafeStateController — operator resume", () => {
     expect(resumed.enteredAt).toBeUndefined();
     expect(resumed.consecutiveMisses).toBeUndefined();
     expect(resumed.anchorHash).toBeUndefined();
+  });
+
+  it("keeps the declared safe state when exit authorisation cannot persist", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new FakeAudit();
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+    audit.failNext = true;
+
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /audit database unavailable/,
+    );
+
+    expect(runtime.halted).toBe(true);
+    expect(runtime.forcedZero).toBe(true);
+    expect(runtime.resumeCalls).toBe(0);
+    expect(runtime.resumed).toBe(false);
+    expect(ctl.getStatus().runState).toBe("SAFE_STATE");
+
+    // A rejected transition must not poison the serial queue; an operator can
+    // retry once durable audit storage is healthy again.
+    await expect(ctl.resume("operator-b", "audit recovered")).resolves.toMatchObject({
+      runState: "RUNNING",
+    });
+    expect(runtime.resumeCalls).toBe(1);
+  });
+
+  it("returns to safe state when resume succeeds but the EXITED audit fails", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new FakeAudit();
+    const originalRecord = audit.record.bind(audit);
+    let failExit = true;
+    audit.record = async (entry) => {
+      if (entry.transition === "EXITED" && failExit) {
+        failExit = false;
+        throw new Error("exit audit unavailable");
+      }
+      await originalRecord(entry);
+    };
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /exit audit unavailable/,
+    );
+
+    expect(runtime.resumeCalls).toBe(1);
+    expect(runtime.halted).toBe(true);
+    expect(runtime.forcedZero).toBe(true);
+    expect(ctl.getStatus().runState).toBe("SAFE_STATE");
+    expect(audit.entries.some((entry) => entry.transition === "EXITED")).toBe(false);
+    expect(audit.entries.some((entry) => entry.transition === "EXIT_ABORTED")).toBe(true);
+
+    await expect(ctl.resume("operator-b", "audit recovered")).resolves.toMatchObject({
+      runState: "RUNNING",
+    });
+    expect(runtime.resumeCalls).toBe(2);
+  });
+
+  it("records RESUME_FAILED and no EXITED when the runtime cannot resume", async () => {
+    const runtime = new FakeRuntime();
+    runtime.failResume = true;
+    const audit = new FakeAudit();
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /runtime resume failed/,
+    );
+
+    expect(runtime.halted).toBe(true);
+    expect(ctl.getStatus().runState).toBe("SAFE_STATE");
+    expect(audit.entries.some((entry) => entry.transition === "EXITED")).toBe(false);
+    expect(audit.entries.some((entry) => entry.transition === "RESUME_FAILED")).toBe(true);
+  });
+
+  it("reports RESUMING while the live runtime waits for a durable EXITED row", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new BlockingExitedAudit();
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+
+    const resume = ctl.resume("operator-a");
+    await audit.exitedWriteStarted;
+
+    expect(runtime.resumed).toBe(true);
+    expect(ctl.getStatus().runState).toBe("RESUMING");
+
+    audit.allowExitedWrite();
+    await expect(resume).resolves.toMatchObject({ runState: "RUNNING" });
+  });
+
+  it("attempts halt and safe outputs independently and reports failed recovery", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new FakeAudit();
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+    const safeCallsBeforeResume = runtime.safeActionCalls;
+    runtime.failResume = true;
+    runtime.failHalt = true;
+    runtime.failSafeAction = true;
+
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /safety recovery was incomplete/,
+    );
+
+    expect(runtime.safeActionCalls).toBe(safeCallsBeforeResume + 1);
+    expect(ctl.getStatus()).toMatchObject({
+      runState: "RECOVERY_FAILED",
+      recoveryErrors: [
+        expect.stringMatching(/halt failed/),
+        expect.stringMatching(/safe-output application failed/),
+      ],
+    });
+    expect(audit.entries.some((entry) => entry.transition === "RECOVERY_FAILED"))
+      .toBe(true);
+  });
+
+  it("retries an ambiguously committed exit request with the same anchor hash", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new FakeAudit();
+    const attemptedHashes: string[] = [];
+    let throwAfterFirstCommit = true;
+    const originalRecord = audit.record.bind(audit);
+    audit.record = async (entry) => {
+      if (entry.transition === "EXIT_REQUESTED") {
+        attemptedHashes.push(entry.anchorHash);
+        if (throwAfterFirstCommit) {
+          throwAfterFirstCommit = false;
+          audit.entries.push(entry);
+          throw new Error("ambiguous database acknowledgement");
+        }
+        if (audit.entries.some((existing) =>
+          existing.anchorHash === entry.anchorHash
+        )) {
+          return;
+        }
+      }
+      await originalRecord(entry);
+    };
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig(),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+
+    await expect(ctl.resume("operator-a")).rejects.toThrow(
+      /ambiguous database acknowledgement/,
+    );
+    expect(runtime.resumeCalls).toBe(0);
+
+    await expect(ctl.resume("operator-b")).resolves.toMatchObject({
+      runState: "RUNNING",
+    });
+    expect(attemptedHashes).toHaveLength(3);
+    expect(attemptedHashes[1]).toBe(attemptedHashes[0]);
+    expect(attemptedHashes[2]).not.toBe(attemptedHashes[0]);
+  });
+
+  it("serializes concurrent resumes and enables the runtime only after exit authorisation persists", async () => {
+    const runtime = new FakeRuntime();
+    const audit = new BlockingExitAudit();
+    const ctl = new SafeStateController(
+      runtime,
+      makeConfig({ safeState: "force-zero" }),
+      new FakeAnchor(),
+      audit,
+    );
+    await ctl.enterSafeState("trip", 3);
+
+    const firstResume = ctl.resume("operator-a", "condition cleared");
+    await audit.exitWriteStarted;
+
+    const secondResume = ctl.resume("operator-b", "duplicate request");
+    const secondOutcome = secondResume.then(
+      (value) => ({ value, error: null as Error | null }),
+      (error: Error) => ({ value: null, error }),
+    );
+
+    expect(runtime.resumeCalls).toBe(0);
+    expect(runtime.halted).toBe(true);
+    expect(audit.exitWriteAttempts).toBe(1);
+    expect(ctl.getStatus().runState).toBe("SAFE_STATE");
+
+    audit.allowExitWrite();
+    await expect(firstResume).resolves.toMatchObject({ runState: "RUNNING" });
+
+    const duplicate = await secondOutcome;
+    expect(duplicate.value).toBeNull();
+    expect(duplicate.error?.message).toMatch(/not in safe state/);
+    expect(runtime.resumeCalls).toBe(1);
+    expect(audit.exitWriteAttempts).toBe(1);
+    expect(audit.entries.filter((entry) => entry.transition === "EXITED")).toHaveLength(1);
+    expect(ctl.getStatus().runState).toBe("RUNNING");
   });
 
   it("Watchdog.resume clears the miss counter and re-arms", async () => {

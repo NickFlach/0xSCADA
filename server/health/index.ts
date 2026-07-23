@@ -12,6 +12,7 @@ import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewa
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
 import { registry, metricsHandler } from '../metrics';
+import { getBlueprintProductionSafetyStatus } from '../blueprint';
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -129,6 +130,28 @@ healthManager.registerSimple(
   },
   false, // Optional, depends on configuration
 );
+
+// 9. Blueprint safe-state production binding (#459). This remains optional for
+// general API readiness, but reports degraded until a verified deployed
+// blueprint/watchdog/field-I/O composition root replaces the production hold.
+healthManager.register({
+  name: 'blueprint-safety-runtime',
+  required: false,
+  check: async () => {
+    const status = getBlueprintProductionSafetyStatus();
+    return {
+      name: 'blueprint-safety-runtime',
+      status: 'degraded',
+      lastCheck: new Date(),
+      message: status.reason,
+      details: {
+        state: status.state,
+        code: status.code,
+        capabilities: status.capabilities,
+      },
+    };
+  },
+});
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
