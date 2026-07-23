@@ -30,6 +30,11 @@ interface FakeProbeOptions {
   applyImpl?: (pid: number, policy: SchedPolicy, priority: number) => string | null;
 }
 
+const DEDICATED_TARGET = {
+  kind: 'dedicated-control-process' as const,
+  pid: 4343,
+};
+
 function makeProbe(opts: FakeProbeOptions = {}): { probe: HostProbe } {
   const files = opts.files ?? {};
   const existing = new Set(opts.existing ?? []);
@@ -116,7 +121,7 @@ describe('TickScheduler.apply — realtime path', () => {
       existing: [CHRT],
     });
     const sched = new TickScheduler({ priority: 70 }, probe);
-    const status = sched.apply();
+    const status = sched.apply(DEDICATED_TARGET);
 
     expect(status.mode).toBe('realtime');
     expect(status.applied).toBe(true);
@@ -134,8 +139,9 @@ describe('TickScheduler.apply — realtime path', () => {
       existing: [CHRT],
       applyImpl: apply,
     });
-    new TickScheduler({ priority: 55, policy: 'SCHED_FIFO' }, probe).apply();
-    expect(apply).toHaveBeenCalledWith(4242, 'SCHED_FIFO', 55);
+    new TickScheduler({ priority: 55, policy: 'SCHED_FIFO' }, probe)
+      .apply(DEDICATED_TARGET);
+    expect(apply).toHaveBeenCalledWith(4343, 'SCHED_FIFO', 55);
   });
 });
 
@@ -160,7 +166,7 @@ describe('TickScheduler.apply — fallback paths', () => {
     vi.spyOn(logger, 'logWarn').mockImplementation(() => {});
     const apply = vi.fn();
     const { probe } = makeProbe({ platform: 'win32', applyImpl: apply });
-    const status = new TickScheduler({}, probe).apply();
+    const status = new TickScheduler({}, probe).apply(DEDICATED_TARGET);
     expect(status.mode).toBe('fallback');
     expect(apply).not.toHaveBeenCalled();
   });
@@ -173,7 +179,7 @@ describe('TickScheduler.apply — fallback paths', () => {
       existing: [], // no chrt
       applyImpl: apply,
     });
-    const status = new TickScheduler({}, probe).apply();
+    const status = new TickScheduler({}, probe).apply(DEDICATED_TARGET);
     expect(status.mode).toBe('fallback');
     expect(status.error).toMatch(/chrt/);
     expect(apply).not.toHaveBeenCalled();
@@ -186,7 +192,7 @@ describe('TickScheduler.apply — fallback paths', () => {
       existing: [CHRT],
       applyResult: 'Operation not permitted',
     });
-    const status = new TickScheduler({}, probe).apply();
+    const status = new TickScheduler({}, probe).apply(DEDICATED_TARGET);
     expect(status.mode).toBe('fallback');
     expect(status.applied).toBe(false);
     expect(status.error).toMatch(/Operation not permitted/);
@@ -201,8 +207,44 @@ describe('TickScheduler.apply — fallback paths', () => {
       existing: [CHRT],
       applyImpl: apply,
     });
-    const status = new TickScheduler({ forceFallback: true }, probe).apply();
+    const status = new TickScheduler({ forceFallback: true }, probe)
+      .apply(DEDICATED_TARGET);
     expect(status.mode).toBe('fallback');
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('refuses to apply RT scheduling without a dedicated process target', () => {
+    vi.spyOn(logger, 'logWarn').mockImplementation(() => {});
+    const apply = vi.fn();
+    const { probe } = makeProbe({
+      files: { [PREEMPTION_SYSFS]: '1' },
+      existing: [CHRT],
+      applyImpl: apply,
+    });
+
+    const status = new TickScheduler({}, probe).apply();
+
+    expect(status.mode).toBe('fallback');
+    expect(status.error).toMatch(/no dedicated control process/i);
+    expect(apply).not.toHaveBeenCalled();
+  });
+
+  it('refuses to target the Express/main process pid', () => {
+    vi.spyOn(logger, 'logWarn').mockImplementation(() => {});
+    const apply = vi.fn();
+    const { probe } = makeProbe({
+      files: { [PREEMPTION_SYSFS]: '1' },
+      existing: [CHRT],
+      applyImpl: apply,
+    });
+
+    const status = new TickScheduler({}, probe).apply({
+      kind: 'dedicated-control-process',
+      pid: 4242,
+    });
+
+    expect(status.mode).toBe('fallback');
+    expect(status.error).toMatch(/main process/i);
     expect(apply).not.toHaveBeenCalled();
   });
 });
@@ -212,7 +254,7 @@ describe('TickScheduler.healthSummary', () => {
     vi.spyOn(logger, 'logInfo').mockImplementation(() => {});
     const { probe } = makeProbe({ files: { [PREEMPTION_SYSFS]: '1' }, existing: [CHRT] });
     const sched = new TickScheduler({}, probe);
-    sched.apply();
+    sched.apply(DEDICATED_TARGET);
     const summary = sched.healthSummary();
     expect(summary.schedulingMode).toBe('realtime');
     expect(summary.policy).toBe('SCHED_FIFO');
@@ -244,11 +286,37 @@ describe('normalizeConfig / configFromEnv', () => {
     const cfg = configFromEnv({
       OXSCADA_RT_PRIORITY: '80',
       OXSCADA_RT_POLICY: 'SCHED_RR',
+      OXSCADA_RT_ENABLE: 'true',
     } as NodeJS.ProcessEnv);
     expect(cfg.priority).toBe(80);
     expect(cfg.policy).toBe('SCHED_RR');
+    expect(cfg.forceFallback).toBe(false);
 
     const disabled = configFromEnv({ OXSCADA_RT_DISABLE: '1' } as NodeJS.ProcessEnv);
     expect(disabled.forceFallback).toBe(true);
+  });
+
+  it('is opt-in and degrades malformed environment config without throwing', () => {
+    const warnSpy = vi.spyOn(logger, 'logWarn').mockImplementation(() => {});
+
+    const defaultHeld = configFromEnv({} as NodeJS.ProcessEnv);
+    expect(defaultHeld.forceFallback).toBe(true);
+    expect(defaultHeld.holdReason).toMatch(/held/i);
+
+    expect(() =>
+      configFromEnv({
+        OXSCADA_RT_ENABLE: 'true',
+        OXSCADA_RT_PRIORITY: 'not-an-integer',
+      } as NodeJS.ProcessEnv),
+    ).not.toThrow();
+
+    const malformed = configFromEnv({
+      OXSCADA_RT_ENABLE: 'true',
+      OXSCADA_RT_PRIORITY: 'not-an-integer',
+    } as NodeJS.ProcessEnv);
+    expect(malformed.forceFallback).toBe(true);
+    expect(malformed.priority).toBe(50);
+    expect(malformed.holdReason).toMatch(/invalid.*priority/i);
+    expect(warnSpy).toHaveBeenCalled();
   });
 });

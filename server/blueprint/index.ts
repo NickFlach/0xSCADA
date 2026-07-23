@@ -24,6 +24,7 @@ export {
   type SchedPolicy,
   type SchedulerConfig,
   type SchedulerStatus,
+  type DedicatedSchedulerTarget,
   type RtCapability,
   type HostProbe,
   type RtSyscall,
@@ -54,12 +55,14 @@ export function getScheduler(): TickScheduler {
 }
 
 /**
- * Apply real-time scheduling at server startup. Idempotent (the scheduler only
- * acts once and warns at most once). Call this early in the boot sequence,
- * before the control loop begins.
+ * Explicitly apply real-time scheduling to a dedicated control process.
+ * Requiring the target prevents health imports or Express startup from
+ * accidentally elevating the main server process.
  */
-export function applyScheduler(): ReturnType<TickScheduler['apply']> {
-  return getScheduler().apply();
+export function applyScheduler(
+  target: import('./scheduler.js').DedicatedSchedulerTarget,
+): ReturnType<TickScheduler['apply']> {
+  return getScheduler().apply(target);
 }
 
 /**

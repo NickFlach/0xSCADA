@@ -14,8 +14,10 @@ import { blockchainService } from '../blockchain';
 import { registry, metricsHandler } from '../metrics';
 import type { Request, Response } from 'express';
 // Tick-aware scheduler (#458): surface schedulingMode in /health and append
-// blueprint tick telemetry to /metrics.
-import { applyScheduler, createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
+// blueprint tick telemetry to /metrics. Applying RT scheduling is deliberately
+// not a health-module import side effect; it requires a dedicated control
+// process target at the explicit runtime composition root.
+import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -135,9 +137,8 @@ healthManager.registerSimple(
 );
 
 // 9. Tick-aware scheduler (#458) — reports schedulingMode (realtime|fallback).
-//    Applied once at import time so the single startup warning fires during
-//    boot and the mode is fixed before the first /health scrape.
-applyScheduler();
+//    It remains unapplied here: pinning the Express process from a module import
+//    is unsafe. A dedicated control-process composition root must opt in.
 healthManager.register(createSchedulerCheck());
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────

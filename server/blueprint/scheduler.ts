@@ -1,11 +1,10 @@
 /**
  * Tick-Aware Scheduler (issue #458)
  *
- * Pins the blueprint control thread to SCHED_FIFO real-time scheduling WHEN the
- * host kernel is PREEMPT_RT, and falls back GRACEFULLY on a stock kernel /
- * non-Linux dev box: it skips the privileged scheduler call, logs a SINGLE
- * startup warning, and reports `schedulingMode: 'fallback'` so the truth shows
- * up honestly in `/health`.
+ * Pins an explicitly identified DEDICATED CONTROL PROCESS to SCHED_FIFO
+ * real-time scheduling when the host kernel is PREEMPT_RT, and falls back
+ * gracefully everywhere else. It never applies a process-wide policy to the
+ * Express process implicitly.
  *
  * ## Why `chrt` and not a native binding
  * `SCHED_FIFO` requires the `sched_setscheduler(2)` syscall, which Node.js does
@@ -16,13 +15,9 @@
  * call is isolated behind {@link RtSyscall} so a native binding can be dropped
  * in later without touching callers.
  *
- * NOTE (partial / deferred): `chrt` re-schedules the WHOLE process (all of
- * Node's threads), not a single OS thread. True per-thread SCHED_FIFO on the
- * dedicated control thread requires either a worker_thread with its own native
- * `sched_setscheduler(SCHED_FIFO, gettid())` call or the N-API addon mentioned
- * above. That thread-targeting refinement is marked TODO below; the capability
- * detection, fallback semantics, single-warning behaviour, and telemetry — i.e.
- * everything the acceptance criteria gate on — are implemented fully.
+ * `chrt` re-schedules a whole process. Therefore the caller must provide the
+ * PID of a separate control process; targeting the current Express process is
+ * rejected. A future per-thread native binding can replace this process seam.
  *
  * All probing is injectable so the decision logic is unit-testable with no real
  * kernel, filesystem, or child process.
@@ -55,6 +50,8 @@ export interface SchedulerConfig {
    * want deterministic dev/test behaviour or to disable RT pinning explicitly.
    */
   forceFallback?: boolean;
+  /** Operator-visible explanation when configuration deliberately holds RT. */
+  holdReason?: string;
 }
 
 export const DEFAULT_PRIORITY = 50;
@@ -87,6 +84,16 @@ export interface SchedulerStatus {
   capability: RtCapability;
   /** Populated when an apply attempt failed (so fallback reason is explicit). */
   error?: string;
+  pid: number;
+}
+
+/**
+ * Explicit target accepted by {@link TickScheduler.apply}. The PID must be a
+ * separate process from the caller; this prevents `chrt` from elevating the
+ * Express/WS main process.
+ */
+export interface DedicatedSchedulerTarget {
+  kind: 'dedicated-control-process';
   pid: number;
 }
 
@@ -276,13 +283,35 @@ export function normalizeConfig(partial?: Partial<SchedulerConfig>): SchedulerCo
 export function configFromEnv(env: NodeJS.ProcessEnv = process.env): SchedulerConfig {
   const priorityRaw = env.OXSCADA_RT_PRIORITY;
   const policyRaw = env.OXSCADA_RT_POLICY as SchedPolicy | undefined;
-  const forceFallback =
+  const explicitlyEnabled =
+    env.OXSCADA_RT_ENABLE === '1' || env.OXSCADA_RT_ENABLE === 'true';
+  const explicitlyDisabled =
     env.OXSCADA_RT_DISABLE === '1' || env.OXSCADA_RT_DISABLE === 'true';
-  return normalizeConfig({
+
+  const candidate: Partial<SchedulerConfig> = {
     priority: priorityRaw !== undefined ? Number(priorityRaw) : DEFAULT_PRIORITY,
     policy: policyRaw ?? 'SCHED_FIFO',
-    forceFallback,
-  });
+    forceFallback: explicitlyDisabled || !explicitlyEnabled,
+    holdReason: explicitlyDisabled
+      ? 'real-time scheduling explicitly disabled (OXSCADA_RT_DISABLE)'
+      : !explicitlyEnabled
+        ? 'real-time scheduling held until OXSCADA_RT_ENABLE is explicit and a dedicated control process is supplied'
+        : undefined,
+  };
+
+  try {
+    return normalizeConfig(candidate);
+  } catch (error) {
+    const reason =
+      `invalid real-time scheduler environment; using safe fallback: ` +
+      `${error instanceof Error ? error.message : String(error)}`;
+    logWarn(`[scheduler] ${reason}`);
+    return {
+      ...DEFAULT_SCHEDULER_CONFIG,
+      forceFallback: true,
+      holdReason: reason,
+    };
+  }
 }
 
 // ============================================================================
@@ -290,8 +319,9 @@ export function configFromEnv(env: NodeJS.ProcessEnv = process.env): SchedulerCo
 // ============================================================================
 
 /**
- * Tick-aware scheduler. Construct once at startup, call {@link apply} before the
- * control loop begins, then surface {@link status} in `/health`.
+ * Tick-aware scheduler. Construct at a control-process composition root, call
+ * {@link apply} with a dedicated process target, then surface {@link status} in
+ * `/health`.
  *
  * Idempotent: repeated `apply()` calls do not re-warn and do not re-invoke the
  * syscall once a decision has been reached (the "single startup warning"
@@ -318,16 +348,38 @@ export class TickScheduler {
    * the resulting status. Returns the status. Safe to call multiple times;
    * the warning is emitted at most once.
    */
-  apply(): SchedulerStatus {
+  apply(target?: DedicatedSchedulerTarget): SchedulerStatus {
     if (this.statusValue) return this.statusValue;
 
     const capability = detectRtCapability(this.probe);
-    const pid = this.probe.pid();
+    const callerPid = this.probe.pid();
+    const targetIsValid =
+      target?.kind === 'dedicated-control-process'
+      && Number.isSafeInteger(target.pid)
+      && target.pid > 0
+      && target.pid !== callerPid;
+    const pid = targetIsValid ? target.pid : callerPid;
 
-    // Operator override or no RT kernel → fallback, warn once, no syscall.
-    if (this.config.forceFallback || !capability.isPreemptRt || !capability.hasSyscallPath) {
+    const targetHoldReason = !target
+      ? 'no dedicated control process target was supplied'
+      : !Number.isSafeInteger(target.pid) || target.pid <= 0
+        ? `invalid dedicated control process pid ${String(target.pid)}`
+        : target.pid === callerPid
+          ? 'refusing to apply a process-wide real-time policy to the Express/main process'
+          : undefined;
+
+    // Missing/unsafe target, operator hold, or no RT kernel → fallback. No
+    // privileged syscall is attempted in any of these branches.
+    if (
+      !targetIsValid
+      || this.config.forceFallback
+      || !capability.isPreemptRt
+      || !capability.hasSyscallPath
+    ) {
       const reason = this.config.forceFallback
-        ? 'real-time scheduling explicitly disabled (OXSCADA_RT_DISABLE)'
+        ? this.config.holdReason ?? 'real-time scheduling explicitly held'
+        : targetHoldReason
+          ? targetHoldReason
         : !capability.isPreemptRt
           ? capability.reason
           : 'PREEMPT_RT kernel detected but no chrt(1) available to apply SCHED_FIFO';
@@ -342,7 +394,7 @@ export class TickScheduler {
       };
       this.warnOnce(
         `[scheduler] running in FALLBACK mode (no real-time guarantees): ${reason}. ` +
-          `Tick jitter will be reported but the control thread is NOT pinned to ${this.config.policy}.`,
+          `Tick jitter will be reported but no process is pinned to ${this.config.policy}.`,
       );
       return this.statusValue;
     }
@@ -384,7 +436,7 @@ export class TickScheduler {
       pid,
     };
     logInfo(
-      `[scheduler] real-time mode active: control thread pinned to ${this.config.policy} ` +
+      `[scheduler] real-time mode active: dedicated control process ${pid} pinned to ${this.config.policy} ` +
         `priority ${this.config.priority} (${capability.reason})`,
     );
     return this.statusValue;
@@ -413,7 +465,9 @@ export class TickScheduler {
         policy: 'SCHED_OTHER',
         priority: 0,
         realtimeKernel: false,
-        reason: 'scheduler not yet applied',
+        reason:
+          this.config.holdReason ??
+          'scheduler not applied: no dedicated control process target has been supplied',
       };
     }
     return {
