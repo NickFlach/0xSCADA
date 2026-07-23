@@ -9,7 +9,7 @@ import { storage } from "../storage";
 import { blockchainService } from "../blockchain";
 import { logError } from "../logger";
 import { insertAssetSchema } from "@shared/schema";
-import { fromZodError } from "zod-validation-error";
+import { fromZodError } from "zod-validation-error/v4";
 
 const router = Router();
 
