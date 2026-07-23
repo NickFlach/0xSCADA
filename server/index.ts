@@ -2,7 +2,7 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { securityHeaders, rateLimit } from "./middleware/security";
+import { securityHeaders } from "./middleware/security";
 import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
@@ -25,9 +25,9 @@ export { log } from "./logger";
 const app = express();
 const httpServer = createServer(app);
 
-// Apply security headers and rate limiting
+// Apply security headers. API rate limiting is installed by setupApiGateway
+// after body parsing so one gateway owns authentication and quota state.
 app.use(securityHeaders);
-app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
 
 // Health/readiness probes — mounted before auth so k8s probes work
 // unauthenticated. Mounted under /api to match the public-route allowlist
@@ -64,6 +64,10 @@ app.use(
 );
 
 app.use(express.urlencoded({ extended: false }));
+
+// Activate the configured gateway after parsing so its payload guard can
+// inspect request bodies. Health probes were mounted above and remain public.
+setupApiGateway(app, gatewayConfig);
 
 app.use((req, res, next) => {
   const start = Date.now();

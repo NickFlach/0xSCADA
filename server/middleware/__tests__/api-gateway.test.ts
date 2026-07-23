@@ -5,6 +5,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   SlidingWindowRateLimiter,
   ApiKeyManager,
+  apiKeyMiddleware,
 } from '../api-gateway';
 
 describe('SlidingWindowRateLimiter', () => {
@@ -96,5 +97,84 @@ describe('ApiKeyManager', () => {
     expect(keys.has('testkey123')).toBe(true);
     expect(keys.get('testkey123')?.scopes).toEqual(['read', 'write']);
     expect(keys.get('anotherkey')?.scopes).toEqual(['*']);
+  });
+
+  it('loads a scope-less environment key without implicit privileges', () => {
+    process.env.API_KEYS = 'unscoped-key:legacy-client';
+    manager.loadFromEnv();
+    delete process.env.API_KEYS;
+
+    expect(manager.getKeysMap().get('unscoped-key')?.scopes).toEqual([]);
+  });
+});
+
+describe('apiKeyMiddleware', () => {
+  const record = {
+    key: 'header-key',
+    name: 'operator',
+    scopes: ['operator'],
+    createdAt: new Date(),
+  };
+
+  function invoke(
+    originalUrl: string,
+    headers: Record<string, string> = {},
+    publicRoutes: string[] = [],
+  ) {
+    let statusCode = 200;
+    let body: unknown;
+    let nextCalled = false;
+    const req = {
+      originalUrl,
+      headers,
+      query: Object.fromEntries(new URL(originalUrl, 'http://local').searchParams),
+    } as never;
+    const res = {
+      status(code: number) {
+        statusCode = code;
+        return this;
+      },
+      json(value: unknown) {
+        body = value;
+        return this;
+      },
+    } as never;
+    apiKeyMiddleware(
+      new Map([[record.key, record]]),
+      publicRoutes,
+    )(req, res, () => {
+      nextCalled = true;
+    });
+    return { statusCode, body, nextCalled, req };
+  }
+
+  it('matches public routes against the full original API path', () => {
+    expect(invoke('/api/health', {}, ['/api/health'])).toMatchObject({
+      statusCode: 200,
+      nextCalled: true,
+    });
+  });
+
+  it('does not treat a public-route prefix collision as public', () => {
+    expect(invoke('/api/health-admin', {}, ['/api/health'])).toMatchObject({
+      statusCode: 401,
+      nextCalled: false,
+    });
+  });
+
+  it('rejects query-string API keys', () => {
+    expect(invoke('/api/private?api_key=header-key')).toMatchObject({
+      statusCode: 401,
+      nextCalled: false,
+    });
+  });
+
+  it('accepts and attaches a valid X-API-Key header', () => {
+    const result = invoke('/api/private', { 'x-api-key': 'header-key' });
+    expect(result).toMatchObject({ statusCode: 200, nextCalled: true });
+    expect(result.req).toMatchObject({
+      apiKeyName: 'operator',
+      apiKeyRecord: record,
+    });
   });
 });

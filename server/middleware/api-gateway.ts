@@ -127,13 +127,18 @@ export function rateLimitMiddleware(config: RateLimitConfig, limiterOptions?: Cr
 export function apiKeyMiddleware(keys: Map<string, ApiKeyRecord>, publicRoutes: string[] = []) {
   return (req: Request, res: Response, next: NextFunction): void => {
     // Skip auth for public routes
-    if (publicRoutes.some(route => req.path.startsWith(route))) {
+    const requestPath = req.originalUrl.split('?', 1)[0];
+    if (publicRoutes.some(route =>
+      requestPath === route || requestPath.startsWith(`${route}/`)
+    )) {
       return next();
     }
 
-    const key = (req.headers['x-api-key'] as string) || req.query.api_key as string;
+    // Query-string credentials leak through browser history, proxies, and
+    // access logs. Accept API keys only through the standard request header.
+    const key = req.headers['x-api-key'] as string | undefined;
     if (!key) {
-      res.status(401).json({ error: 'Missing API key. Provide via X-API-Key header or api_key query parameter.' });
+      res.status(401).json({ error: 'Missing API key. Provide via X-API-Key header.' });
       return;
     }
 
@@ -323,6 +328,7 @@ export class ApiKeyManager {
       const [key, name, scopeStr] = entry.trim().split(':');
       if (key && name) {
         // Missing scopes must never silently create an all-powerful key.
+        // Operators can grant `*` explicitly when that is truly intended.
         const scopes = scopeStr ? scopeStr.split('+').filter(Boolean) : [];
         this.keys.set(key, {
           key,
