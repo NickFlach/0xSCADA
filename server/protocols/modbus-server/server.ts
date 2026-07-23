@@ -153,7 +153,7 @@ export class ModbusTcpServer {
     );
 
     // Per-connection receive buffer; TCP may split or coalesce frames.
-    let buffer = Buffer.alloc(0);
+    let buffer: Buffer = Buffer.alloc(0);
     // Serialize draining so overlapping `data` events don't reorder responses
     // or race on `buffer`.
     let draining: Promise<void> = Promise.resolve();
