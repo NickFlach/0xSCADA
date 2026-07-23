@@ -3,6 +3,8 @@
  * Handles protocol drivers for industrial communication
  */
 
+import { storeAndForwardService } from './store-and-forward';
+
 // Protocol Types Union
 export type ProtocolType = 
   | 'DNP3_TCP'
@@ -64,7 +66,6 @@ export class GatewayManager {
    */
   async storeData(data: any, driverId: string): Promise<void> {
     try {
-      const { storeAndForwardService } = await import('./store-and-forward');
       await storeAndForwardService.store(data, driverId);
     } catch (error) {
       console.error(`Failed to store data for driver ${driverId}:`, error);
