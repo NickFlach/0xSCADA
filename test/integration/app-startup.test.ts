@@ -101,33 +101,32 @@ describe('App Startup Integration', () => {
   test('health endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/health`);
     const body = await response.text();
+    // A startup smoke test must fail when the server boots unhealthy: the
+    // required components (database, store-and-forward) have no environment
+    // dependencies in this configuration, so anything short of
+    // healthy/degraded is a real regression, not CI noise. The body and
+    // server log are attached so the failing component names itself.
     expect(
-      [200, 503],
-      `GET /api/health -> ${response.status}: ${body}`,
-    ).toContain(response.status);
+      response.ok,
+      `GET /api/health -> ${response.status}: ${body}\n--- server output ---\n${serverOutput.slice(-3000)}`,
+    ).toBe(true);
 
-    const data = JSON.parse(body) as {
-      status: 'healthy' | 'degraded' | 'unhealthy';
-      healthy: boolean;
-    };
+    const data = JSON.parse(body);
     expect(data).toHaveProperty('status');
-    expect(['healthy', 'degraded', 'unhealthy']).toContain(data.status);
-    expect(typeof data.healthy).toBe('boolean');
-    expect(data.healthy).toBe(data.status !== 'unhealthy');
-    expect(response.status).toBe(data.healthy ? 200 : 503);
+    expect(['healthy', 'degraded']).toContain(data.status);
+    expect(data.healthy, `health components: ${body}`).toBe(true);
   });
 
   test('readiness endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/readyz`);
     const body = await response.text();
     expect(
-      [200, 503],
-      `GET /api/readyz -> ${response.status}: ${body}`,
-    ).toContain(response.status);
+      response.ok,
+      `GET /api/readyz -> ${response.status}: ${body}\n--- server output ---\n${serverOutput.slice(-3000)}`,
+    ).toBe(true);
 
-    const data = JSON.parse(body) as { status: 'ready' | 'not ready' };
-    expect(['ready', 'not ready']).toContain(data.status);
-    expect(response.status).toBe(data.status === 'ready' ? 200 : 503);
+    const data = JSON.parse(body);
+    expect(data).toHaveProperty('status');
   });
 
   test('server responds to basic requests', async () => {
