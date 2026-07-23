@@ -24,6 +24,18 @@ const records: ApiKeyRecord[] = [
     scopes: ["read", "alarms.write"],
     createdAt: new Date(),
   },
+  {
+    key: "tuning-write-key",
+    name: "tuning-writer",
+    scopes: ["tuning.write"],
+    createdAt: new Date(),
+  },
+  {
+    key: "tuning-approve-key",
+    name: "tuning-approver",
+    scopes: ["tuning.approve"],
+    createdAt: new Date(),
+  },
   { key: "admin-key", name: "admin", scopes: ["admin"], createdAt: new Date() },
 ];
 
@@ -45,6 +57,12 @@ async function startApp(logs: string[] = []): Promise<string> {
   app.post("/api/sites", (_req, res) => res.status(201).json({ created: true }));
   app.post("/api/alarms/phi/check", (_req, res) =>
     res.status(201).json({ checked: true })
+  );
+  app.post("/api/tuning/loops/loop-1/tune/relay", (_req, res) =>
+    res.status(201).json({ proposed: true })
+  );
+  app.post("/api/tuning/proposals/proposal-1/approve", (_req, res) =>
+    res.status(200).json({ approved: true })
   );
 
   const server = createServer(app);
@@ -89,6 +107,7 @@ describe("control route policy inventory", () => {
       expect.arrayContaining([
         "anchor-backend-control",
         "safe-state-resume",
+        "tuning-proposal-decision",
         "tuning-control",
         "alarm-control",
         "geometry-control",
@@ -155,6 +174,30 @@ describe("mutating REST authorization", () => {
     expect((await fetch(`${baseUrl}/api/sites`, {
       method: "POST",
       headers: { "X-API-Key": "alarm-key" },
+    })).status).toBe(403);
+  });
+
+  it("separates tuning proposal creation from human approval authority", async () => {
+    const baseUrl = await startApp();
+    const proposePath = "/api/tuning/loops/loop-1/tune/relay";
+    const approvePath = "/api/tuning/proposals/proposal-1/approve";
+
+    expect((await fetch(`${baseUrl}${proposePath}`, {
+      method: "POST",
+      headers: { "X-API-Key": "tuning-write-key" },
+    })).status).toBe(201);
+    expect((await fetch(`${baseUrl}${approvePath}`, {
+      method: "POST",
+      headers: { "X-API-Key": "tuning-write-key" },
+    })).status).toBe(403);
+
+    expect((await fetch(`${baseUrl}${approvePath}`, {
+      method: "POST",
+      headers: { "X-API-Key": "tuning-approve-key" },
+    })).status).toBe(200);
+    expect((await fetch(`${baseUrl}${proposePath}`, {
+      method: "POST",
+      headers: { "X-API-Key": "tuning-approve-key" },
     })).status).toBe(403);
   });
 

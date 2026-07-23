@@ -18,12 +18,17 @@ describe("production deployment API-key defaults", () => {
   });
 
   it("requires a file-backed bootstrap secret in Docker Compose", () => {
-    const compose = repositoryFile("docker-compose.yml");
-    expect(compose).toContain("ENABLE_API_KEYS=${ENABLE_API_KEYS:-true}");
-    expect(compose).toContain("API_KEYS_FILE=/run/secrets/api_keys");
-    expect(compose).toContain(
-      "${API_KEYS_FILE:?Set API_KEYS_FILE to a bootstrap API-key secret file}",
-    );
+    for (const composeFile of [
+      "docker-compose.yml",
+      "docker/edge/docker-compose.yml",
+    ]) {
+      const compose = repositoryFile(composeFile);
+      expect(compose).toContain("ENABLE_API_KEYS=${ENABLE_API_KEYS:-true}");
+      expect(compose).toContain("API_KEYS_FILE=/run/secrets/api_keys");
+      expect(compose).toContain(
+        "${API_KEYS_FILE:?Set API_KEYS_FILE to a bootstrap API-key secret file}",
+      );
+    }
   });
 
   it("defaults both Helm charts on and requires an existing Secret", () => {
@@ -44,5 +49,14 @@ describe("production deployment API-key defaults", () => {
         "server.apiKeys.existingSecret is required when API-key authentication is enabled",
       );
     }
+  });
+
+  it("injects a required bootstrap key into the raw Kubernetes deployment", () => {
+    const deployment = repositoryFile("k8s/app/server-deployment.yaml");
+    expect(deployment).toContain("name: ENABLE_API_KEYS");
+    expect(deployment).toContain('value: "true"');
+    expect(deployment).toContain("name: API_KEYS");
+    expect(deployment).toContain("name: oxscada-api-keys");
+    expect(deployment).toContain("key: API_KEYS");
   });
 });

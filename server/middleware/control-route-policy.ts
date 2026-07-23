@@ -43,10 +43,16 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
     description: "Resume a blueprint from a fail-closed safe state.",
   },
   {
+    id: "tuning-proposal-decision",
+    pathPrefix: "/api/tuning/proposals",
+    scopes: Object.freeze(["tuning.approve"]),
+    description: "Approve or reject a pending tuning proposal.",
+  },
+  {
     id: "tuning-control",
     pathPrefix: "/api/tuning",
-    scopes: Object.freeze(["tuning.write", "tuning.approve"]),
-    description: "Change tuning envelopes, proposals, or approval state.",
+    scopes: Object.freeze(["tuning.write"]),
+    description: "Change tuning envelopes or create tuning proposals.",
   },
   {
     id: "alarm-control",
