@@ -1,4 +1,4 @@
--- Migration: 0003_modbus_register_map
+-- Migration: 0007_modbus_register_map
 -- Issue: #462 - Modbus TCP Server Mode
 -- Description: Persist per-site Modbus register mappings declared in shared/schema.ts
 -- Date: 2026-07-23
