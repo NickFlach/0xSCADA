@@ -43,7 +43,7 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
     enum BountyStatus {
         Open,       // Available to claim
         Claimed,    // Claimed by someone, work in progress
-        Completed,  // PR merged, payment processing
+        Completed,  // Reserved: no longer set (payments go Claimed -> Paid atomically); kept to preserve enum indices in the ABI
         Paid,       // Payment successful
         Expired,    // Claim expired, reverted to Open
         Disputed,   // Under dispute resolution
@@ -64,13 +64,15 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         address createdBy;          // Who registered the bounty
     }
 
+    // The paying transaction's own hash is unknowable on-chain; consumers
+    // needing it should read it from the BountyPaid event log. A former
+    // `txHash` field here actually held blockhash(block.number - 1) — see #448.
     struct Payment {
         uint256 issueNumber;
         uint256 prNumber;           // GitHub PR number
         address[] recipients;       // Support multi-recipient payments
         uint256[] amounts;          // Amount per recipient
         uint256 paidAt;             // Timestamp of payment
-        bytes32 txHash;             // Transaction hash for reference
     }
 
     // ═══════════════════════════════════════════════════════════════════
@@ -287,9 +289,28 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
         require(bounty.claimant == recipient, "Recipient must be the claimant");
         require(recipient != address(0), "Invalid recipient");
 
-        bounty.status = BountyStatus.Completed;
+        // Effects: finalize all state before the external transfer so a
+        // re-entering recipient can never observe or exploit an intermediate
+        // state (checks-effects-interactions). A failed transfer reverts the
+        // whole transaction, rolling these back.
+        bounty.status = BountyStatus.Paid;
 
-        // Transfer funds
+        address[] memory recipients = new address[](1);
+        recipients[0] = recipient;
+        uint256[] memory amounts = new uint256[](1);
+        amounts[0] = bounty.amount;
+
+        payments[issueNumber] = Payment({
+            issueNumber: issueNumber,
+            prNumber: prNumber,
+            recipients: recipients,
+            amounts: amounts,
+            paidAt: block.timestamp
+        });
+
+        totalPaidOut += bounty.amount;
+
+        // Interactions: transfer funds
         if (bounty.token == address(0)) {
             // Native token (ETH/MATIC)
             require(address(this).balance >= bounty.amount, "Insufficient contract balance");
@@ -304,25 +325,6 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
             );
             tokenContract.safeTransfer(recipient, bounty.amount);
         }
-
-        bounty.status = BountyStatus.Paid;
-
-        // Record payment
-        address[] memory recipients = new address[](1);
-        recipients[0] = recipient;
-        uint256[] memory amounts = new uint256[](1);
-        amounts[0] = bounty.amount;
-
-        payments[issueNumber] = Payment({
-            issueNumber: issueNumber,
-            prNumber: prNumber,
-            recipients: recipients,
-            amounts: amounts,
-            paidAt: block.timestamp,
-            txHash: blockhash(block.number - 1) // Approximate tx hash
-        });
-
-        totalPaidOut += bounty.amount;
 
         emit BountyPaid(issueNumber, prNumber, recipient, bounty.amount, bounty.token);
     }
@@ -352,10 +354,39 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
             totalAmount += amounts[i];
         }
         require(totalAmount == bounty.amount, "Total amounts must equal bounty amount");
+        if (bounty.token == address(0)) {
+            require(address(this).balance >= totalAmount, "Insufficient contract balance");
+        } else {
+            require(
+                IERC20(bounty.token).balanceOf(address(this)) >= totalAmount,
+                "Insufficient token balance"
+            );
+        }
 
-        bounty.status = BountyStatus.Completed;
+        // Effects: finalize all state before any external call so a
+        // re-entering recipient mid-loop can never observe or exploit an
+        // intermediate state (checks-effects-interactions). Any failed
+        // transfer reverts the whole transaction, rolling these back.
+        bounty.status = BountyStatus.Paid;
 
-        // Transfer funds to each recipient
+        // Payment.recipients is address[]; the payable array cannot be assigned directly
+        address[] memory recipientAddrs = new address[](recipients.length);
+        for (uint256 i = 0; i < recipients.length; i++) {
+            recipientAddrs[i] = recipients[i];
+        }
+
+        // Record payment
+        payments[issueNumber] = Payment({
+            issueNumber: issueNumber,
+            prNumber: prNumber,
+            recipients: recipientAddrs,
+            amounts: amounts,
+            paidAt: block.timestamp
+        });
+
+        totalPaidOut += totalAmount;
+
+        // Interactions: transfer funds to each recipient
         for (uint256 i = 0; i < recipients.length; i++) {
             address payable recipient = recipients[i];
             uint256 amount = amounts[i];
@@ -371,20 +402,6 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
 
             emit BountyPaid(issueNumber, prNumber, recipient, amount, bounty.token);
         }
-
-        bounty.status = BountyStatus.Paid;
-
-        // Record payment
-        payments[issueNumber] = Payment({
-            issueNumber: issueNumber,
-            prNumber: prNumber,
-            recipients: recipients,
-            amounts: amounts,
-            paidAt: block.timestamp,
-            txHash: blockhash(block.number - 1)
-        });
-
-        totalPaidOut += totalAmount;
     }
 
     // ═══════════════════════════════════════════════════════════════════
