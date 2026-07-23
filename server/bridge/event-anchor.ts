@@ -9,6 +9,7 @@
 
 import { EventEmitter } from 'events';
 import { log, logError } from '../logger';
+import { anchorsToL2, getAnchorBackend } from './anchor-backend';
 
 export interface AnchorableEvent {
   id: string;
@@ -60,7 +61,15 @@ export class EventAnchorBridge extends EventEmitter {
     if (this.isInitialized) return;
 
     log('Initializing event anchor bridge');
-    
+
+    // The L2 path is deprecated (#443): only active when ANCHOR_BACKEND
+    // explicitly selects it, so events cannot double-anchor by default.
+    if (!anchorsToL2()) {
+      this.config.enabled = false;
+      log(`L2 event anchor bridge disabled (ANCHOR_BACKEND=${getAnchorBackend()}); canonical path is 0xSCADA-node`);
+      return;
+    }
+
     if (!this.config.enabled) {
       log('Event anchor bridge disabled via configuration');
       return;

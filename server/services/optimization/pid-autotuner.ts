@@ -63,7 +63,7 @@ function cohenCoonPID(k: number, tau: number, theta: number): PIDGains {
 }
 
 /** Compute ultimate gain and period from relay feedback oscillation data */
-function relayFeedbackAnalysis(
+export function relayFeedbackAnalysis(
   relayAmplitude: number,
   peakTimestamps: number[],
   valleyTimestamps: number[],

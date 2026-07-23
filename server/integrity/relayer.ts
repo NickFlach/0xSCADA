@@ -12,6 +12,42 @@ import { ethers } from 'ethers';
 import { EventEmitter } from 'events';
 import { SignatureResult } from './hsm.js';
 
+/**
+ * Minimal signature verifier the relayer needs — satisfied by MerkleRootSigner.
+ * Injected so the relayer can cryptographically verify the HSM signature over
+ * the Merkle root against the signing key's public half before anchoring.
+ */
+export interface SignatureVerifier {
+  verifyMerkleRootSignature(
+    merkleRoot: string,
+    signature: SignatureResult,
+  ): Promise<{ valid: boolean }>;
+}
+
+/** Structural subset of the ethers contract the relayer calls (for injection). */
+export interface AnchorContractLike {
+  anchor: {
+    (merkleRoot: string, batchId: number, eventCount: number, overrides?: unknown): Promise<{
+      wait(): Promise<{ hash: string; blockNumber: number; gasUsed: bigint }>;
+    }>;
+    estimateGas(merkleRoot: string, batchId: number, eventCount: number): Promise<bigint>;
+  };
+}
+
+export interface RelayerDeps {
+  provider?: ethers.JsonRpcProvider;
+  wallet?: ethers.Wallet;
+  contract?: AnchorContractLike;
+  /** Cryptographic verifier for HSM signatures (e.g. the MerkleRootSigner). */
+  signatureVerifier?: SignatureVerifier;
+  /**
+   * Explicitly permit anchoring with only the structural signature check when
+   * no cryptographic verifier is wired. Default false → fail closed: without a
+   * verifier, nothing is anchored. An integrity chain must not fail open.
+   */
+  allowUnverified?: boolean;
+}
+
 export interface RelayerConfig {
   // Blockchain connection
   rpcUrl: string;
@@ -56,6 +92,8 @@ export interface AnchorResult {
   confirmations: number;
   error?: string;
   finalizedAt?: number;
+  /** Permanent failure (e.g. invalid signature) — must NOT be retried. */
+  permanent?: boolean;
 }
 
 export interface RelayerStats {
@@ -77,7 +115,10 @@ export class AnchorRelayerService extends EventEmitter {
   private config: RelayerConfig;
   private provider!: ethers.JsonRpcProvider;
   private wallet!: ethers.Wallet;
-  private contract!: ethers.Contract;
+  private contract!: AnchorContractLike;
+  private injectedDeps: RelayerDeps;
+  private signatureVerifier?: SignatureVerifier;
+  private allowUnverified: boolean;
   private queue: AnchorRequest[] = [];
   private processing = false;
   private stats: RelayerStats;
@@ -93,9 +134,12 @@ export class AnchorRelayerService extends EventEmitter {
     'event Anchored(uint256 indexed batchId, bytes32 merkleRoot, uint256 eventCount, uint256 timestamp)'
   ];
 
-  constructor(config: Partial<RelayerConfig> = {}) {
+  constructor(config: Partial<RelayerConfig> = {}, deps: RelayerDeps = {}) {
     super();
-    
+    this.injectedDeps = deps;
+    this.signatureVerifier = deps.signatureVerifier;
+    this.allowUnverified = deps.allowUnverified ?? false;
+
     this.config = {
       // Default configuration
       rpcUrl: config.rpcUrl || 'http://localhost:8545',
@@ -127,21 +171,42 @@ export class AnchorRelayerService extends EventEmitter {
       queueLength: 0
     };
 
-    this.initializeBlockchainConnection();
+    // Connection is lazy: `new ethers.Wallet('')` throws, so we don't build the
+    // provider/wallet/contract until first use. Injected deps (tests) are stored
+    // and any gaps are filled from config by ensureConnection.
+    if (deps.provider) this.provider = deps.provider;
+    if (deps.wallet) this.wallet = deps.wallet;
+    if (deps.contract) this.contract = deps.contract;
     this.startBatchTimer();
   }
 
   /**
-   * Initialize blockchain connection and contract interface
+   * Ensure the provider + contract exist, building any missing piece lazily
+   * from config. Idempotent and gap-filling: a partial dep injection (e.g. only
+   * a contract) still gets a real provider rather than crashing on undefined.
    */
-  private initializeBlockchainConnection(): void {
-    this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
-    this.wallet = new ethers.Wallet(this.config.privateKey, this.provider);
-    this.contract = new ethers.Contract(
-      this.config.contractAddress,
-      AnchorRelayerService.CONTRACT_ABI,
-      this.wallet
-    );
+  private ensureConnection(): void {
+    if (this.provider && this.contract) return;
+
+    if (!this.provider) {
+      this.provider = new ethers.JsonRpcProvider(this.config.rpcUrl);
+    }
+    if (!this.contract) {
+      if (!this.config.privateKey) {
+        throw new Error('AnchorRelayerService: no privateKey configured — cannot submit anchors');
+      }
+      if (!this.config.contractAddress) {
+        throw new Error('AnchorRelayerService: no contractAddress configured — cannot submit anchors');
+      }
+      if (!this.wallet) {
+        this.wallet = new ethers.Wallet(this.config.privateKey, this.provider);
+      }
+      this.contract = new ethers.Contract(
+        this.config.contractAddress,
+        AnchorRelayerService.CONTRACT_ABI,
+        this.wallet,
+      ) as unknown as AnchorContractLike;
+    }
   }
 
   /**
@@ -233,7 +298,7 @@ export class AnchorRelayerService extends EventEmitter {
           this.stats.lastSuccessfulSubmission = Date.now();
           this.emit('anchorSuccess', { request, result });
         } else {
-          await this.handleFailure(request, result.error);
+          await this.handleFailure(request, result.error, result.permanent);
         }
       } catch (error) {
         await this.handleFailure(request, (error as Error).message);
@@ -251,12 +316,15 @@ export class AnchorRelayerService extends EventEmitter {
    */
   private async submitToBlockchain(request: AnchorRequest): Promise<AnchorResult> {
     const startTime = Date.now();
-    
+
     try {
-      // Verify signature before submission
-      if (!this.verifySignature(request)) {
-        throw new Error('Invalid signature on Merkle root');
+      // Verify signature before submission. A bad signature is a PERMANENT
+      // failure — retrying can never make it valid, so don't queue a retry.
+      if (!(await this.verifySignature(request))) {
+        return { success: false, confirmations: 0, permanent: true, error: 'Invalid signature on Merkle root' };
       }
+
+      this.ensureConnection();
 
       // Estimate gas
       const gasEstimate = await this.contract.anchor.estimateGas(
@@ -328,9 +396,15 @@ export class AnchorRelayerService extends EventEmitter {
   /**
    * Handle submission failure with retry logic
    */
-  private async handleFailure(request: AnchorRequest, error?: string): Promise<void> {
+  private async handleFailure(request: AnchorRequest, error?: string, permanent?: boolean): Promise<void> {
     request.retryCount++;
     this.stats.failedSubmissions++;
+
+    // Permanent failures (invalid signature) are never retried.
+    if (permanent) {
+      this.emit('anchorFailed', { request, error: error || 'Permanent failure', permanent: true });
+      return;
+    }
 
     if (request.retryCount >= this.config.maxRetries) {
       this.emit('anchorFailed', { request, error: error || 'Max retries exceeded' });
@@ -357,18 +431,57 @@ export class AnchorRelayerService extends EventEmitter {
   }
 
   /**
-   * Verify HSM signature on Merkle root
+   * Verify the HSM signature on the Merkle root before anchoring.
+   *
+   * Structural checks (signature present, bound to THIS root, sane timestamp)
+   * run first. Then, if a cryptographic verifier is configured, the signature
+   * is verified against the signing key's public half — the real HSM check that
+   * replaces the former presence-only TODO. When a verifier IS configured it
+   * fails closed: an unverifiable signature is never anchored.
    */
-  private verifySignature(request: AnchorRequest): boolean {
-    // TODO: Implement actual signature verification with HSM public key
-    // For now, just check that signature exists and matches expected format
+  private async verifySignature(request: AnchorRequest): Promise<boolean> {
     const { signatureResult } = request;
-    
-    return !!(
+
+    const structurallyValid = !!(
       signatureResult.signature &&
       signatureResult.merkleRoot === request.merkleRoot &&
       signatureResult.timestamp > 0
     );
+    if (!structurallyValid) return false;
+
+    if (this.signatureVerifier) {
+      try {
+        const { valid } = await this.signatureVerifier.verifyMerkleRootSignature(
+          request.merkleRoot,
+          signatureResult,
+        );
+        if (!valid) {
+          this.emit('signatureRejected', { batchId: request.batchId, merkleRoot: request.merkleRoot });
+        }
+        return valid;
+      } catch (err) {
+        this.emit('signatureRejected', {
+          batchId: request.batchId,
+          merkleRoot: request.merkleRoot,
+          error: (err as Error).message,
+        });
+        return false;
+      }
+    }
+
+    // No cryptographic verifier wired. Fail CLOSED by default — an integrity
+    // chain must never anchor a root it cannot cryptographically verify. Only
+    // the explicit allowUnverified opt-out permits the structural-check-only
+    // path. The production AnchorPipeline always injects a verifier.
+    if (!this.allowUnverified) {
+      this.emit('signatureRejected', {
+        batchId: request.batchId,
+        merkleRoot: request.merkleRoot,
+        error: 'no signature verifier configured (fail-closed)',
+      });
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -415,6 +528,7 @@ export class AnchorRelayerService extends EventEmitter {
    */
   public async getHealth(): Promise<{ connected: boolean; blockNumber?: number; error?: string }> {
     try {
+      this.ensureConnection();
       const blockNumber = await this.provider.getBlockNumber();
       return { connected: true, blockNumber };
     } catch (error) {

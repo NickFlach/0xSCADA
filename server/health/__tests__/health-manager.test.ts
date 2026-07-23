@@ -53,6 +53,9 @@ describe('HealthManager', () => {
   });
 
   it('handles check timeout', async () => {
+    // Short per-check timeout so the never-resolving check aborts well within
+    // the test budget (the default check timeout is 10s).
+    hm = new HealthManager(0, 100);
     hm.register({
       name: 'slow',
       required: true,

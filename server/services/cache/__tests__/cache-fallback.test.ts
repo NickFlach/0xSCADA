@@ -3,13 +3,13 @@
  * Tests for in-memory fallback when Redis is unavailable
  */
 
+import { vi } from 'vitest';
 import { CacheService } from '../cache-service.js';
-import { jest } from '@jest/globals';
 
 // Mock Redis client to simulate unavailability
-jest.mock('../redis-client.js', () => ({
-  getRedisClient: jest.fn().mockResolvedValue(null),
-  isRedisHealthy: jest.fn().mockReturnValue(false),
+vi.mock('../redis-client.js', () => ({
+  getRedisClient: vi.fn().mockResolvedValue(null),
+  isRedisHealthy: vi.fn().mockReturnValue(false),
 }));
 
 describe('Cache Service - Redis Fallback', () => {
@@ -146,7 +146,7 @@ describe('Cache Service - Redis Fallback', () => {
     });
 
     it('should handle getOrSet with fallback cache', async () => {
-      const loader = jest.fn().mockResolvedValue({ computed: 'value' });
+      const loader = vi.fn().mockResolvedValue({ computed: 'value' });
       
       // First call should invoke loader
       const result1 = await cache.getOrSet('computed:key', loader, { ttl: 60 });
@@ -173,6 +173,6 @@ describe('Cache Service - Redis Fallback', () => {
 
       // Should be expired and cleaned up
       expect(await cache.get('short-lived')).toBeNull();
-    });
+    }, 10000); // real-time expiry: waits past the cleanup cycle, exceeds the 5s default
   });
 });
