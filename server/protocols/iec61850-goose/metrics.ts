@@ -14,8 +14,38 @@
 
 import { registry } from "../../metrics/prometheus.js";
 
+type MetricLabels = Record<string, string>;
+
+interface CounterMetric {
+  inc(labels?: MetricLabels, value?: number): void;
+  get(labels?: MetricLabels): number;
+  reset(): void;
+  collect(): Array<{ labels: MetricLabels; value: number }>;
+}
+
+interface GaugeMetric {
+  set(value: number, labels?: MetricLabels): void;
+  inc(labels?: MetricLabels, value?: number): void;
+  dec(labels?: MetricLabels, value?: number): void;
+  get(labels?: MetricLabels): number;
+  setToCurrentTime(labels?: MetricLabels): void;
+  reset(): void;
+  collect(): Array<{ labels: MetricLabels; value: number }>;
+}
+
+interface HistogramMetric {
+  observe(value: number, labels?: MetricLabels): void;
+  reset(): void;
+  collect(): Array<{
+    labels: MetricLabels;
+    buckets: Map<number, number>;
+    sum: number;
+    count: number;
+  }>;
+}
+
 /** Total GOOSE frames received on the wire (before validation). */
-export const gooseFramesReceivedTotal = registry.counter(
+export const gooseFramesReceivedTotal: CounterMetric = registry.counter(
   "goose_frames_received_total",
   "Total IEC 61850 GOOSE frames received on the configured interface",
   ["app_id"],
@@ -25,7 +55,7 @@ export const gooseFramesReceivedTotal = registry.counter(
  * GOOSE frames rejected, labelled by reason. Reasons are a fixed, low-cardinality
  * enum — see {@link GooseRejectReason}.
  */
-export const gooseFramesRejectedTotal = registry.counter(
+export const gooseFramesRejectedTotal: CounterMetric = registry.counter(
   "goose_frames_rejected_total",
   "IEC 61850 GOOSE frames rejected during decode/validation",
   ["reason"],
@@ -36,7 +66,7 @@ export const gooseFramesRejectedTotal = registry.counter(
  * to local receive time). Buckets centred on the sub-4ms control-loop budget
  * (issue 2b pairs this with control-loop latency telemetry).
  */
-export const gooseRoundTripUs = registry.histogram(
+export const gooseRoundTripUs: HistogramMetric = registry.histogram(
   "goose_round_trip_us",
   "GOOSE publish-to-receive round-trip latency in microseconds",
   ["gocb_ref"],
@@ -44,14 +74,14 @@ export const gooseRoundTripUs = registry.histogram(
 );
 
 /** Per-subscription state-number gauge (last accepted stNum). */
-export const gooseLastStNum = registry.gauge(
+export const gooseLastStNum: GaugeMetric = registry.gauge(
   "goose_last_st_num",
   "Last accepted GOOSE state number per subscription",
   ["gocb_ref"],
 );
 
 /** Number of active GOOSE subscriptions configured on the subscriber. */
-export const gooseSubscriptionsActive = registry.gauge(
+export const gooseSubscriptionsActive: GaugeMetric = registry.gauge(
   "goose_subscriptions_active",
   "Number of active GOOSE subscriptions",
 );
