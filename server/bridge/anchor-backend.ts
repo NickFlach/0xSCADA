@@ -133,6 +133,21 @@ export function anchorsToNode(): boolean {
   return backend === 'node' || backend === 'both';
 }
 
+/**
+ * Log the routing this process resolved at boot. Runtime overrides installed
+ * via POST /api/admin/anchor-backend are process-local and do not survive a
+ * restart: after a crash or redeploy, routing silently returns to the
+ * environment default. Logging the boot state makes that reversion visible
+ * to operators auditing an earlier committed switch.
+ */
+export function logAnchorBackendBootState(): void {
+  const source = process.env.ANCHOR_BACKEND !== undefined ? 'ANCHOR_BACKEND env' : 'default';
+  console.log(
+    `[anchor-backend] boot routing = "${getAnchorBackend()}" (source: ${source}); ` +
+      'runtime overrides do not persist across restarts',
+  );
+}
+
 /** Test hook: reset the one-time warning latch. */
 export function _resetWarningLatch(): void {
   warned = false;
