@@ -197,12 +197,6 @@ export class SafetyGuard {
       noveltyRatio: currentNoveltyRatio,
     };
 
-    // Track novelty usage
-    this.noveltyWindow.push(isExperimental);
-    if (this.noveltyWindow.length > this.config.noveltyWindowSize) {
-      this.noveltyWindow.shift();
-    }
-
     this.recordDecision(decision, genome, evaluation.score, processArea);
     return decision;
   }
@@ -232,7 +226,15 @@ export class SafetyGuard {
   // ─── Novelty Budget ─────────────────────────────────────────────
 
   /**
-   * Get current novelty ratio: fraction of recent resolutions using experimental genomes.
+   * Get current novelty ratio: fraction of recent resolution DECISIONS that
+   * actually used an experimental genome (#451 B1).
+   *
+   * The window records every decision — allowed-experimental (true),
+   * allowed-mature (false), and blocked→static-fallback (false) — so the
+   * denominator is all resolutions, matching the ADR-0023 budget semantics
+   * ("max fraction of resolutions using experimental genomes"). Recording only
+   * allowed-experimental outcomes made the ratio collapse to 1.0 after the
+   * first experimental resolution and deadlock every subsequent one.
    */
   getNoveltyRatio(): number {
     if (this.noveltyWindow.length === 0) return 0;
@@ -253,6 +255,17 @@ export class SafetyGuard {
     confidence: number,
     processArea: string,
   ): void {
+    // Novelty tracking (#451 B1): record EVERY decision. An experimental
+    // genome was actually used only when the decision was allowed AND the
+    // genome is below the maturity generation; every other outcome (mature
+    // genome, or blocked→static fallback) counts as a non-experimental
+    // resolution.
+    const usedExperimental = decision.allowed && decision.isExperimental;
+    this.noveltyWindow.push(usedExperimental);
+    if (this.noveltyWindow.length > this.config.noveltyWindowSize) {
+      this.noveltyWindow.shift();
+    }
+
     const entry: AuditEntry = {
       timestamp: Date.now(),
       processArea,

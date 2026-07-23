@@ -201,8 +201,26 @@ export const storage = {
   getHealth: () => ({
     connected: db !== null,
     type: dbType,
-    database: dbType === 'postgres' 
+    database: dbType === 'postgres'
       ? (process.env.DATABASE_URL ? 'PostgreSQL configured' : 'not configured')
       : 'SQLite (development mode)'
-  })
+  }),
+  /**
+   * Active connectivity probe used by the health endpoints. Runs a lightweight
+   * query against Postgres; the file-backed SQLite dev database is considered
+   * connected once initialized.
+   */
+  healthCheck: async (): Promise<{ connected: boolean; type: string; error?: string }> => {
+    if (!db) {
+      return { connected: false, type: dbType, error: 'Database not initialized' };
+    }
+    try {
+      if (dbType === 'postgres' && pgClient) {
+        await pgClient.query('SELECT 1');
+      }
+      return { connected: true, type: dbType };
+    } catch (err) {
+      return { connected: false, type: dbType, error: (err as Error).message };
+    }
+  }
 };

@@ -7,8 +7,20 @@
  */
 
 import { EventEmitter } from 'events';
-import { MerkleRootSigner, HSMConfig, SignatureResult } from './hsm';
+import { MerkleRootSigner, HSMConfig, SignatureResult, type SignerDeps } from './hsm';
 import { EventBatch } from './pipeline';
+import { MerkleTreeBuilder } from './merkle';
+
+/**
+ * Real blockchain anchor operation: submit a signed Merkle root and resolve
+ * true once it is anchored. Injected (e.g. wrapping the AnchorRelayerService)
+ * so the resilience layer performs a real submission instead of a simulation.
+ */
+export type AnchorFn = (
+  batchId: string,
+  merkleRoot: string,
+  signature: SignatureResult,
+) => Promise<boolean>;
 
 export interface CircuitBreakerConfig {
   failureThreshold: number; // Number of failures before opening circuit
@@ -28,6 +40,11 @@ export interface ResilienceConfig {
     retryAttempts: number;
     retryDelayMs: number;
     queueMaxSize: number;
+    /**
+     * Real anchor operation. When absent, anchoring fails closed (returns false
+     * and emits a warning) rather than the former Math.random() simulation.
+     */
+    anchor?: AnchorFn;
   };
   merkle: {
     continueOnFailure: boolean;
@@ -170,9 +187,11 @@ export class ResilienceManager extends EventEmitter {
   private retryTimer?: NodeJS.Timeout;
   private healthStatus: HealthStatus;
   private componentMetrics: Map<string, any> = new Map();
+  private signerDeps: SignerDeps;
 
-  constructor(config: Partial<ResilienceConfig> = {}) {
+  constructor(config: Partial<ResilienceConfig> = {}, signerDeps: SignerDeps = {}) {
     super();
+    this.signerDeps = signerDeps;
     
     this.config = {
       hsm: {
@@ -216,7 +235,7 @@ export class ResilienceManager extends EventEmitter {
     // Initialize primary signer (HSM or software)
     if (this.config.hsm.enabled) {
       try {
-        this.primarySigner = new MerkleRootSigner(this.config.hsm.config);
+        this.primarySigner = new MerkleRootSigner(this.config.hsm.config, this.signerDeps);
         await this.primarySigner.initialize();
         this.updateComponentHealth('hsm', 'healthy');
       } catch (error) {
@@ -534,23 +553,28 @@ export class ResilienceManager extends EventEmitter {
    * Perform blockchain anchor operation (placeholder)
    */
   private async performBlockchainAnchor(batchId: string, merkleRoot: string, signature: SignatureResult): Promise<boolean> {
-    // Simulate blockchain anchoring
-    // In real implementation, this would:
-    // 1. Connect to blockchain node
-    // 2. Submit anchoring transaction
-    // 3. Wait for confirmation
-    // 4. Return success/failure
-    
-    await this.sleep(100); // Simulate network delay
-    return Math.random() > 0.1; // 90% success rate for simulation
+    // Real anchor via the injected operation (e.g. the AnchorRelayerService).
+    // No operation configured → fail closed (do NOT fake success), so the
+    // circuit breaker + retry queue treat it as a genuine anchoring outage.
+    if (!this.config.blockchain.anchor) {
+      this.emit('warning', {
+        component: 'blockchain',
+        message: 'No anchor operation configured — anchoring is a no-op (failing closed)',
+        batchId,
+      });
+      return false;
+    }
+    return this.config.blockchain.anchor(batchId, merkleRoot, signature);
   }
 
   /**
-   * Simulate Merkle tree building (placeholder)
+   * Build the bytes32 Merkle root for a batch from its event hashes (real tree).
+   * Uses the shared MerkleTreeBuilder.rootBytes32 so this is byte-identical to
+   * the anchor pipeline's root for the same batch (#489) — a non-0x root would
+   * be rejected by ethers if this feeds the relayer.
    */
   private buildMerkleTreeSync(eventBatch: EventBatch): string {
-    // In real implementation, this would use the MerkleTreeBuilder
-    return `merkle_root_${eventBatch.id}_${eventBatch.batchHash}`;
+    return MerkleTreeBuilder.rootBytes32(eventBatch.events.map(e => e.hash), eventBatch.batchHash);
   }
 
   /**
