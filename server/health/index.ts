@@ -12,6 +12,12 @@ import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewa
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
 import { registry, metricsHandler } from '../metrics';
+import { publishProductionLatencyProbeStatus } from '../integrity/latency-probe';
+
+// Publish an explicit held/down series during normal server composition. This
+// does not instantiate or start a synthetic probe; only a future verified
+// tick/batch/HSM/anchor composition root may replace the held status.
+publishProductionLatencyProbeStatus();
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.

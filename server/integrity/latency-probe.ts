@@ -31,6 +31,42 @@ import {
   type Clock,
   type LatencyMeasurement,
 } from './stage-timestamps.js';
+import { registry } from '../metrics/prometheus.js';
+
+// ============================================================================
+// PRODUCTION REACHABILITY
+// ============================================================================
+
+/**
+ * The probe core below is intentionally injectable. No production composition
+ * root currently supplies the real pipeline/sign/confirmation adapters, so the
+ * server must not advertise it as running merely because metrics and dashboards
+ * exist.
+ */
+export const PRODUCTION_LATENCY_PROBE_STATUS = Object.freeze({
+  state: 'HELD' as const,
+  running: false as const,
+  reason:
+    'Latency probe is held: no production composition root binds all tick, batch, HSM-sign, and anchor-confirmation stages.',
+});
+
+/**
+ * Explicit production liveness signal. Initialising this to zero creates a real
+ * Prometheus series even when the probe is held, so Alertmanager can distinguish
+ * "not running" from "metric never existed".
+ */
+export const productionLatencyProbeUpGauge = registry.gauge(
+  'control_loop_probe_up',
+  'Whether the production control-loop latency probe is actively producing end-to-end cycles (1=up, 0=held/down)',
+);
+
+export function publishProductionLatencyProbeStatus(): void {
+  productionLatencyProbeUpGauge.set(
+    PRODUCTION_LATENCY_PROBE_STATUS.running ? 1 : 0,
+  );
+}
+
+publishProductionLatencyProbeStatus();
 
 // ============================================================================
 // SENTINEL BLUEPRINT
@@ -188,6 +224,8 @@ export class ControlLoopLatencyProbe extends EventEmitter {
       if (this.inFlight >= this.config.maxConcurrentCycles) return;
       void this.runCycle();
     }, this.intervalMs);
+    // A diagnostic probe must never be the sole reason the server stays alive.
+    this.timer.unref?.();
     this.emit('started', { validator: this.config.validator, cadenceHz: this.config.cadenceHz });
   }
 

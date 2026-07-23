@@ -13,11 +13,15 @@
  */
 
 import { EventEmitter } from 'events';
+import { readFileSync } from 'node:fs';
 import { describe, it, expect, beforeEach } from 'vitest';
 import {
   ControlLoopLatencyProbe,
+  PRODUCTION_LATENCY_PROBE_STATUS,
   createSentinelBlueprint,
   createPipelineStageExecutors,
+  productionLatencyProbeUpGauge,
+  publishProductionLatencyProbeStatus,
   type StageExecutors,
   type PipelineLike,
   type SignerLike,
@@ -48,6 +52,59 @@ function makeAdvancingClock(): { clock: Clock; advance: (ms: number) => void } {
 describe('ControlLoopLatencyProbe', () => {
   beforeEach(() => {
     registry.reset();
+  });
+
+  it('publishes an explicit held/down production gauge for Alertmanager', () => {
+    publishProductionLatencyProbeStatus();
+
+    expect(PRODUCTION_LATENCY_PROBE_STATUS).toMatchObject({
+      state: 'HELD',
+      running: false,
+    });
+    expect(productionLatencyProbeUpGauge.get()).toBe(0);
+    expect(registry.metrics()).toContain('scada_control_loop_probe_up 0');
+  });
+
+  it('does not claim the injectable probe is started by the server', () => {
+    const serverEntry = readFileSync(
+      new URL('../../index.ts', import.meta.url),
+      'utf8',
+    );
+    const healthEntry = readFileSync(
+      new URL('../../health/index.ts', import.meta.url),
+      'utf8',
+    );
+
+    expect(PRODUCTION_LATENCY_PROBE_STATUS.running).toBe(false);
+    expect(serverEntry).not.toContain('ControlLoopLatencyProbe');
+    expect(serverEntry).not.toContain('publishProductionLatencyProbeStatus');
+    expect(healthEntry).toContain('publishProductionLatencyProbeStatus()');
+    expect(healthEntry).not.toContain('new ControlLoopLatencyProbe');
+  });
+
+  it('alerts on explicit probe-down and sustained live SLO gauges', () => {
+    const rules = readFileSync(
+      new URL('../../../ops/alertmanager/control-loop-rules.yml', import.meta.url),
+      'utf8',
+    );
+    const stageRule = rules.match(
+      /- alert:\s*ControlLoopStageBudgetBreached[\s\S]*?(?=\n\s+- alert:)/,
+    )?.[0];
+    const stalledRule = rules.match(
+      /- alert:\s*ControlLoopProbeStalled[\s\S]*$/,
+    )?.[0];
+
+    expect(stageRule).toBeDefined();
+    expect(stageRule).toContain('expr: scada_control_loop_stage_slo_ok == 0');
+    expect(stageRule).toMatch(/\n\s+for:\s*5m/);
+    expect(stageRule).not.toContain('min_over_time');
+    expect(stageRule).not.toContain('max_over_time');
+
+    expect(stalledRule).toBeDefined();
+    expect(stalledRule).toContain('expr: scada_control_loop_probe_up == 0');
+    expect(stalledRule).not.toContain(
+      'scada_control_loop_roundtrip_latency_seconds_count',
+    );
   });
 
   it('creates an isolated, non-control-relevant sentinel blueprint', () => {

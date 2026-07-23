@@ -9,6 +9,7 @@
 #   scada_control_loop_stage_latency_seconds      (histogram, labels: stage, validator)
 #   scada_control_loop_roundtrip_latency_seconds  (histogram, labels: validator)
 #   scada_control_loop_stage_slo_ok               (gauge 1/0, labels: stage, validator)
+#   scada_control_loop_probe_up                    (gauge 1=running, 0=held/down)
 #
 # Per-stage SLO budgets (mirror STAGE_SLO_MS in stage-timestamps.ts):
 #   tick=50ms  batch=100ms  sign=150ms  anchor=5000ms  total(round-trip)=5500ms
@@ -20,12 +21,12 @@ groups:
       # ----------------------------------------------------------------------
       # PRIMARY: a stage stays out of its SLO budget for >5 minutes.
       # Driven by the SLO gauge the instrument sets on every probe cycle
-      # (1 = within budget, 0 = breach). `min_over_time(... [5m]) == 0` means
-      # the stage was breached for the entire window; `for: 5m` requires the
-      # condition to persist, i.e. a sustained >5min breach.
+      # (1 = within budget, 0 = breach). Prometheus's `for: 5m` timer requires
+      # the live gauge to remain zero continuously. A range-vector min/max check
+      # can misclassify a newly-created series with only one sample.
       # ----------------------------------------------------------------------
       - alert: ControlLoopStageBudgetBreached
-        expr: min_over_time(scada_control_loop_stage_slo_ok[5m]) == 0
+        expr: scada_control_loop_stage_slo_ok == 0
         for: 5m
         labels:
           severity: warning
@@ -123,11 +124,12 @@ groups:
             P95 for over 5 minutes.
 
       # ----------------------------------------------------------------------
-      # The probe itself has gone silent (no round-trips observed). Without
-      # samples the SLO gauges go stale, so detect absence explicitly.
+      # The production probe itself is held or down. This uses an explicitly
+      # initialized gauge: querying rate() on an absent histogram returns an
+      # empty vector, which cannot fire an alert for a probe that never started.
       # ----------------------------------------------------------------------
       - alert: ControlLoopProbeStalled
-        expr: sum(rate(scada_control_loop_roundtrip_latency_seconds_count[5m])) == 0
+        expr: scada_control_loop_probe_up == 0
         for: 5m
         labels:
           severity: critical
@@ -135,6 +137,6 @@ groups:
         annotations:
           summary: "Control-loop latency probe is not producing round-trips"
           description: >-
-            No control-loop round-trips have been observed for 5 minutes. The
-            latency probe (sentinel tag flip) may be stopped or the integrity
-            pipeline may be stalled before anchor confirmation.
+            The production latency probe has reported held/down for 5 minutes.
+            The repository may still lack a verified tick/batch/HSM/anchor
+            composition root, or an active probe may have stopped.
