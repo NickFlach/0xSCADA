@@ -8,21 +8,30 @@
  */
 
 import { Router } from "express";
-import type { Request, Response, NextFunction, RequestHandler } from "express";
+import type { Request, Response, RequestHandler } from "express";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
 import { predictiveMaintenanceService } from "../services/predictive";
 import type { SeverityLevel } from "@shared/types/predictive";
 
 const router = Router();
 const engine = predictiveMaintenanceService.engine;
-
-// Auth middleware placeholder — same pattern as other protected routes
-function requireAuth(req: Request, res: Response, next: NextFunction) {
-  // TODO: implement real auth check (JWT / session validation)
-  next();
-}
-router.use(requireAuth);
+const requirePredictiveRead = requireControlPlaneAccess({
+  scopes: ["predictive.read"],
+});
+const requirePredictiveRecommend = requireControlPlaneAccess({
+  scopes: ["predictive.recommend"],
+});
+const requirePredictiveIngest = requireControlPlaneAccess({
+  scopes: ["predictive.ingest"],
+});
+const requirePredictiveConfigure = requireControlPlaneAccess({
+  scopes: ["predictive.configure"],
+});
+const requirePredictiveAcknowledge = requireControlPlaneAccess({
+  scopes: ["predictive.acknowledge"],
+});
 
 /** Express 4 does not catch async rejections — wrap every async handler */
 function asyncHandler(
@@ -96,6 +105,7 @@ const AlertQuerySchema = z.object({
 
 router.post(
   "/ingest",
+  requirePredictiveIngest,
   asyncHandler(async (req, res) => {
     const parsed = IngestSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -126,6 +136,7 @@ router.post(
 // never from a GET.
 router.get(
   "/analyze/:tagId",
+  requirePredictiveRecommend,
   asyncHandler(async (req, res) => {
     const assessment = await engine.analyze(req.params.tagId, { generateAlerts: false });
     if (!assessment) {
@@ -141,6 +152,7 @@ router.get(
 
 router.get(
   "/prediction/:tagId",
+  requirePredictiveRecommend,
   asyncHandler(async (req, res) => {
     const prediction = await engine.predictFailure(req.params.tagId);
     if (!prediction) {
@@ -152,15 +164,15 @@ router.get(
 
 // ── Tags & thresholds ──────────────────────────────────────────────────────
 
-router.get("/tags", (_req, res) => {
+router.get("/tags", requirePredictiveRead, (_req, res) => {
   res.json({ tags: engine.getTrackedTags() });
 });
 
-router.get("/thresholds/:tagId", (req, res) => {
+router.get("/thresholds/:tagId", requirePredictiveRead, (req, res) => {
   res.json(engine.getThresholds(req.params.tagId));
 });
 
-router.put("/thresholds/:tagId", (req, res) => {
+router.put("/thresholds/:tagId", requirePredictiveConfigure, (req, res) => {
   const parsed = ThresholdsSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: fromZodError(parsed.error as any).message });
@@ -213,7 +225,7 @@ router.put("/thresholds/:tagId", (req, res) => {
 
 // ── Alerts ─────────────────────────────────────────────────────────────────
 
-router.get("/alerts", (req, res) => {
+router.get("/alerts", requirePredictiveRead, (req, res) => {
   const parsed = AlertQuerySchema.safeParse(req.query);
   if (!parsed.success) {
     return res.status(400).json({ error: fromZodError(parsed.error as any).message });
@@ -224,18 +236,23 @@ router.get("/alerts", (req, res) => {
   });
 });
 
-router.post("/alerts/:alertId/acknowledge", (req, res) => {
-  const ok = engine.acknowledgeAlert(req.params.alertId);
-  if (!ok) {
-    return res.status(404).json({ error: `Alert ${req.params.alertId} not found` });
+router.post(
+  "/alerts/:alertId/acknowledge",
+  requirePredictiveAcknowledge,
+  (req, res) => {
+    const ok = engine.acknowledgeAlert(req.params.alertId);
+    if (!ok) {
+      return res.status(404).json({ error: `Alert ${req.params.alertId} not found` });
+    }
+    res.json({ acknowledged: true });
   }
-  res.json({ acknowledged: true });
-});
+);
 
 // ── Status ─────────────────────────────────────────────────────────────────
 
 router.get(
   "/status",
+  requirePredictiveRead,
   asyncHandler(async (_req, res) => {
     const health = await predictiveMaintenanceService.healthCheck();
     res.json({ ...engine.getStatus(), ...health });
