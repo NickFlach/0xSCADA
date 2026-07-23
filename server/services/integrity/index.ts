@@ -39,3 +39,13 @@ export type {
   VerificationHook,
   ExplainabilityConfig,
 } from './explainability-monitor';
+
+// Evolutionary resolution + composition root (#492)
+export { EvolutionaryResolver } from './evolutionary/evolutionary-resolver';
+export type {
+  EvolutionaryResolverConfig,
+  EvolutionaryResolution,
+  EvolutionaryResolverStatus,
+} from './evolutionary/evolutionary-resolver';
+export { IntegrityService, integrityService } from './integrity-service';
+export type { IntegrityServiceConfig, IngestOutcome } from './integrity-service';

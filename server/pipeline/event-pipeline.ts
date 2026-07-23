@@ -124,7 +124,27 @@ export class EventPipeline extends EventEmitter {
       this.config.pipeline.dedup_window_ms
     );
 
+    // Register built-in event sources so every pipeline instance shares a
+    // consistent baseline (system + simulator) rather than relying on callers.
+    this.registerDefaultSources();
+
     this.logger.info("EventPipeline initialized", { config: this.config });
+  }
+
+  /** Register the built-in event sources present on every pipeline. */
+  private registerDefaultSources(): void {
+    this.registerSource({
+      id: "system",
+      name: "System Events",
+      type: "system",
+      active: true,
+    });
+    this.registerSource({
+      id: "simulator",
+      name: "PLC Simulator",
+      type: "plc",
+      active: true,
+    });
   }
 
   /**
@@ -406,23 +426,9 @@ let defaultPipeline: EventPipeline | null = null;
 
 export function getDefaultEventPipeline(config?: Partial<EventPipelineConfig>): EventPipeline {
   if (!defaultPipeline) {
+    // Default sources (system + simulator) are registered in the constructor.
     defaultPipeline = createEventPipeline(config);
-    
-    // Register some default event sources
-    defaultPipeline.registerSource({
-      id: "system",
-      name: "System Events",
-      type: "system",
-      active: true,
-    });
-    
-    defaultPipeline.registerSource({
-      id: "simulator",
-      name: "PLC Simulator",
-      type: "plc",
-      active: true,
-    });
   }
-  
+
   return defaultPipeline;
 }
