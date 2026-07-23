@@ -46,11 +46,28 @@ function nextTransactionId(): number {
 }
 
 /**
+ * Per-connection / per-instance Modbus transaction-ID counter (#363). Each
+ * adapter holds its own so transaction IDs are NOT shared across adapters — the
+ * MBAP transaction id matches a response to its request on a given connection,
+ * and a global counter (the former behavior) mixes streams across instances.
+ */
+export class ModbusTransactionCounter {
+  private id = 0;
+  next(): number {
+    const v = this.id & 0xFFFF;
+    this.id = (this.id + 1) & 0xFFFF;
+    return v;
+  }
+}
+
+/**
  * Encode a Modbus TCP (MBAP) request frame.
  * Generic form: MBAP header + function code + payload.
+ * Pass `transactionId` for per-connection sequencing; omit to use the shared
+ * module counter (legacy fallback).
  */
-export function encodeModbusTcpRequest(unitId: number, functionCode: number, payload: Buffer): Buffer {
-  const transId = nextTransactionId();
+export function encodeModbusTcpRequest(unitId: number, functionCode: number, payload: Buffer, transactionId?: number): Buffer {
+  const transId = transactionId !== undefined ? (transactionId & 0xFFFF) : nextTransactionId();
   const mbapHeader = Buffer.alloc(7);
   mbapHeader.writeUInt16BE(transId, 0);            // Transaction ID
   mbapHeader.writeUInt16BE(0x0000, 2);              // Protocol ID (Modbus = 0)
@@ -65,31 +82,31 @@ export function encodeModbusTcpRequest(unitId: number, functionCode: number, pay
 }
 
 /** Build Modbus TCP read request (FC01/02/03/04) */
-export function buildModbusReadRequest(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
+export function buildModbusReadRequest(unitId: number, fc: number, startAddress: number, quantity: number, transactionId?: number): Buffer {
   const payload = Buffer.alloc(4);
   payload.writeUInt16BE(startAddress, 0);
   payload.writeUInt16BE(quantity, 2);
-  return encodeModbusTcpRequest(unitId, fc, payload);
+  return encodeModbusTcpRequest(unitId, fc, payload, transactionId);
 }
 
 /** Build Modbus TCP write single register (FC06) */
-export function buildModbusWriteSingleRegister(unitId: number, address: number, value: number): Buffer {
+export function buildModbusWriteSingleRegister(unitId: number, address: number, value: number, transactionId?: number): Buffer {
   const payload = Buffer.alloc(4);
   payload.writeUInt16BE(address, 0);
   payload.writeUInt16BE(value & 0xFFFF, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_REGISTER, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_REGISTER, payload, transactionId);
 }
 
 /** Build Modbus TCP write single coil (FC05) */
-export function buildModbusWriteSingleCoil(unitId: number, address: number, value: boolean): Buffer {
+export function buildModbusWriteSingleCoil(unitId: number, address: number, value: boolean, transactionId?: number): Buffer {
   const payload = Buffer.alloc(4);
   payload.writeUInt16BE(address, 0);
   payload.writeUInt16BE(value ? 0xFF00 : 0x0000, 2);
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_COIL, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_SINGLE_COIL, payload, transactionId);
 }
 
 /** Build Modbus TCP write multiple registers (FC16) */
-export function buildModbusWriteMultipleRegisters(unitId: number, startAddress: number, values: number[]): Buffer {
+export function buildModbusWriteMultipleRegisters(unitId: number, startAddress: number, values: number[], transactionId?: number): Buffer {
   const byteCount = values.length * 2;
   const payload = Buffer.alloc(5 + byteCount);
   payload.writeUInt16BE(startAddress, 0);
@@ -98,11 +115,11 @@ export function buildModbusWriteMultipleRegisters(unitId: number, startAddress: 
   for (let i = 0; i < values.length; i++) {
     payload.writeUInt16BE(values[i] & 0xFFFF, 5 + i * 2);
   }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_REGISTERS, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_REGISTERS, payload, transactionId);
 }
 
 /** Build Modbus TCP write multiple coils (FC15) */
-export function buildModbusWriteMultipleCoils(unitId: number, startAddress: number, values: boolean[]): Buffer {
+export function buildModbusWriteMultipleCoils(unitId: number, startAddress: number, values: boolean[], transactionId?: number): Buffer {
   const byteCount = Math.ceil(values.length / 8);
   const payload = Buffer.alloc(5 + byteCount);
   payload.writeUInt16BE(startAddress, 0);
@@ -113,5 +130,5 @@ export function buildModbusWriteMultipleCoils(unitId: number, startAddress: numb
       payload[5 + Math.floor(i / 8)] |= (1 << (i % 8));
     }
   }
-  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_COILS, payload);
+  return encodeModbusTcpRequest(unitId, MODBUS_FC.WRITE_MULTIPLE_COILS, payload, transactionId);
 }

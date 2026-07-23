@@ -99,86 +99,6 @@ export const CIP_CLASSES = {
   WALL_CLOCK_TIME: 0x8B,
 } as const;
 
-// ─── CIP Protocol Constants ───────────────────────────────────────────
-
-/** EtherNet/IP encapsulation header commands */
-export const EIP_COMMANDS = {
-  NOP: 0x0000,
-  LIST_SERVICES: 0x0004,
-  LIST_IDENTITY: 0x0063,
-  LIST_INTERFACES: 0x0064,
-  REGISTER_SESSION: 0x0065,
-  UNREGISTER_SESSION: 0x0066,
-  SEND_RR_DATA: 0x006F,      // Connected/Unconnected Send
-  SEND_UNIT_DATA: 0x0070,    // Connected data
-} as const;
-
-/** CIP service codes */
-export const CIP_SERVICES = {
-  GET_ATTRIBUTE_ALL: 0x01,
-  GET_ATTRIBUTE_SINGLE: 0x0E,
-  SET_ATTRIBUTE_SINGLE: 0x10,
-  READ_TAG: 0x4C,
-  READ_TAG_FRAGMENTED: 0x52,
-  WRITE_TAG: 0x4D,
-  WRITE_TAG_FRAGMENTED: 0x53,
-  READ_MODIFY_WRITE: 0x4E,
-  MULTIPLE_SERVICE_PACKET: 0x0A,
-  FORWARD_OPEN: 0x54,
-  FORWARD_CLOSE: 0x4E,
-  LARGE_FORWARD_OPEN: 0x5B,
-  GET_CONNECTION_DATA: 0x56,
-} as const;
-
-/** CIP general status codes */
-export const CIP_STATUS = {
-  SUCCESS: 0x00,
-  CONNECTION_FAILURE: 0x01,
-  RESOURCE_UNAVAILABLE: 0x02,
-  INVALID_PARAMETER: 0x03,
-  PATH_SEGMENT_ERROR: 0x04,
-  PATH_DESTINATION_UNKNOWN: 0x05,
-  PARTIAL_TRANSFER: 0x06,
-  CONNECTION_LOST: 0x07,
-  SERVICE_NOT_SUPPORTED: 0x08,
-  INVALID_ATTRIBUTE: 0x09,
-  ATTRIBUTE_LIST_ERROR: 0x0A,
-  ALREADY_IN_STATE: 0x0B,
-  OBJECT_STATE_CONFLICT: 0x0C,
-  OBJECT_ALREADY_EXISTS: 0x0D,
-  ATTRIBUTE_NOT_SETTABLE: 0x0E,
-  PRIVILEGE_VIOLATION: 0x0F,
-  DEVICE_STATE_CONFLICT: 0x10,
-  REPLY_DATA_TOO_LARGE: 0x11,
-  FRAGMENTATION_OF_PRIMITIVE: 0x12,
-  NOT_ENOUGH_DATA: 0x13,
-  ATTRIBUTE_NOT_SUPPORTED: 0x14,
-  TOO_MUCH_DATA: 0x15,
-  OBJECT_DOES_NOT_EXIST: 0x16,
-  KEY_FAILURE_IN_PATH: 0x25,
-  INVALID_MEMBER: 0x28,
-  MEMBER_NOT_SETTABLE: 0x29,
-} as const;
-
-/** CIP object class IDs */
-export const CIP_CLASSES = {
-  IDENTITY: 0x01,
-  MESSAGE_ROUTER: 0x02,
-  DEVICE_NET: 0x03,
-  ASSEMBLY: 0x04,
-  CONNECTION: 0x05,
-  CONNECTION_MANAGER: 0x06,
-  REGISTER: 0x07,
-  PARAMETER: 0x0F,
-  PORT: 0xF4,
-  TCP_IP: 0xF5,
-  ETHERNET_LINK: 0xF6,
-  SYMBOL: 0x6B,
-  TEMPLATE: 0x6C,
-  PROGRAM: 0x68,
-  WALL_CLOCK_TIME: 0x8B,
-} as const;
-
 // Rockwell-specific register mappings from SIN
 export const ROCKWELL_REGISTER_MAP = {
   IDENTITY: { classId: CIP_CLASSES.IDENTITY, instanceId: 1, attributeId: 1 },
@@ -960,7 +880,6 @@ export class RockwellVendorAdapter extends VendorBaseAdapter<'protocol'> impleme
 
   startPollingByTier(addresses: string[], tier: keyof typeof ROCKWELL_POLLING, callback: (tags: AdapterTag[]) => void): string {
     return this.startPolling(addresses, ROCKWELL_POLLING[tier], callback, tier);
-  }
   }
 
   // ─── Helpers ──────────────────────────────────────────────────────
