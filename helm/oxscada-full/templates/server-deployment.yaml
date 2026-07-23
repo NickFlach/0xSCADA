@@ -28,6 +28,17 @@ spec:
               value: {{ .Values.server.env.DATABASE_URL }}
             - name: PORT
               value: "{{ .Values.server.port }}"
+            - name: OXSCADA_REPLICA_COUNT
+              value: "{{ .Values.server.replicaCount }}"
+            - name: ENABLE_API_KEYS
+              value: {{ .Values.server.apiKeys.enableGlobalAuth | quote }}
+            {{- with .Values.server.apiKeys.existingSecret }}
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: {{ $.Values.server.apiKeys.secretKey | quote }}
+            {{- end }}
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}
           livenessProbe:

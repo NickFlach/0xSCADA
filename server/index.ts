@@ -196,6 +196,11 @@ app.use((req, res, next) => {
       const { natsPublisher } = await import("./services/nats");
       await natsPublisher.connect();
 
+      // Record the boot-resolved anchor routing: runtime switches (#455) are
+      // process-local, so a restart reverts to env and this makes that visible.
+      const { logAnchorBackendBootState } = await import("./bridge/anchor-backend");
+      logAnchorBackendBootState();
+
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);
     },

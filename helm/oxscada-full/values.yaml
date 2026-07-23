@@ -13,6 +13,15 @@ server:
     repository: "{{ .Values.global.imageRegistry }}/server"
     tag: latest
   port: 3000
+  apiKeys:
+    # API_KEYS is read from this pre-created Secret; the chart never generates
+    # or stores an API credential. Leave empty only if control-plane access is
+    # intentionally unavailable.
+    existingSecret: ""
+    secretKey: API_KEYS
+    # Enables API key authentication for the entire API gateway. Control-plane
+    # routes require API_KEYS independently of this setting.
+    enableGlobalAuth: false
   resources:
     requests:
       cpu: 250m
