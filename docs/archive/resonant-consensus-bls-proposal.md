@@ -1,4 +1,15 @@
-# Resonant Consensus Protocol: Signal → Resonance → Emergence
+# Proposal: Resonant-BLS Consensus Variant (NOT ADOPTED)
+
+> **ARCHIVED 2026-07-21 — this design was never implemented.**
+>
+> Two unrelated protocols historically shared the name "Resonant Consensus"
+> (issue #441). The canonical protocol — the one implemented and shipping in
+> the Rust validator node — is **Kuramoto-BFT**: phase-coupled oscillators
+> with Raft fallback and ed25519 attestations. Its spec is
+> [0xSCADA-node ADR-0001](https://github.com/NickFlach/0xSCADA-node/blob/main/docs/adr/ADR-0001-resonant-consensus.md).
+>
+> The BLS-aggregate-signature, `2f+1`-threshold design below is kept only as
+> a historical proposal. Do not build against it.
 
 > Issue #144: [Protocol] Design resonant consensus
 

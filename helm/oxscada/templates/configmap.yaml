@@ -9,3 +9,6 @@ data:
   SERVER_PORT: "{{ .Values.server.port }}"
   GATEWAY_PORT: "{{ .Values.gateway.port }}"
   CLIENT_PORT: "{{ .Values.client.port }}"
+  RATE_LIMITER_BACKEND: "{{ .Values.rateLimiter.backend }}"
+  REDIS_HOST: "{{ .Values.redis.host }}"
+  REDIS_PORT: "{{ .Values.redis.port }}"
