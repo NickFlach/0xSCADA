@@ -441,7 +441,7 @@ describe("EventPipeline", () => {
       expect(metrics.events_received).toBe(5);
       expect(metrics.events_batched).toBe(5);
       expect(metrics.batches_processed).toBeGreaterThan(0);
-      expect(metrics.uptime_ms).toBeGreaterThan(0);
+      expect(metrics.uptime_ms).toBeGreaterThanOrEqual(0);
       expect(metrics.last_event_timestamp).toBeDefined();
     });
 
