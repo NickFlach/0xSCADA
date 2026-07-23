@@ -100,25 +100,29 @@ describe('App Startup Integration', () => {
 
   test('health endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/health`);
-    expect(response.ok).toBe(true);
-    
-    const data = await response.json();
+    const body = await response.text();
+    // Include the response body so a failing required check names itself in CI.
+    expect(response.ok, `GET /api/health -> ${response.status}: ${body}`).toBe(true);
+
+    const data = JSON.parse(body);
     expect(data).toHaveProperty('status');
     expect(['healthy', 'degraded']).toContain(data.status);
-    expect(data.healthy).toBe(true);
+    expect(data.healthy, `health components: ${body}`).toBe(true);
   });
 
   test('readiness endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/readyz`);
-    expect(response.ok).toBe(true);
-    
-    const data = await response.json();
+    const body = await response.text();
+    expect(response.ok, `GET /api/readyz -> ${response.status}: ${body}`).toBe(true);
+
+    const data = JSON.parse(body);
     expect(data).toHaveProperty('status');
   });
 
   test('server responds to basic requests', async () => {
     const response = await fetch(`${baseUrl}/api/health`);
-    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(response.status, `GET /api/health -> ${response.status}: ${body}`).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/json');
   });
 
