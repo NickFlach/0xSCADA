@@ -279,7 +279,7 @@ export class Dnp3Outstation {
       const [type, idxStr] = key.split(':') as [Dnp3PointType, string];
       const index = Number(idxStr);
       const def = this.ctx.pointMap.getPoint(type, index);
-      if (!def || !def.eventClass || def.eventClass === 0) continue;
+      if (!def || !def.eventClass) continue;
       const resolved = this.ctx.pointMap.resolve(def.type, def.index);
       if (!resolved) continue;
       this.ctx.eventBuffer.enqueue({
