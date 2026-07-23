@@ -12,6 +12,37 @@ import {
   colors,
 } from "../output.js";
 
+interface Tag {
+  id?: string;
+  tagId?: string;
+  name?: string;
+  value?: unknown;
+  currentValue?: unknown;
+  unit?: string;
+  engineeringUnit?: string;
+  quality?: string;
+  timestamp?: string;
+  updatedAt?: string;
+  dataType?: string;
+  type?: string;
+  gatewayId?: string;
+  description?: string;
+}
+
+interface TagListResponse {
+  tags?: Tag[];
+}
+
+interface TagHistoryPoint {
+  timestamp?: string;
+  value?: unknown;
+  quality?: string;
+}
+
+interface TagHistoryResponse {
+  history?: TagHistoryPoint[];
+}
+
 export function registerTagsCommand(program: Command): void {
   const tags = program
     .command("tags")
@@ -29,10 +60,10 @@ export function registerTagsCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get(`/api/tags/${tagId}`);
+        const response = await api.get<Tag>(`/api/tags/${tagId}`);
         spinner?.succeed(`Tag ${tagId} read`);
 
-        const tag = response.data;
+        const tag = response.data ?? ({} as Tag);
 
         if (options.raw) {
           console.log(tag.value ?? tag.currentValue ?? "");
@@ -78,17 +109,18 @@ export function registerTagsCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get("/api/tags", {
-          params: {
-            ...(options.gateway && { gatewayId: options.gateway }),
-            ...(options.site && { siteId: options.site }),
-            ...(options.search && { search: options.search }),
-            limit: parseInt(options.limit),
-          },
-        });
+        const query = new URLSearchParams();
+        if (options.gateway) query.set("gatewayId", options.gateway);
+        if (options.site) query.set("siteId", options.site);
+        if (options.search) query.set("search", options.search);
+        query.set("limit", String(parseInt(options.limit)));
+        const response = await api.get<TagListResponse | Tag[]>(
+          `/api/tags?${query.toString()}`
+        );
         spinner?.succeed("Tags retrieved");
 
-        const tagList = response.data?.tags ?? response.data ?? [];
+        const data = response.data;
+        const tagList: Tag[] = Array.isArray(data) ? data : data?.tags ?? [];
 
         if (options.json) {
           output(tagList);
@@ -104,7 +136,7 @@ export function registerTagsCommand(program: Command): void {
         for (const tag of tagList) {
           const qualityColor = tag.quality === "Good" ? colors.green : colors.yellow;
           console.log(
-            `  ${colors.cyan(tag.id ?? tag.tagId)} ${tag.name ?? "—"} = ${colors.bold(String(tag.value ?? "—"))} ${tag.unit ?? ""} [${qualityColor(tag.quality ?? "?")}]`
+            `  ${colors.cyan(tag.id ?? tag.tagId ?? "—")} ${tag.name ?? "—"} = ${colors.bold(String(tag.value ?? "—"))} ${tag.unit ?? ""} [${qualityColor(tag.quality ?? "?")}]`
           );
         }
       } catch (error: any) {
@@ -155,16 +187,19 @@ export function registerTagsCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get(`/api/tags/${tagId}/history`, {
-          params: {
-            ...(options.from && { from: options.from }),
-            ...(options.to && { to: options.to }),
-            limit: parseInt(options.limit),
-          },
-        });
+        const query = new URLSearchParams();
+        if (options.from) query.set("from", options.from);
+        if (options.to) query.set("to", options.to);
+        query.set("limit", String(parseInt(options.limit)));
+        const response = await api.get<TagHistoryResponse | TagHistoryPoint[]>(
+          `/api/tags/${tagId}/history?${query.toString()}`
+        );
         spinner?.succeed("History retrieved");
 
-        const points = response.data?.history ?? response.data ?? [];
+        const data = response.data;
+        const points: TagHistoryPoint[] = Array.isArray(data)
+          ? data
+          : data?.history ?? [];
 
         if (options.json) {
           output(points);

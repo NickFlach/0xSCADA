@@ -142,9 +142,10 @@ describe("EventBatcher", () => {
     });
 
     it("should flush batch when max_batch_size_bytes exceeded", async () => {
-      // Use small size limit
+      // Use the smallest valid size limit (schema minimum is 1024 bytes) and a
+      // payload large enough to push a single event's serialized batch past it.
       const smallBatcher = new EventBatcher({
-        max_batch_size_bytes: 100, // Very small limit
+        max_batch_size_bytes: 1024,
         log_level: "error",
       });
 
@@ -152,18 +153,18 @@ describe("EventBatcher", () => {
         smallBatcher.once("batch", resolve);
       });
 
-      // Create large event that will exceed size limit
+      // Create large event that will exceed the size limit on its own.
       const largeEvent: Event = {
         ...mockEvent,
-        payload: { large_data: "x".repeat(200) },
-        payload_hash: crypto.createHash("sha256").update("x".repeat(200)).digest("hex"),
+        payload: { large_data: "x".repeat(2048) },
+        payload_hash: crypto.createHash("sha256").update("x".repeat(2048)).digest("hex"),
       };
 
       await smallBatcher.ingest(largeEvent);
 
       const batch = await batchPromise;
       expect(batch.events).toHaveLength(1);
-      expect(batch.metrics.batch_size_bytes).toBeGreaterThan(100);
+      expect(batch.metrics.batch_size_bytes).toBeGreaterThan(1024);
 
       await smallBatcher.shutdown();
     });
@@ -205,24 +206,35 @@ describe("EventBatcher", () => {
 
   describe("Merkle Tree Operations", () => {
     it("should generate valid Merkle proofs", async () => {
+      // Use a dedicated batcher whose count threshold is high enough that all
+      // four events stay queued until the explicit flush, so the resulting
+      // batch contains every event we generate proofs for.
+      const proofBatcher = new EventBatcher({
+        max_events_per_batch: 10,
+        max_batch_time_ms: 1000,
+        log_level: "error",
+      });
+
       const events = [];
       for (let i = 0; i < 4; i++) {
         const event = { ...mockEvent, sequence_number: i, source_id: `source-${i}` };
         events.push(event);
-        await batcher.ingest(event);
+        await proofBatcher.ingest(event);
       }
 
-      const batch = await batcher.flush();
+      const batch = await proofBatcher.flush();
       expect(batch).toBeDefined();
 
       if (batch) {
         // Generate proof for each event
         for (let i = 0; i < events.length; i++) {
-          const proof = batcher.generateProof(batch, i);
-          const isValid = batcher.verifyProof(events[i], i, proof, batch.merkle_root);
+          const proof = proofBatcher.generateProof(batch, i);
+          const isValid = proofBatcher.verifyProof(events[i], i, proof, batch.merkle_root);
           expect(isValid).toBe(true);
         }
       }
+
+      await proofBatcher.shutdown();
     });
 
     it("should reject invalid proofs", async () => {
@@ -402,22 +414,32 @@ describe("EventBatcher", () => {
 
   describe("Event Ordering", () => {
     it("should preserve event order within batches", async () => {
+      // Use a batcher whose count threshold exceeds the number of events so the
+      // explicit flush produces a single batch containing all of them in order.
+      const orderBatcher = new EventBatcher({
+        max_events_per_batch: 10,
+        max_batch_time_ms: 1000,
+        log_level: "error",
+      });
+
       const events = [];
       for (let i = 0; i < 3; i++) {
         const event = { ...mockEvent, sequence_number: i, source_id: `source-${i}` };
         events.push(event);
-        await batcher.ingest(event);
+        await orderBatcher.ingest(event);
       }
 
-      const batch = await batcher.flush();
+      const batch = await orderBatcher.flush();
       expect(batch?.events).toHaveLength(3);
-      
+
       if (batch) {
         for (let i = 0; i < 3; i++) {
           expect(batch.events[i].sequence_number).toBe(i);
           expect(batch.events[i].source_id).toBe(`source-${i}`);
         }
       }
+
+      await orderBatcher.shutdown();
     });
   });
 });
