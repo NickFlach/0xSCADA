@@ -1,7 +1,8 @@
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { getFluxPublisher } from "./services/flux";
-import { dispatchAnchorEvent } from "./bridge";
+import { natsPublisher } from "./services/nats";
+import { getAnchorPipeline } from "./bridge";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -115,25 +116,35 @@ class FieldSimulator {
         });
       } catch { /* WebSocket not connected — that's fine */ }
 
-      // Route through the canonical runtime-selected anchor backend(s).
+      // Publish to NATS for blockchain anchoring (canonical wire schema, #440)
       try {
-        await dispatchAnchorEvent({
-          id: `sim-${asset.id}-${Date.now()}`,
-          timestamp: new Date(),
-          eventType,
-          siteId: asset.siteId,
-          severity: asset.critical ? "critical" : "info",
-          message: details,
-          data: {
-            asset: asset.nameOrTag,
-            siteName: asset.siteName,
-            assetType: asset.assetType,
-            payload,
-          },
+        natsPublisher.publishScadaEvent({
+          asset: asset.nameOrTag,
+          event_type: eventType,
+          site_id: asset.siteId,
+          site_name: asset.siteName,
+          asset_type: asset.assetType,
+          timestamp: new Date().toISOString(),
+          payload: payload,
+          details: details,
         });
-      } catch (error) {
-        logWarn(`Anchor queue rejected simulator event: ${error}`, "simulator");
-      }
+      } catch { /* NATS not connected — that's fine */ }
+
+      // Feed the real L2 anchor chain (#489), when active. getAnchorPipeline()
+      // is null unless ANCHOR_BACKEND=l2|both, so this is a no-op on the default
+      // node path. The pipeline hashes → batches → merkle → signs → anchors.
+      try {
+        const anchor = getAnchorPipeline();
+        if (anchor) {
+          await anchor.ingestEvent({
+            id: `${asset.id}-${eventType}-${Date.now()}`,
+            timestamp: Date.now(),
+            type: eventType,
+            source: asset.nameOrTag,
+            data: { siteId: asset.siteId, assetType: asset.assetType, details, ...(typeof payload === 'object' && payload ? payload : { value: payload }) },
+          });
+        }
+      } catch { /* anchor pipeline not started — that's fine */ }
     } catch (error) {
       logError("❌ Failed to generate event", error as any);
     }

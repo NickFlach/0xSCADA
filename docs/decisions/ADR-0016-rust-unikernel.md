@@ -74,7 +74,7 @@ Every 0xSCADA-OS node is simultaneously:
 1. **A SCADA controller** — reads sensors, drives actuators, runs control logic
 2. **A Flux entity** — publishes state to the world graph, subscribes to peers, reacts to cross-network events
 3. **An Ethereum attestor** — batches events into Merkle roots, anchors to L2, verifies proofs from peers
-4. **A consensus participant** — resonant consensus (RCP) for local cluster agreement
+4. **A consensus participant** — resonant consensus (Kuramoto-BFT, see 0xSCADA-node ADR-0001) for local cluster agreement
 5. **A chiral network node** — Byzantine-resistant routing with L-path/R-path separation
 
 The SIN forms when nodes discover each other via Flux and establish chiral routing relationships. There is no central coordinator. The network self-organizes via gossip + resonant consensus.
@@ -171,7 +171,7 @@ No ethers.js, no JSON-RPC proxy. The kernel speaks Ethereum natively:
 - secp256k1, Keccak-256, RLP encoding
 - Merkle tree construction + proof verification
 - Batch anchor submission to L2
-- Resonant consensus protocol (signal → resonance → emergence)
+- Resonant consensus protocol (Kuramoto-BFT — see 0xSCADA-node ADR-0001)
 - Bidirectional state sync
 
 ### Phase 4: Production Hardening (Weeks 27+)
@@ -229,7 +229,7 @@ No ethers.js, no JSON-RPC proxy. The kernel speaks Ethereum natively:
 
 ## References
 
-- Existing docs: `kernel-fork-plan.md`, `chiral-network-stack.md`, `resonant-consensus.md`, `resonant-scheduler.md`, `l2-kernel-integration.md`, `bidirectional-sync.md`, `decentralized-orchestration.md`
+- Existing docs: `kernel-fork-plan.md`, `chiral-network-stack.md`, `archive/resonant-consensus-bls-proposal.md` (archived proposal — canonical spec is 0xSCADA-node ADR-0001), `resonant-scheduler.md`, `l2-kernel-integration.md`, `bidirectional-sync.md`, `decentralized-orchestration.md`
 - Rust OS resources: [Writing an OS in Rust (phil-opp)](https://os.phil-opp.com/), [Redox OS](https://www.redox-os.org/), [Theseus OS](https://github.com/theseus-os/Theseus)
 - smoltcp: https://github.com/smoltcp-rs/smoltcp
 - Flux: https://flux.eckman-tech.com

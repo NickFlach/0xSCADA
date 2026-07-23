@@ -136,8 +136,13 @@ export interface ProcessAreaRules {
   physicsConstraints: PhysicsConstraint[];
   /** Sensor priority order (highest first) */
   sensorPriority: string[];
-  /** Auto-resolve threshold: conflicts below this severity auto-resolve */
-  autoResolveSeverity: ConflictDetection['severity'];
+  /**
+   * Auto-resolve threshold: conflicts at/below this severity auto-resolve.
+   * Optional (#451): when omitted, the area defers to the global
+   * `autoResolveLowSeverity` switch, so an operator can flip that off as a
+   * real kill-switch. When set, the area opts in regardless of the global flag.
+   */
+  autoResolveSeverity?: ConflictDetection['severity'];
   /** Custom confidence weight overrides per device */
   deviceConfidenceOverrides: Record<string, number>;
 }
@@ -153,6 +158,14 @@ export interface ParadoxResolverConfig {
   qualityWeight: number;
   /** Default minimum quorum for voting strategy */
   defaultVotingQuorum: number;
+  /**
+   * When true, `ingestEvent` detects conflicts but NEVER resolves them —
+   * resolution is driven externally (e.g. by the EvolutionaryResolver via the
+   * IntegrityService, #492). This is a hard master switch that overrides even a
+   * process area's explicit `autoResolveSeverity`, so a conflict is committed
+   * exactly once by the external owner rather than double-committed.
+   */
+  externalResolution: boolean;
 }
 
 const DEFAULT_CONFIG: ParadoxResolverConfig = {
@@ -161,7 +174,18 @@ const DEFAULT_CONFIG: ParadoxResolverConfig = {
   autoResolveLowSeverity: true,
   qualityWeight: 0.7,
   defaultVotingQuorum: 3,
+  externalResolution: false,
 };
+
+/**
+ * Coerce a sensor-confidence value to a usable weight in [0, 1].
+ * `?? fallback` does NOT catch NaN (NaN is not null/undefined), so a NaN or
+ * out-of-range confidence would otherwise poison weighted merges (#451 minor).
+ */
+function sanitizeConfidence(value: number | undefined, fallback: number): number {
+  if (value === undefined || !Number.isFinite(value)) return fallback;
+  return value < 0 ? 0 : value > 1 ? 1 : value;
+}
 
 // ─── Built-in Physics Constraints ───────────────────────────────────────────
 
@@ -329,11 +353,22 @@ export class ParadoxResolver extends EventEmitter {
   }
 
   private shouldAutoResolve(conflict: ConflictDetection, areaRules: ProcessAreaRules | null): boolean {
-    const threshold = areaRules?.autoResolveSeverity ?? 'low';
+    // Hard master switch (#492): when resolution is owned externally, never
+    // auto-resolve internally — otherwise the conflict is committed twice
+    // (once here, once by the external resolver).
+    if (this.config.externalResolution) return false;
+
     const severityOrder = ['low', 'medium', 'high', 'critical'];
     const conflictLevel = severityOrder.indexOf(conflict.severity);
-    const thresholdLevel = severityOrder.indexOf(threshold);
-    return this.config.autoResolveLowSeverity && conflictLevel <= thresholdLevel;
+
+    // An area that explicitly configured autoResolveSeverity opts in regardless
+    // of the global autoResolveLowSeverity default (#451 minor): the two are
+    // separate controls, and conflating them silently disabled per-area policy.
+    if (areaRules?.autoResolveSeverity !== undefined) {
+      return conflictLevel <= severityOrder.indexOf(areaRules.autoResolveSeverity);
+    }
+
+    return this.config.autoResolveLowSeverity && conflictLevel <= severityOrder.indexOf('low');
   }
 
   // ─── Conflict Detection ─────────────────────────────────────────────────
@@ -470,6 +505,18 @@ export class ParadoxResolver extends EventEmitter {
       }
     }
 
+    this.commitResolution(conflict, resolution);
+    return resolution;
+  }
+
+  /**
+   * Record a resolution into the resolver's maps and emit the `resolved` /
+   * `resolved_event` events. Factored out of `resolve()` so an external
+   * strategy (e.g. the EvolutionaryResolver, #492) can commit its own
+   * resolution through the same path — otherwise downstream ADR-0024/0025
+   * listeners never see evolved resolutions.
+   */
+  commitResolution(conflict: ConflictDetection, resolution: Resolution): ResolvedEvent {
     this.resolutions.set(conflict.conflictId, resolution);
     this.enforceMapLimit(this.conflicts, ParadoxResolver.MAX_MAP_SIZE);
     this.enforceMapLimit(this.resolutions, ParadoxResolver.MAX_MAP_SIZE);
@@ -481,7 +528,43 @@ export class ParadoxResolver extends EventEmitter {
 
     this.emit('resolved', resolution);
     this.emit('resolved_event', resolved);
-    return resolution;
+    return resolved;
+  }
+
+  // ─── Read accessors for external resolvers (#492 ConflictContext) ─────────
+
+  /**
+   * Recent readings for a tag (oldest→newest) from the voting window,
+   * optionally excluding a set of event ids (e.g. the conflict's own events).
+   */
+  getRecentReadings(tag: string, excludeIds?: Set<string>): ScadaEvent[] {
+    const window = this.tagEventWindow.get(tag) ?? [];
+    const filtered = excludeIds ? window.filter(e => !excludeIds.has(e.id)) : window;
+    return [...filtered].sort((a, b) => a.timestamp.getTime() - b.timestamp.getTime());
+  }
+
+  /** Latest known value for a tag, or undefined if never seen. */
+  getLatestValue(tag: string): unknown | undefined {
+    return this.tagLatest.get(tag)?.value;
+  }
+
+  /**
+   * Tags linked to `tag` via a shared physics constraint (global + area) —
+   * a reasonable "neighbor" set for correlation checks.
+   */
+  getNeighborTags(tag: string, area?: string): string[] {
+    const areaRules = this.getRulesForArea(area);
+    const constraints = [
+      ...this.globalPhysicsConstraints,
+      ...(areaRules?.physicsConstraints ?? []),
+    ];
+    const neighbors = new Set<string>();
+    for (const c of constraints) {
+      if (c.tags.includes(tag)) {
+        for (const t of c.tags) if (t !== tag) neighbors.add(t);
+      }
+    }
+    return Array.from(neighbors);
   }
 
   /** Pick the best strategy for simultaneous readings */
@@ -538,6 +621,17 @@ export class ParadoxResolver extends EventEmitter {
       }
     }
 
+    // Quorum + empty guard (#451 B3): voting is only valid with enough distinct
+    // devices. Callers other than resolveByBestStrategy (e.g. an area's
+    // preferredStrategy='voting') reach here without a prior quorum check, and
+    // the per-tag window can be empty by the time a deferred conflict resolves.
+    // Fall back to confidence weighting rather than crash or "vote" with one
+    // device at confidence 1.0.
+    const quorum = areaRules?.minVotingQuorum ?? this.config.defaultVotingQuorum;
+    if (byDevice.size < quorum) {
+      return this.resolveByConfidenceWeighting(conflict, areaRules);
+    }
+
     // Count votes per value (for numeric, bucket to nearest integer)
     const votes = new Map<string, { count: number; events: ScadaEvent[] }>();
     for (const event of byDevice.values()) {
@@ -551,7 +645,7 @@ export class ParadoxResolver extends EventEmitter {
     }
 
     // Find majority
-    let bestKey = '';
+    let bestKey: string | undefined;
     let bestCount = 0;
     for (const [key, bucket] of votes) {
       if (bucket.count > bestCount) {
@@ -560,19 +654,24 @@ export class ParadoxResolver extends EventEmitter {
       }
     }
 
-    const winnerBucket = votes.get(bestKey)!;
+    const winnerBucket = bestKey !== undefined ? votes.get(bestKey) : undefined;
+    if (!winnerBucket) {
+      // No countable votes — defer to confidence weighting.
+      return this.resolveByConfidenceWeighting(conflict, areaRules);
+    }
     const totalVotes = byDevice.size;
     const confidence = bestCount / totalVotes;
 
     // For numeric values, use weighted average of the winning group
     let finalValue: unknown;
     if (winnerBucket.events.every(e => typeof e.value === 'number')) {
-      const weights = winnerBucket.events.map(e => e.sensorConfidence ?? this.qualityScore(e));
+      const weights = winnerBucket.events.map(e => sanitizeConfidence(e.sensorConfidence, this.qualityScore(e)));
       const totalWeight = weights.reduce((a, b) => a + b, 0);
-      finalValue = winnerBucket.events.reduce(
-        (sum, e, i) => sum + (e.value as number) * weights[i],
-        0,
-      ) / totalWeight;
+      // Zero-weight guard (#451 minor): if every winning reading has zero
+      // effective weight, a weighted mean is NaN — use the plain mean instead.
+      finalValue = totalWeight > 0
+        ? winnerBucket.events.reduce((sum, e, i) => sum + (e.value as number) * weights[i], 0) / totalWeight
+        : winnerBucket.events.reduce((sum, e) => sum + (e.value as number), 0) / winnerBucket.events.length;
     } else {
       finalValue = winnerBucket.events[0].value;
     }
@@ -595,9 +694,20 @@ export class ParadoxResolver extends EventEmitter {
     areaRules: ProcessAreaRules | null,
   ): Resolution {
     const events = conflict.events;
+    // Empty guard (#451 minor): a voting fallback or external resolve() call
+    // can arrive with no events; `scored[0]` would be undefined.
+    if (events.length === 0) {
+      return {
+        conflictId: conflict.conflictId,
+        method: 'confidence_weighted',
+        confidence: 0,
+        reasoning: 'No events available to resolve',
+        resolvedAt: new Date(),
+      };
+    }
     const scored = events.map(e => {
       const override = areaRules?.deviceConfidenceOverrides[e.deviceId];
-      const sensorConf = override ?? e.sensorConfidence ?? 0.5;
+      const sensorConf = sanitizeConfidence(override ?? e.sensorConfidence, 0.5);
       const qualityMult = { good: 1.0, uncertain: 0.5, bad: 0.1 }[e.quality];
       return { event: e, score: sensorConf * qualityMult };
     });

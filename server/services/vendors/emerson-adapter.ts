@@ -26,7 +26,7 @@ import {
   MODBUS_EXCEPTION,
   buildModbusReadRequest,
   buildModbusWriteSingleRegister as sharedBuildWriteSingle,
-  buildModbusWriteMultipleRegisters as sharedBuildWriteMultiple,
+  ModbusTransactionCounter,
 } from './modbus-utils';
 
 // ─── HART Protocol Constants ──────────────────────────────────────────
@@ -197,7 +197,7 @@ interface HartAddress {
 }
 
 /** Encode a HART short-frame request */
-function encodeHartShortFrame(pollingAddress: number, command: number, data: Buffer = Buffer.alloc(0), isPrimary: boolean = true): Buffer {
+export function encodeHartShortFrame(pollingAddress: number, command: number, data: Buffer = Buffer.alloc(0), isPrimary: boolean = true): Buffer {
   const preambleCount = EMERSON_CONNECTION_PARAMS.hart.preambleBytes;
   const frameLen = preambleCount + 1 + 1 + 1 + 1 + data.length + 1; // preamble + delimiter + addr + command + byteCount + data + checksum
   const buf = Buffer.alloc(frameLen);
@@ -385,11 +385,9 @@ function parseHartCmd3Response(data: Buffer): {
 }
 
 // ─── Modbus TCP Frame Encoding (delegated to shared modbus-utils) ────
-
-/** Alias for backward compatibility */
-const buildModbusTcpRequest = buildModbusReadRequest;
-const buildModbusWriteSingleRegister = sharedBuildWriteSingle;
-const buildModbusWriteMultipleRegisters = sharedBuildWriteMultiple;
+// Modbus requests go through the per-instance wrapper methods (mbRead/mbWriteReg)
+// so transaction IDs are per-instance (#363); the former module-level aliases
+// shared the global counter and are removed.
 
 /** Parse Modbus TCP response */
 function parseModbusTcpResponse(buf: Buffer): { unitId: number; fc: number; data: Buffer; isException: boolean; exceptionCode?: number } {
@@ -469,6 +467,16 @@ export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
   readonly protocols = ['hart', 'foundation-fieldbus', 'modbus', 'modbus-tcp'];
 
   private connections: Map<string, ProtocolConnection> = new Map();
+
+  /** Per-instance Modbus transaction-ID counter (#363). */
+  private readonly modbusTx = new ModbusTransactionCounter();
+
+  private mbRead(unitId: number, fc: number, startAddress: number, quantity: number): Buffer {
+    return buildModbusReadRequest(unitId, fc, startAddress, quantity, this.modbusTx.next());
+  }
+  private mbWriteReg(unitId: number, address: number, value: number): Buffer {
+    return sharedBuildWriteSingle(unitId, address, value, this.modbusTx.next());
+  }
   private hartDevices: Map<number, { manufacturerId: number; deviceType: number; deviceId: number; tag: string }> = new Map();
 
   protected async doInitialize(context: AdapterContext): Promise<void> {
@@ -580,7 +588,7 @@ export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
     const fc = register >= 30000 ? MODBUS_FC.READ_INPUT_REGISTERS : MODBUS_FC.READ_HOLDING_REGISTERS;
     const actualRegister = register >= 40000 ? register - 40001 : register >= 30000 ? register - 30001 : register;
 
-    const request = buildModbusTcpRequest(EMERSON_CONNECTION_PARAMS.modbus.unitId, fc, actualRegister, 1);
+    const request = this.mbRead(EMERSON_CONNECTION_PARAMS.modbus.unitId, fc, actualRegister, 1);
     this.messagesProcessed++;
 
     const cached = this.tagCache.get(address);
@@ -624,7 +632,7 @@ export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
         case 'modbus': {
           const reg = parsed.register ?? 0;
           const writeAddr = reg >= 40000 ? reg - 40001 : reg;
-          const request = buildModbusWriteSingleRegister(EMERSON_CONNECTION_PARAMS.modbus.unitId, writeAddr, Number(tag.value));
+          const request = this.mbWriteReg(EMERSON_CONNECTION_PARAMS.modbus.unitId, writeAddr, Number(tag.value));
           this.messagesProcessed++;
           break;
         }
@@ -653,7 +661,7 @@ export class EmersonVendorAdapter extends VendorBaseAdapter<'protocol'> implemen
 
     // Modbus: Scan unit IDs 1-247
     for (let unitId = 1; unitId <= 10; unitId++) { // Limited scan
-      const request = buildModbusTcpRequest(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, 0, 1);
+      const request = this.mbRead(unitId, MODBUS_FC.READ_HOLDING_REGISTERS, 0, 1);
       this.messagesProcessed++;
     }
 
