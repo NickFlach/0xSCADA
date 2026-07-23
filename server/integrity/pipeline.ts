@@ -63,7 +63,14 @@ export class EventIntegrityPipeline extends EventEmitter {
     try {
       // Hash the event
       const hashedEvent = this.hashEvent(event);
-      
+
+      // Anchor the very first window to the first event's timestamp so batching
+      // depends only on event timestamps (deterministic), not on wall-clock
+      // time elapsed since construction.
+      if (this.currentWindowStart === 0) {
+        this.currentWindowStart = hashedEvent.timestamp;
+      }
+
       // Check if we need a new time window
       if (this.shouldStartNewWindow(hashedEvent.timestamp)) {
         await this.flushCurrentBatch();
@@ -144,8 +151,11 @@ export class EventIntegrityPipeline extends EventEmitter {
    * Initialize a new time window
    */
   private initializeWindow(timestamp?: number): void {
-    const now = timestamp || Date.now();
-    this.currentWindowStart = Math.floor(now / this.config.windowSizeMs) * this.config.windowSizeMs;
+    // Anchor the window to its first event's timestamp rather than the absolute
+    // clock grid or construction time. Left at 0 until the first event arrives
+    // (see ingestEvent), so a single logical burst is never split by where it
+    // happens to fall in wall-clock time.
+    this.currentWindowStart = timestamp ?? 0;
     this.currentBatch = [];
   }
 

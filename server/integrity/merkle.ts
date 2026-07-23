@@ -71,6 +71,20 @@ export class MerkleTreeBuilder {
   }
 
   /**
+   * bytes32-encoded (0x-prefixed) Merkle root for a batch, for on-chain anchoring.
+   * The single normalization point shared by the anchor pipeline and the
+   * resilience layer so the same batch never yields two different root strings
+   * (#489). `emptyFallbackHex` (the batch hash) is used when there are no
+   * events — MerkleTreeBuilder rejects empty input.
+   */
+  static rootBytes32(eventHashes: string[], emptyFallbackHex: string): string {
+    const root = eventHashes.length > 0
+      ? this.buildFromEventHashes(eventHashes).root
+      : emptyFallbackHex;
+    return root.startsWith('0x') ? root : `0x${root}`;
+  }
+
+  /**
    * Generate inclusion proof for a specific leaf
    */
   static generateProof(tree: MerkleNode, leafData: string, leafIndex: number): MerkleProof {
@@ -80,6 +94,10 @@ export class MerkleTreeBuilder {
     if (!this.generateProofRecursive(tree, leafHash, leafIndex, proof)) {
       throw new Error(`Leaf not found in tree: ${leafData} at index ${leafIndex}`);
     }
+
+    // generateProofRecursive collects siblings top-down (root level first), but
+    // verifyProof folds from the leaf upward. Store siblings in leaf→root order.
+    proof.reverse();
 
     return {
       leaf: leafData,

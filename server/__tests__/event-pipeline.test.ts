@@ -98,9 +98,11 @@ describe("EventPipeline", () => {
     it("should track sequence numbers for sources", async () => {
       pipeline.registerSource(mockSource);
       
-      // Process events with increasing sequence numbers
+      // Process distinct events with increasing sequence numbers. Each needs a
+      // unique payload_hash so deduplication (keyed on source/type/payload_hash,
+      // not sequence_number) does not drop them before sequence tracking runs.
       for (let i = 1; i <= 5; i++) {
-        const event = { ...mockEvent, sequence_number: i };
+        const event = { ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` };
         await pipeline.processEvent(event);
       }
       
@@ -161,17 +163,23 @@ describe("EventPipeline", () => {
         dropReason = reason;
       });
       
-      // Fill pipeline to capacity to trigger drop
+      // Fill the batcher beyond its backpressure cap to trigger drops. Events
+      // must be distinct (unique payload_hash) so they are not deduplicated
+      // before reaching the batcher's backpressure path.
       const promises = [];
       for (let i = 0; i < 10; i++) {
-        promises.push(pipeline.processEvent({ ...mockEvent, sequence_number: i }));
+        promises.push(
+          pipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` })
+        );
       }
-      
+
       await Promise.all(promises);
-      
+
       // At least some events should be dropped due to backpressure
       const metrics = pipeline.getMetrics();
       expect(metrics.events_dropped).toBeGreaterThan(0);
+      expect(droppedEvent).not.toBeNull();
+      expect(dropReason).toBe("batcher_backpressure");
     });
 
     it("should handle processing errors gracefully", async () => {
@@ -238,29 +246,41 @@ describe("EventPipeline", () => {
     });
 
     it("should allow events after deduplication window", async () => {
-      // Create pipeline with very short dedup window
+      // Use fake timers so we can deterministically advance past the dedup
+      // window (schema minimum is 1000ms) without a real delay. The pipeline
+      // evicts stale dedup entries via a cleanup interval keyed on the window.
+      vi.useFakeTimers();
+
       const shortPipeline = new EventPipeline({
         pipeline: {
-          dedup_window_ms: 100, // 100ms window
+          dedup_window_ms: 1000, // smallest valid window
         },
         batcher: {
           log_level: "error",
         },
       });
-      
-      shortPipeline.registerSource(mockSource);
-      
-      // Process event
-      await shortPipeline.processEvent(mockEvent);
-      
-      // Wait for dedup window to expire
-      await new Promise(resolve => setTimeout(resolve, 150));
-      
-      // Process same event again - should be allowed
-      const result = await shortPipeline.processEvent(mockEvent);
-      expect(result).toBe(true);
-      
-      await shortPipeline.shutdown();
+
+      try {
+        shortPipeline.registerSource(mockSource);
+
+        // Process event
+        const first = await shortPipeline.processEvent(mockEvent);
+        expect(first).toBe(true);
+
+        // Advance well past the dedup window. The cleanup interval fires every
+        // window (1000ms) and evicts entries strictly older than the window, so
+        // advancing past the second tick (>2000ms after insertion) guarantees
+        // the entry is gone.
+        await vi.advanceTimersByTimeAsync(2500);
+
+        // Process same event again - should be allowed
+        const result = await shortPipeline.processEvent(mockEvent);
+        expect(result).toBe(true);
+
+        await shortPipeline.shutdown();
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     it("should disable deduplication when configured", async () => {

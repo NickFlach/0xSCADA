@@ -488,10 +488,12 @@ describe('Fuzz: Path Traversal Prevention', () => {
   it('should detect and handle path traversal attempts', () => {
     for (const payload of pathTraversalPayloads) {
       // Simple path traversal detection
-      const hasTraversal = payload.includes('..') || 
+      const hasTraversal = payload.includes('..') ||
                           payload.includes('%2e%2e') ||
-                          payload.includes('%252e');
-      
+                          payload.includes('%252e') ||
+                          payload.includes('%00') ||   // null-byte injection
+                          payload.includes('\0');
+
       expect(hasTraversal).toBe(true);
     }
   });
@@ -560,7 +562,7 @@ describe('Fuzz: Command Injection Prevention', () => {
   ];
 
   it('should identify command injection patterns', () => {
-    const dangerousPatterns = /[;&|`$()\\]/;
+    const dangerousPatterns = /[;&|`$()\\\n\r]/;
     
     for (const payload of commandInjectionPayloads) {
       const hasDangerousChars = dangerousPatterns.test(payload);

@@ -458,7 +458,7 @@ export function registerAgentsCommand(program: Command): void {
           const [key, ...valueParts] = options.set.split("=");
           const value = valueParts.join("=");
 
-          if (!key || value === undefined) {
+          if (!key || !options.set.includes("=")) {
             spinner?.stop();
             outputError("Invalid format", "Use --set key=value");
             return;

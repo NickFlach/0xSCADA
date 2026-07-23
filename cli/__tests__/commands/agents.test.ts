@@ -14,6 +14,7 @@ vi.mock("../../src/api.js", () => ({
     stopAgent: vi.fn(),
     setAgentConfig: vi.fn(),
     getProposals: vi.fn(),
+    getProposalById: vi.fn(),
     approveProposal: vi.fn(),
     rejectProposal: vi.fn(),
   })),
@@ -78,6 +79,7 @@ describe("Agents Command", () => {
     stopAgent: vi.fn(),
     setAgentConfig: vi.fn(),
     getProposals: vi.fn(),
+    getProposalById: vi.fn(),
     approveProposal: vi.fn(),
     rejectProposal: vi.fn(),
   };
@@ -233,6 +235,19 @@ describe("Agents Command", () => {
     mockApiClient.stopAgent.mockResolvedValue({ success: true });
     mockApiClient.setAgentConfig.mockResolvedValue({ success: true });
     mockApiClient.getProposals.mockResolvedValue({ success: true, data: mockProposals });
+    // Mirror the real ApiClient.getProposalById: it has no direct endpoint, so it
+    // fetches the full list via getProposals and finds the proposal client-side.
+    mockApiClient.getProposalById.mockImplementation(async (id: string) => {
+      const listResponse = await mockApiClient.getProposals();
+      if (!listResponse.success || !listResponse.data) {
+        return { success: false, error: listResponse.error || "Failed to fetch proposals" };
+      }
+      const proposal = listResponse.data.find((p: any) => p.id === id);
+      if (!proposal) {
+        return { success: false, error: `Proposal with ID '${id}' not found` };
+      }
+      return { success: true, data: proposal };
+    });
     mockApiClient.approveProposal.mockResolvedValue({
       success: true,
       data: { ...mockProposals[0], status: "APPROVED" },
