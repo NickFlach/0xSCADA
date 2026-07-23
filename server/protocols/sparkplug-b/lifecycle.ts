@@ -50,6 +50,12 @@ export interface OutboundMessage {
   retain: boolean;
   /** The message type, for transport-side topic/QoS sanity & logging. */
   messageType: "NBIRTH" | "NDEATH" | "NDATA" | "DBIRTH" | "DDEATH" | "DDATA";
+  /**
+   * Monotonic token for a pending device lifecycle transition. The transport
+   * must echo this token when it confirms or rejects DBIRTH/DDEATH so an older
+   * MQTT callback cannot settle a newer transition for the same device.
+   */
+  transitionId?: number;
 }
 
 /** Definition of a device managed by this edge node. */
@@ -67,6 +73,10 @@ export const NODE_CONTROL_REBIRTH = "Node Control/Rebirth";
 interface DeviceRecord {
   definition: DeviceDefinition;
   state: DeviceState;
+  pending?: {
+    kind: "birth" | "death";
+    id: number;
+  };
 }
 
 /**
@@ -89,6 +99,7 @@ export class EdgeNodeLifecycle {
   private seq = 0;
 
   private readonly devices = new Map<string, DeviceRecord>();
+  private nextTransitionId = 1;
 
   constructor(node: EdgeNodeDescriptor, nodeMetrics: SparkplugMetric[] = []) {
     this.node = node;
@@ -137,6 +148,7 @@ export class EdgeNodeLifecycle {
     this.devices.set(definition.deviceId, {
       definition,
       state: existing?.state ?? "offline",
+      pending: existing?.pending,
     });
   }
 
@@ -207,13 +219,25 @@ export class EdgeNodeLifecycle {
    * metrics. Devices known to the machine are *not* auto-birthed here; the
    * transport should call {@link birthDevice} for each online device after
    * NBIRTH (spec §7.2: DBIRTH must follow NBIRTH).
+   *
+   * Building the message is deliberately only the first half of the
+   * transition. The node remains `connecting` until the transport confirms
+   * that MQTT accepted the NBIRTH via {@link confirmNodeBirth}. This prevents
+   * DATA from escaping while a QoS-1 BIRTH is still pending or after its
+   * publish callback fails.
    */
   onConnect(): OutboundMessage {
     if (this.seq !== 0) {
       // Defensive: a BIRTH must be seq 0. beginSession() resets it.
       this.seq = 0;
     }
-    this.nodeState = "online";
+    this.nodeState = "connecting";
+    // Every NBIRTH invalidates the previous device BIRTH set. Devices must
+    // DBIRTH again before DDATA is permitted in the new birth sequence.
+    for (const record of this.devices.values()) {
+      record.state = "offline";
+      record.pending = undefined;
+    }
 
     const metrics: SparkplugMetric[] = [
       bdSeqMetric(this.bdSeq),
@@ -234,6 +258,18 @@ export class EdgeNodeLifecycle {
       retain: false,
       messageType: "NBIRTH",
     };
+  }
+
+  /** Commit a pending NBIRTH after its MQTT publish callback succeeds. */
+  confirmNodeBirth(): boolean {
+    if (this.nodeState !== "connecting") return false;
+    this.nodeState = "online";
+    return true;
+  }
+
+  /** Roll back a pending/failed NBIRTH and block all DATA publishing. */
+  failNodeBirth(): void {
+    this.onDisconnect();
   }
 
   /**
@@ -261,6 +297,10 @@ export class EdgeNodeLifecycle {
    * Produce a DBIRTH for a device on its first publish. Registers the device if
    * not already known. DBIRTH shares the node's seq sequence (§6.1) and carries
    * the device's full metric set.
+   *
+   * As with NBIRTH, building the message does not commit the device online.
+   * The transport must call {@link confirmDeviceBirth} after MQTT accepts the
+   * QoS-1 DBIRTH. Until then DDATA remains blocked.
    */
   birthDevice(definition: DeviceDefinition): OutboundMessage {
     if (this.nodeState !== "online") {
@@ -270,7 +310,9 @@ export class EdgeNodeLifecycle {
     }
     this.registerDevice(definition);
     const record = this.devices.get(definition.deviceId)!;
-    record.state = "online";
+    record.state = "offline";
+    const transitionId = this.nextTransitionId++;
+    record.pending = { kind: "birth", id: transitionId };
 
     const payload: SparkplugPayload = {
       timestamp: this.now(),
@@ -284,7 +326,46 @@ export class EdgeNodeLifecycle {
       qos: 1,
       retain: false,
       messageType: "DBIRTH",
+      transitionId,
     };
+  }
+
+  /** Commit a pending DBIRTH after its MQTT publish callback succeeds. */
+  confirmDeviceBirth(deviceId: string, transitionId?: number): boolean {
+    const record = this.devices.get(deviceId);
+    if (
+      !record ||
+      this.nodeState !== "online" ||
+      record.pending?.kind !== "birth" ||
+      (transitionId !== undefined && record.pending.id !== transitionId)
+    ) {
+      return false;
+    }
+    record.state = "online";
+    record.pending = undefined;
+    return true;
+  }
+
+  /**
+   * Roll back the optimistic DBIRTH state when the transport cannot encode or
+   * queue the birth message. DATA must remain blocked until a later successful
+   * birth attempt.
+   */
+  failDeviceBirth(deviceId: string, transitionId?: number): void {
+    const record = this.devices.get(deviceId);
+    if (!record) return;
+    if (transitionId === undefined) {
+      // DDATA has no transition token. Never let an older DATA callback erase a
+      // newer DBIRTH/DDEATH transition that is already pending.
+      if (record.pending) return;
+    } else if (
+      record.pending?.kind !== "birth" ||
+      record.pending.id !== transitionId
+    ) {
+      return;
+    }
+    record.state = "offline";
+    record.pending = undefined;
   }
 
   /**
@@ -298,6 +379,7 @@ export class EdgeNodeLifecycle {
   ): OutboundMessage | null {
     const record = this.devices.get(deviceId);
     if (!record || record.state !== "online") return null;
+    if (record.pending) return null;
     if (!this.canPublishData() || changed.length === 0) return null;
 
     const payload: SparkplugPayload = {
@@ -316,13 +398,16 @@ export class EdgeNodeLifecycle {
   }
 
   /**
-   * Produce a DDEATH when a site/device goes offline. Returns null if the
-   * device is unknown or already offline.
+   * Produce a DDEATH when a site/device goes offline. The device remains
+   * logically online but DATA is blocked until the transport settles the
+   * QoS-1 publish. This makes a failed DDEATH retryable instead of leaving the
+   * broker and local lifecycle permanently divergent.
    */
   deathDevice(deviceId: string): OutboundMessage | null {
     const record = this.devices.get(deviceId);
-    if (!record || record.state !== "online") return null;
-    record.state = "offline";
+    if (!record || record.state !== "online" || record.pending) return null;
+    const transitionId = this.nextTransitionId++;
+    record.pending = { kind: "death", id: transitionId };
 
     const payload: SparkplugPayload = {
       timestamp: this.now(),
@@ -336,7 +421,36 @@ export class EdgeNodeLifecycle {
       retain: false,
       payload,
       messageType: "DDEATH",
+      transitionId,
     };
+  }
+
+  /** Commit a pending DDEATH after its MQTT publish callback succeeds. */
+  confirmDeviceDeath(deviceId: string, transitionId?: number): boolean {
+    const record = this.devices.get(deviceId);
+    if (
+      !record ||
+      record.pending?.kind !== "death" ||
+      (transitionId !== undefined && record.pending.id !== transitionId)
+    ) {
+      return false;
+    }
+    record.state = "offline";
+    record.pending = undefined;
+    return true;
+  }
+
+  /** Clear a failed DDEATH so the caller can retry it. */
+  failDeviceDeath(deviceId: string, transitionId?: number): void {
+    const record = this.devices.get(deviceId);
+    if (
+      !record ||
+      record.pending?.kind !== "death" ||
+      (transitionId !== undefined && record.pending.id !== transitionId)
+    ) {
+      return;
+    }
+    record.pending = undefined;
   }
 
   /**
@@ -348,6 +462,7 @@ export class EdgeNodeLifecycle {
     this.nodeState = "offline";
     for (const record of this.devices.values()) {
       record.state = "offline";
+      record.pending = undefined;
     }
   }
 

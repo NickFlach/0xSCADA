@@ -102,9 +102,19 @@ describe("NBIRTH", () => {
     expect(msg.payload.metrics.find((m) => m.name === "bdSeq")?.value).toBe(1);
   });
 
-  it("moves the node to online", () => {
+  it("keeps the node connecting until NBIRTH is confirmed", () => {
     lc.onConnect();
+    expect(lc.getNodeState()).toBe("connecting");
+    expect(lc.canPublishData()).toBe(false);
+    expect(lc.confirmNodeBirth()).toBe(true);
     expect(lc.getNodeState()).toBe("online");
+  });
+
+  it("cannot confirm a failed or disconnected NBIRTH", () => {
+    lc.onConnect();
+    lc.failNodeBirth();
+    expect(lc.confirmNodeBirth()).toBe(false);
+    expect(lc.getNodeState()).toBe("offline");
   });
 
   it("seq advances after NBIRTH (next message is seq 1)", () => {
@@ -119,6 +129,7 @@ describe("device lifecycle DBIRTH / DDATA / DDEATH", () => {
     lc = newLifecycle();
     lc.beginSession();
     lc.onConnect();
+    lc.confirmNodeBirth();
   });
 
   it("DBIRTH announces the device with its full metric set", () => {
@@ -128,6 +139,8 @@ describe("device lifecycle DBIRTH / DDATA / DDEATH", () => {
     expect(msg.qos).toBe(1);
     expect(msg.payload.seq).toBe(1); // follows NBIRTH(seq 0)
     expect(msg.payload.metrics.map((m) => m.name)).toEqual(["FlowRate", "Running"]);
+    expect(lc.getDeviceState("pump-42")).toBe("offline");
+    expect(lc.confirmDeviceBirth("pump-42")).toBe(true);
     expect(lc.getDeviceState("pump-42")).toBe("online");
   });
 
@@ -139,6 +152,7 @@ describe("device lifecycle DBIRTH / DDATA / DDEATH", () => {
 
   it("DDATA carries changed tags after DBIRTH", () => {
     lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42");
     const changed: SparkplugMetric[] = [
       { name: "FlowRate", dataType: SparkplugDataType.Double, value: 12.5 },
     ];
@@ -154,26 +168,58 @@ describe("device lifecycle DBIRTH / DDATA / DDEATH", () => {
     expect(lc.publishDeviceData("pump-42", PUMP.metrics)).toBeNull();
   });
 
-  it("DDEATH marks the device offline", () => {
+  it("commits DDEATH only after transport confirmation", () => {
     lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42");
     const msg = lc.deathDevice("pump-42");
     expect(msg).not.toBeNull();
     expect(msg!.messageType).toBe("DDEATH");
     expect(msg!.qos).toBe(1);
+    expect(lc.getDeviceState("pump-42")).toBe("online");
+    expect(lc.publishDeviceData("pump-42", PUMP.metrics)).toBeNull();
+    expect(lc.confirmDeviceDeath("pump-42", msg!.transitionId)).toBe(true);
     expect(lc.getDeviceState("pump-42")).toBe("offline");
   });
 
   it("DDEATH on an unknown/offline device returns null", () => {
     expect(lc.deathDevice("ghost")).toBeNull();
     lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42");
     lc.deathDevice("pump-42");
     expect(lc.deathDevice("pump-42")).toBeNull();
   });
 
-  it("DDATA after DDEATH returns null", () => {
+  it("failed DDEATH remains online and can be retried", () => {
     lc.birthDevice(PUMP);
-    lc.deathDevice("pump-42");
+    lc.confirmDeviceBirth("pump-42");
+    const first = lc.deathDevice("pump-42")!;
     expect(lc.publishDeviceData("pump-42", PUMP.metrics)).toBeNull();
+    lc.failDeviceDeath("pump-42", first.transitionId);
+    expect(lc.getDeviceState("pump-42")).toBe("online");
+    const retry = lc.deathDevice("pump-42");
+    expect(retry).not.toBeNull();
+    expect(retry!.transitionId).not.toBe(first.transitionId);
+  });
+
+  it("ignores stale DBIRTH transition callbacks", () => {
+    const first = lc.birthDevice(PUMP);
+    const second = lc.birthDevice(PUMP);
+    expect(lc.confirmDeviceBirth("pump-42", first.transitionId)).toBe(false);
+    expect(lc.getDeviceState("pump-42")).toBe("offline");
+    expect(lc.confirmDeviceBirth("pump-42", second.transitionId)).toBe(true);
+    expect(lc.getDeviceState("pump-42")).toBe("online");
+  });
+
+  it("does not let an older DDATA failure erase a newer device transition", () => {
+    const initialBirth = lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42", initialBirth.transitionId);
+    expect(lc.publishDeviceData("pump-42", PUMP.metrics)).not.toBeNull();
+
+    const replacementBirth = lc.birthDevice(PUMP);
+    lc.failDeviceBirth("pump-42"); // deferred failure from the older DDATA
+    expect(
+      lc.confirmDeviceBirth("pump-42", replacementBirth.transitionId),
+    ).toBe(true);
   });
 });
 
@@ -182,7 +228,9 @@ describe("seq increments and rolls over mod 256", () => {
     const lc = newLifecycle();
     lc.beginSession();
     lc.onConnect(); // seq 0
+    lc.confirmNodeBirth();
     lc.birthDevice(PUMP); // seq 1
+    lc.confirmDeviceBirth("pump-42");
     expect(lc.getSeq()).toBe(2);
     lc.publishDeviceData("pump-42", PUMP.metrics); // seq 2
     expect(lc.getSeq()).toBe(3);
@@ -192,6 +240,7 @@ describe("seq increments and rolls over mod 256", () => {
     const lc = newLifecycle();
     lc.beginSession();
     lc.onConnect(); // consumes seq 0, seq now 1
+    lc.confirmNodeBirth();
     // Emit 255 more node-data messages to push seq through the rollover.
     for (let i = 0; i < 255; i++) {
       lc.publishNodeData([{ name: "Node/Uptime", dataType: SparkplugDataType.Int64, value: i }]);
@@ -205,6 +254,7 @@ describe("in-session rebirth (§7.6)", () => {
     const lc = newLifecycle();
     lc.beginSession(); // bdSeq -> 1
     lc.onConnect(); // seq 0 consumed, seq now 1
+    lc.confirmNodeBirth();
     lc.publishNodeData([{ name: "Node/Uptime", dataType: SparkplugDataType.Int64, value: 5 }]); // seq 1
     expect(lc.getSeq()).toBe(2);
     const bdSeqBefore = lc.getBdSeq();
@@ -217,6 +267,7 @@ describe("in-session rebirth (§7.6)", () => {
     const reBirth = lc.onConnect();
     expect(reBirth.payload.seq).toBe(0);
     expect(reBirth.payload.metrics.find((m) => m.name === "bdSeq")?.value).toBe(bdSeqBefore);
+    expect(lc.getNodeState()).toBe("connecting");
   });
 });
 
@@ -226,7 +277,9 @@ describe("host STATE gating (§10)", () => {
     lc = newLifecycle();
     lc.beginSession();
     lc.onConnect();
+    lc.confirmNodeBirth();
     lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42");
   });
 
   it("allows DATA when host unknown or online", () => {
@@ -258,7 +311,9 @@ describe("disconnect", () => {
     const lc = newLifecycle();
     lc.beginSession();
     lc.onConnect();
+    lc.confirmNodeBirth();
     lc.birthDevice(PUMP);
+    lc.confirmDeviceBirth("pump-42");
     lc.onDisconnect();
     expect(lc.getNodeState()).toBe("offline");
     expect(lc.getDeviceState("pump-42")).toBe("offline");
@@ -268,6 +323,7 @@ describe("disconnect", () => {
     const lc = newLifecycle();
     lc.beginSession();
     lc.onConnect();
+    lc.confirmNodeBirth();
     lc.onDisconnect();
     expect(lc.canPublishData()).toBe(false);
   });

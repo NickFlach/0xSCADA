@@ -111,6 +111,12 @@ export class SparkplugBridge {
   private client: MqttLike | null = null;
   private commandHandler: CommandHandler | null = null;
   private started = false;
+  /** Monotonic identity for each MQTT client/session attempt. */
+  private sessionEpoch = 0;
+  /** Monotonic identity for each NBIRTH sequence, including in-session rebirths. */
+  private birthEpoch = 0;
+  private connectedSessionEpoch: number | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     config: SparkplugConfig = loadSparkplugConfig(),
@@ -153,75 +159,179 @@ export class SparkplugBridge {
       return;
     }
 
-    // §6.4 — bump bdSeq + reset seq, then encode the Will/NDEATH with that bdSeq.
-    const bdSeq = this.lifecycle.beginSession();
-    const willPayload = this.lifecycle.buildWillPayload(bdSeq);
-    const willTopic = this.lifecycle.buildWillTopic();
-
-    const opts: MqttConnectOptions = {
-      clientId: this.config.clientId ?? `${this.config.groupId}-${this.config.edgeNodeId}`,
-      username: this.config.username,
-      password: this.config.password,
-      keepalive: this.config.keepaliveSec,
-      reconnectPeriod: this.config.reconnectPeriodMs,
-      clean: true,
-      will: {
-        topic: willTopic,
-        payload: encodePayload(willPayload),
-        qos: 1,
-        retain: false,
-      },
-    };
-
-    try {
-      this.client = this.connectFn(this.config.brokerUrl, opts);
-    } catch (err) {
-      logError(err, "Sparkplug B: failed to create MQTT connection");
-      return;
-    }
     this.started = true;
-    this.attachHandlers(this.client);
+    if (!this.openSession()) {
+      this.started = false;
+    }
+  }
+
+  /**
+   * Create one MQTT client/session with a freshly incremented bdSeq and matching
+   * NDEATH Will. MQTT.js auto-reconnect is deliberately disabled: a reconnect
+   * must install a new Will, which requires constructing a new client.
+   */
+  private openSession(): boolean {
+    const sessionEpoch = ++this.sessionEpoch;
+    let bdSeq: number;
+    let opts: MqttConnectOptions;
+    try {
+      // §6.4 — bump bdSeq + reset seq, then encode the Will/NDEATH with that
+      // bdSeq. Encoding is part of startup preparation and must remain inside
+      // this guard: malformed codec output must never take down the HTTP server.
+      bdSeq = this.lifecycle.beginSession();
+      const willPayload = this.lifecycle.buildWillPayload(bdSeq);
+      const willTopic = this.lifecycle.buildWillTopic();
+      const willBytes = encodePayload(willPayload);
+
+      opts = {
+        clientId: this.config.clientId ?? `${this.config.groupId}-${this.config.edgeNodeId}`,
+        username: this.config.username,
+        password: this.config.password,
+        keepalive: this.config.keepaliveSec,
+        reconnectPeriod: 0,
+        clean: true,
+        will: {
+          topic: willTopic,
+          payload: willBytes,
+          qos: 1,
+          retain: false,
+        },
+      };
+    } catch (err) {
+      this.lifecycle.onDisconnect();
+      logError(err, "Sparkplug B: failed to prepare NDEATH Will");
+      return false;
+    }
+
+    let client: MqttLike;
+    try {
+      client = this.connectFn(this.config.brokerUrl, opts);
+    } catch (err) {
+      this.lifecycle.onDisconnect();
+      logError(err, "Sparkplug B: failed to create MQTT connection");
+      return false;
+    }
+
+    if (!this.started || sessionEpoch !== this.sessionEpoch) {
+      client.end(true);
+      return false;
+    }
+
+    this.client = client;
+    this.attachHandlers(client, sessionEpoch);
     log(
       `Sparkplug B bridge connecting → ${this.config.brokerUrl} ` +
         `(group=${this.config.groupId}, edge=${this.config.edgeNodeId}, bdSeq=${bdSeq})`,
       LOG_SCOPE,
     );
+    return true;
   }
 
-  private attachHandlers(client: MqttLike): void {
+  private attachHandlers(client: MqttLike, sessionEpoch: number): void {
     client.on("connect", () => {
-      log(`Sparkplug B connected; publishing NBIRTH for ${this.config.edgeNodeId}`, LOG_SCOPE);
-      // §7.2 — NBIRTH first, then subscribe for commands & host STATE.
-      this.publishMessage(this.lifecycle.onConnect());
-      const filters = buildCommandSubscriptionFilters(this.node);
-      client.subscribe(filters, { qos: 1 }, (err) => {
-        if (err) logError(err, "Sparkplug B: subscribe failed");
-      });
-      // Re-birth any devices that were online before a reconnect.
-      for (const deviceId of this.lifecycle.listDevices()) {
-        if (this.lifecycle.getDeviceState(deviceId) === "online") {
-          // Device metrics are owned by the caller; re-birth requires the caller
-          // to re-supply via birthDevice. We only log here so state is honest.
-          logWarn(
-            `Sparkplug B: device "${deviceId}" was online before reconnect; ` +
-              "caller should re-birth it (call birthSite again).",
-            LOG_SCOPE,
-          );
-        }
+      if (
+        !this.isCurrentSession(client, sessionEpoch) ||
+        this.connectedSessionEpoch === sessionEpoch
+      ) {
+        return;
       }
+      this.connectedSessionEpoch = sessionEpoch;
+      const birthEpoch = ++this.birthEpoch;
+      log(`Sparkplug B connected; publishing NBIRTH for ${this.config.edgeNodeId}`, LOG_SCOPE);
+      // §7.2 — NBIRTH must be acknowledged before the node becomes online or
+      // its command/STATE subscriptions are acknowledged. Until both complete,
+      // the lifecycle stays `connecting`, so DATA and DBIRTH remain fail-closed.
+      const birth = this.lifecycle.onConnect();
+      this.publishMessage(birth, () =>
+        this.subscribeAfterNodeBirth(client, sessionEpoch, birthEpoch),
+      );
     });
 
-    client.on("message", (topic, payload) => this.handleMessage(topic, payload));
+    client.on("message", (topic, payload) => {
+      if (!this.isCurrentSession(client, sessionEpoch)) return;
+      this.handleMessage(topic, payload);
+    });
 
-    client.on("error", (err) => logError(err, "Sparkplug B: MQTT error"));
+    client.on("error", (err) => {
+      if (!this.isCurrentSession(client, sessionEpoch)) return;
+      logError(err, "Sparkplug B: MQTT error");
+    });
     client.on("offline", () => {
-      logWarn("Sparkplug B: MQTT offline", LOG_SCOPE);
-      this.lifecycle.onDisconnect();
+      this.handleSessionLoss(client, sessionEpoch, "offline");
     });
     client.on("close", () => {
-      this.lifecycle.onDisconnect();
+      this.handleSessionLoss(client, sessionEpoch, "close");
     });
-    client.on("reconnect", () => log("Sparkplug B: reconnecting", LOG_SCOPE));
+    client.on("reconnect", () => {
+      // Defensive for injected/custom clients. reconnectPeriod=0 means the real
+      // MQTT client never reuses a session with a stale Will.
+      this.handleSessionLoss(client, sessionEpoch, "reconnect");
+    });
+  }
+
+  private isCurrentSession(client: MqttLike, sessionEpoch: number): boolean {
+    return (
+      this.started &&
+      this.client === client &&
+      this.sessionEpoch === sessionEpoch
+    );
+  }
+
+  private isCurrentBirth(
+    client: MqttLike,
+    sessionEpoch: number,
+    birthEpoch: number,
+  ): boolean {
+    return (
+      this.isCurrentSession(client, sessionEpoch) &&
+      this.birthEpoch === birthEpoch
+    );
+  }
+
+  private handleSessionLoss(
+    client: MqttLike,
+    sessionEpoch: number,
+    event: "offline" | "close" | "reconnect",
+  ): void {
+    if (!this.isCurrentSession(client, sessionEpoch)) return;
+    if (event === "offline") {
+      logWarn("Sparkplug B: MQTT offline", LOG_SCOPE);
+    } else if (event === "reconnect") {
+      logWarn("Sparkplug B: rejecting MQTT auto-reconnect with a stale Will", LOG_SCOPE);
+    }
+
+    this.client = null;
+    ++this.sessionEpoch;
+    ++this.birthEpoch;
+    this.lifecycle.onDisconnect();
+    if (event !== "close") {
+      try {
+        client.end(true);
+      } catch (err) {
+        logError(err, "Sparkplug B: failed to dispose stale MQTT client");
+      }
+    }
+    this.scheduleReconnect(this.sessionEpoch);
+  }
+
+  private scheduleReconnect(expectedEpoch: number): void {
+    if (!this.started || this.reconnectTimer) return;
+    const timer = setTimeout(() => {
+      if (this.reconnectTimer !== timer) return;
+      this.reconnectTimer = null;
+      if (
+        !this.started ||
+        this.client !== null ||
+        this.sessionEpoch !== expectedEpoch
+      ) {
+        return;
+      }
+      if (!this.openSession()) {
+        this.scheduleReconnect(this.sessionEpoch);
+      }
+    }, this.config.reconnectPeriodMs);
+    this.reconnectTimer = timer;
+    timer.unref?.();
   }
 
   private handleMessage(topic: string, raw: Uint8Array): void {
@@ -260,11 +370,20 @@ export class SparkplugBridge {
         log("Sparkplug B: Rebirth requested by host", LOG_SCOPE);
         this.rebirth();
       }
-      this.commandHandler?.({
-        messageType: parsed.messageType,
-        deviceId: parsed.deviceId,
-        metrics: decoded.metrics,
-      });
+      if (this.commandHandler) {
+        try {
+          this.commandHandler({
+            messageType: parsed.messageType,
+            deviceId: parsed.deviceId,
+            metrics: decoded.metrics,
+          });
+        } catch (err) {
+          // An application callback must not escape the MQTT event emitter and
+          // crash the server. The bridge remains connected; the failed command
+          // is logged and no transport state is fabricated.
+          logError(err, `Sparkplug B: ${parsed.messageType} handler failed`);
+        }
+      }
     }
   }
 
@@ -290,7 +409,8 @@ export class SparkplugBridge {
       logWarn(`Sparkplug B: cannot birth "${definition.deviceId}" before NBIRTH`, LOG_SCOPE);
       return;
     }
-    this.publishMessage(this.lifecycle.birthDevice(definition));
+    const birth = this.lifecycle.birthDevice(definition);
+    this.publishMessage(birth);
   }
 
   /** Publish changed device tags (DDATA). No-op if not allowed/birthed. */
@@ -316,24 +436,38 @@ export class SparkplugBridge {
    * (§7.6). This is an *in-session* rebirth: the seq sequence restarts at 0 but
    * the bdSeq is unchanged so the already-registered NDEATH Will still
    * correlates with this birth (§6.4). A new MQTT session (and thus a new
-   * bdSeq) only happens on an actual reconnect, which is driven by the broker's
-   * `connect` event, not by a Rebirth command.
+   * bdSeq) only happens when the bridge creates a fresh MQTT client/session,
+   * not when a Rebirth command is handled inside the current connection.
    */
   rebirth(): void {
     if (this.lifecycle.getNodeState() !== "online") return;
     // Restart seq at 0 WITHOUT bumping bdSeq (would desync the Will/NDEATH).
     this.lifecycle.resetSeq();
-    this.publishMessage(this.lifecycle.onConnect());
+    ++this.birthEpoch;
+    this.publishMessage(this.lifecycle.onConnect(), () => {
+      this.lifecycle.confirmNodeBirth();
+    });
   }
 
   /** Disconnect cleanly. Publishes nothing — NDEATH is delivered by the Will. */
   stop(): void {
-    this.lifecycle.onDisconnect();
-    if (this.client) {
-      this.client.end(false, {}, () => log("Sparkplug B bridge stopped", LOG_SCOPE));
-      this.client = null;
-    }
     this.started = false;
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    const client = this.client;
+    this.client = null;
+    const stoppedEpoch = ++this.sessionEpoch;
+    ++this.birthEpoch;
+    this.lifecycle.onDisconnect();
+    if (client) {
+      client.end(false, {}, () => {
+        if (!this.started && this.sessionEpoch === stoppedEpoch) {
+          log("Sparkplug B bridge stopped", LOG_SCOPE);
+        }
+      });
+    }
   }
 
   /** Status snapshot for health/metrics endpoints. */
@@ -345,8 +479,10 @@ export class SparkplugBridge {
     bdSeq: number;
     seq: number;
     devices: string[];
+    deviceStates: Record<string, string>;
     canPublishData: boolean;
   } {
+    const devices = this.lifecycle.listDevices();
     return {
       enabled: this.config.enabled,
       started: this.started,
@@ -354,26 +490,148 @@ export class SparkplugBridge {
       hostState: this.lifecycle.getHostState(),
       bdSeq: this.lifecycle.getBdSeq(),
       seq: this.lifecycle.getSeq(),
-      devices: this.lifecycle.listDevices(),
+      devices,
+      deviceStates: Object.fromEntries(
+        devices.map((deviceId) => [
+          deviceId,
+          this.lifecycle.getDeviceState(deviceId) ?? "offline",
+        ]),
+      ),
       canPublishData: this.lifecycle.canPublishData(),
     };
   }
 
-  private publishMessage(msg: OutboundMessage): void {
-    if (!this.client) {
+  /**
+   * Publish one lifecycle message transactionally.
+   *
+   * BIRTH transitions are committed only from the MQTT callback. Encoding,
+   * synchronous queueing, and asynchronous callback failures all roll back the
+   * optimistic lifecycle state. The optional success callback is used to defer
+   * command/STATE subscription until NBIRTH is acknowledged.
+   */
+  private publishMessage(msg: OutboundMessage, onSuccess?: () => void): boolean {
+    const client = this.client;
+    const sessionEpoch = this.sessionEpoch;
+    const birthEpoch = this.birthEpoch;
+    if (!client) {
       logWarn(`Sparkplug B: dropping ${msg.messageType} (no MQTT client)`, LOG_SCOPE);
-      return;
+      this.handlePublishFailure(msg);
+      return false;
     }
     let bytes: Uint8Array;
     try {
       bytes = encodePayload(msg.payload);
     } catch (err) {
       logError(err, `Sparkplug B: failed to encode ${msg.messageType}`);
+      this.handlePublishFailure(msg);
+      return false;
+    }
+
+    let callbackResult: boolean | undefined;
+    let settled = false;
+    try {
+      client.publish(msg.topic, bytes, { qos: msg.qos, retain: msg.retain }, (err) => {
+        if (settled) return;
+        settled = true;
+        if (!this.isCurrentBirth(client, sessionEpoch, birthEpoch)) return;
+        if (err) {
+          callbackResult = false;
+          logError(err, `Sparkplug B: publish ${msg.messageType} failed`);
+          this.handlePublishFailure(msg);
+          return;
+        }
+        callbackResult = this.handlePublishSuccess(msg);
+        if (!callbackResult) return;
+        try {
+          onSuccess?.();
+        } catch (callbackErr) {
+          // Defensive containment for injected/custom transport callbacks.
+          logError(callbackErr, `Sparkplug B: post-publish ${msg.messageType} callback failed`);
+          this.handlePublishFailure(msg);
+        }
+      });
+      return callbackResult ?? true;
+    } catch (err) {
+      logError(err, `Sparkplug B: publish ${msg.messageType} threw`);
+      // The first settlement wins for callback APIs that invoke synchronously.
+      // A non-conforming transport that calls back and then throws must not
+      // commit and roll back the same lifecycle operation.
+      if (!settled) {
+        settled = true;
+        if (this.isCurrentBirth(client, sessionEpoch, birthEpoch)) {
+          this.handlePublishFailure(msg);
+        }
+      }
+      return false;
+    }
+  }
+
+  /** Commit lifecycle state after an acknowledged publish. */
+  private handlePublishSuccess(msg: OutboundMessage): boolean {
+    if (msg.messageType === "NBIRTH") {
+      // The node remains connecting until subscribeAfterNodeBirth also
+      // acknowledges command/STATE subscriptions.
+      return true;
+    }
+    if (msg.messageType === "DBIRTH") {
+      const deviceId = parseTopic(msg.topic)?.deviceId;
+      return deviceId
+        ? this.lifecycle.confirmDeviceBirth(deviceId, msg.transitionId)
+        : false;
+    }
+    if (msg.messageType === "DDEATH") {
+      const deviceId = parseTopic(msg.topic)?.deviceId;
+      return deviceId
+        ? this.lifecycle.confirmDeviceDeath(deviceId, msg.transitionId)
+        : false;
+    }
+    return true;
+  }
+
+  /** Fail closed for a message that could not be encoded/queued/acknowledged. */
+  private handlePublishFailure(msg: OutboundMessage): void {
+    if (msg.messageType === "NBIRTH" || msg.messageType === "NDATA") {
+      this.lifecycle.failNodeBirth();
       return;
     }
-    this.client.publish(msg.topic, bytes, { qos: msg.qos, retain: msg.retain }, (err) => {
-      if (err) logError(err, `Sparkplug B: publish ${msg.messageType} failed`);
-    });
+    if (msg.messageType === "DBIRTH" || msg.messageType === "DDATA") {
+      const deviceId = parseTopic(msg.topic)?.deviceId;
+      if (deviceId) this.lifecycle.failDeviceBirth(deviceId, msg.transitionId);
+      return;
+    }
+    if (msg.messageType === "DDEATH") {
+      const deviceId = parseTopic(msg.topic)?.deviceId;
+      if (deviceId) this.lifecycle.failDeviceDeath(deviceId, msg.transitionId);
+    }
+  }
+
+  /** Complete NBIRTH only after command/STATE subscriptions are acknowledged. */
+  private subscribeAfterNodeBirth(
+    client: MqttLike,
+    sessionEpoch: number,
+    birthEpoch: number,
+  ): void {
+    if (!this.isCurrentBirth(client, sessionEpoch, birthEpoch)) return;
+    const filters = buildCommandSubscriptionFilters(this.node);
+    let settled = false;
+    try {
+      client.subscribe(filters, { qos: 1 }, (err) => {
+        if (settled) return;
+        settled = true;
+        if (!this.isCurrentBirth(client, sessionEpoch, birthEpoch)) return;
+        if (err) {
+          logError(err, "Sparkplug B: subscribe failed");
+          this.lifecycle.failNodeBirth();
+          return;
+        }
+        this.lifecycle.confirmNodeBirth();
+      });
+    } catch (err) {
+      if (settled || !this.isCurrentBirth(client, sessionEpoch, birthEpoch)) return;
+      settled = true;
+      logError(err, "Sparkplug B: subscribe threw");
+      this.lifecycle.failNodeBirth();
+    }
   }
 }
 

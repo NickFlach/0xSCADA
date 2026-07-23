@@ -186,8 +186,12 @@ app.use((req, res, next) => {
 
       // Start MQTT Sparkplug B bridge (Issue #463) — no-op unless
       // SPARKPLUG_BROKER_URL is configured.
-      const { startSparkplugBridge } = await import("./protocols/sparkplug-b");
-      startSparkplugBridge();
+      try {
+        const { startSparkplugBridge } = await import("./protocols/sparkplug-b");
+        startSparkplugBridge();
+      } catch (err) {
+        logError(err, "Sparkplug B bridge failed to start");
+      }
 
       // Connect to NATS for SCADA event publishing
       const { natsPublisher } = await import("./services/nats");

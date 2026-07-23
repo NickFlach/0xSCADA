@@ -44,7 +44,7 @@ describe("metricToProto", () => {
     const proto = metricToProto(metric, 1000);
     expect(proto).toMatchObject({
       name: "Temperature",
-      dataType: "Float",
+      type: "Float",
       value: 42.5,
       timestamp: 1000,
       isNull: false,
@@ -82,6 +82,51 @@ describe("metricToProto", () => {
       enabled: { type: "Boolean", value: true },
     });
   });
+
+  it("uses range-aware integer property types without Int32 truncation", () => {
+    const proto = metricToProto({
+      name: "x",
+      dataType: SparkplugDataType.Double,
+      value: 1,
+      properties: {
+        int32Max: 2_147_483_647,
+        uint32HighBit: 2_147_483_648,
+        belowInt32: -2_147_483_649,
+        uint64Max: 18_446_744_073_709_551_615n,
+      },
+    });
+
+    expect(proto.properties).toMatchObject({
+      int32Max: { type: "Int32", value: 2_147_483_647 },
+      uint32HighBit: { type: "UInt32", value: "2147483648" },
+      belowInt32: { type: "Int64", value: "-2147483649" },
+      uint64Max: { type: "UInt64", value: "18446744073709551615" },
+    });
+  });
+
+  it("rejects invalid outbound metric timestamps, aliases, and property integers", () => {
+    const metric: SparkplugMetric = {
+      name: "x",
+      dataType: SparkplugDataType.Int32,
+      value: 1,
+    };
+
+    expect(() => metricToProto({ ...metric, timestamp: -1 })).toThrow(
+      /metric timestamp/,
+    );
+    expect(() => metricToProto({ ...metric, timestamp: 1.5 })).toThrow(
+      /metric timestamp/,
+    );
+    expect(() =>
+      metricToProto({ ...metric, alias: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(/metric alias/);
+    expect(() =>
+      metricToProto({
+        ...metric,
+        properties: { invalid: Number.MAX_SAFE_INTEGER + 1 },
+      }),
+    ).toThrow(/property integer/);
+  });
 });
 
 describe("metric round trip", () => {
@@ -116,6 +161,33 @@ describe("payloadToProto / payloadFromProto", () => {
     const back = payloadFromProto(proto);
     expect(back.seq).toBe(5);
     expect(back.metrics[0].name).toBe("a");
+  });
+
+  it("enforces outbound timestamp and 0..255 sequence ranges", () => {
+    const payload: SparkplugPayload = { timestamp: 1, metrics: [] };
+
+    expect(() => payloadToProto({ ...payload, timestamp: -1 })).toThrow(
+      /payload timestamp/,
+    );
+    expect(() =>
+      payloadToProto({ ...payload, timestamp: Number.MAX_SAFE_INTEGER + 1 }),
+    ).toThrow(/payload timestamp/);
+    expect(() => payloadToProto({ ...payload, seq: -1 })).toThrow(
+      /payload sequence/,
+    );
+    expect(() => payloadToProto({ ...payload, seq: 256 })).toThrow(/0\.\.255/);
+    expect(() => payloadToProto({ ...payload, seq: 1.5 })).toThrow(
+      /payload sequence/,
+    );
+  });
+
+  it("rejects decoded metadata outside the internal safe ranges", () => {
+    expect(() =>
+      payloadFromProto({ timestamp: -1, metrics: [] }),
+    ).toThrow(/payload timestamp/);
+    expect(() =>
+      payloadFromProto({ timestamp: 1, seq: 256, metrics: [] }),
+    ).toThrow(/0\.\.255/);
   });
 });
 
