@@ -154,12 +154,10 @@ export interface BlueprintImportResult {
   warnings: string[];
 }
 
-// ─── Blueprint DB row shapes (#479) ──────────────────────────────────────────
-// The blueprint DB tables were never restored into the operative schema (they
-// were deleted with the code in 6f9d9219c). These describe the row objects the
-// code-generation routes pass to the generators, decoupling the generators from
-// @shared/schema. The full DB layer (schema tables + storage CRUD) is a separate
-// restoration — see the #479 follow-up.
+// ─── Blueprint DB row shapes ─────────────────────────────────────────────────
+// Keep the generators coupled to these narrow row contracts rather than the
+// Drizzle implementation so they remain usable with PostgreSQL, SQLite, or
+// parsed request-body definitions.
 
 export interface ControlModuleTypeRow {
   id?: string;

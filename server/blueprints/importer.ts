@@ -176,6 +176,61 @@ export function validateUnitReferences(
 }
 
 /**
+ * Validate CM -> Unit instance links before persistence.
+ *
+ * The source format references a unit instance by name only, while persisted
+ * identity is `(unitTypeId, name)`. A name that exists under multiple unit
+ * types is therefore ambiguous and must be rejected rather than silently
+ * binding a control module to whichever row happened to be imported last.
+ */
+export function validateInstanceBindings(
+  unitTypes: ParsedUnitType[],
+  unitInstances: ParsedUnitInstances[],
+  cmInstances: ParsedCMInstances[],
+): string[] {
+  const errors: string[] = [];
+  const unitTypeNames = new Set(unitTypes.map((unitType) => unitType.name));
+  const identitiesByName = new Map<string, Set<string>>();
+
+  for (const group of unitInstances) {
+    for (const instance of group.instances) {
+      const unitTypeName = instance.unitType || group.unitTypeName;
+      if (!unitTypeNames.has(unitTypeName)) {
+        errors.push(
+          `Unit instance ${instance.name} in ${group.sourceFile ?? "blueprint package"} ` +
+          `references unknown Unit type: ${unitTypeName}`,
+        );
+        continue;
+      }
+      const identities = identitiesByName.get(instance.name) ?? new Set<string>();
+      identities.add(unitTypeName);
+      identitiesByName.set(instance.name, identities);
+    }
+  }
+
+  for (const group of cmInstances) {
+    for (const instance of group.instances) {
+      if (!instance.unitInstance) continue;
+      const identities = identitiesByName.get(instance.unitInstance);
+      if (!identities || identities.size === 0) {
+        errors.push(
+          `CM instance ${instance.name} in ${group.sourceFile ?? "blueprint package"} ` +
+          `references unknown Unit instance: ${instance.unitInstance}`,
+        );
+      } else if (identities.size > 1) {
+        errors.push(
+          `CM instance ${instance.name} references ambiguous Unit instance ` +
+          `${instance.unitInstance}; it exists under Unit types: ` +
+          `${[...identities].sort().join(", ")}`,
+        );
+      }
+    }
+  }
+
+  return errors;
+}
+
+/**
  * Validate that Phase types reference valid CM types
  */
 export function validatePhaseReferences(
