@@ -8,7 +8,7 @@
 
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
-import { fromZodError } from "zod-validation-error";
+import { fromZodError } from "zod-validation-error/v3";
 import pino from "pino";
 import crypto from "crypto";
 import { 
