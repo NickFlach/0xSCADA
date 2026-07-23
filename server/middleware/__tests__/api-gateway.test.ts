@@ -2,11 +2,17 @@
  * Tests for [12.2] API Gateway & Rate Limiting
  */
 import { describe, it, expect, beforeEach } from 'vitest';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import {
   SlidingWindowRateLimiter,
   ApiKeyManager,
   apiKeyMiddleware,
+  apiKeyAuthEnabled,
+  setupApiGateway,
 } from '../api-gateway';
+import express from 'express';
 
 describe('SlidingWindowRateLimiter', () => {
   let limiter: SlidingWindowRateLimiter;
@@ -99,12 +105,98 @@ describe('ApiKeyManager', () => {
     expect(keys.get('anotherkey')?.scopes).toEqual(['*']);
   });
 
+  it('refuses to generate a key without an explicit scope', () => {
+    expect(() => manager.generate('scope-less', [])).toThrow(
+      'At least one explicit API key scope is required',
+    );
+  });
+
   it('loads a scope-less environment key without implicit privileges', () => {
     process.env.API_KEYS = 'unscoped-key:legacy-client';
     manager.loadFromEnv();
     delete process.env.API_KEYS;
 
     expect(manager.getKeysMap().get('unscoped-key')?.scopes).toEqual([]);
+  });
+});
+
+describe('fail-closed gateway configuration', () => {
+  it('enables authentication by default only in production', () => {
+    expect(apiKeyAuthEnabled({ NODE_ENV: 'production' })).toBe(true);
+    expect(apiKeyAuthEnabled({ NODE_ENV: 'development' })).toBe(false);
+    expect(apiKeyAuthEnabled({ NODE_ENV: 'test' })).toBe(false);
+    expect(() => apiKeyAuthEnabled({
+      NODE_ENV: 'production',
+      ENABLE_API_KEYS: 'yes',
+    })).toThrow('must be either "true" or "false"');
+  });
+
+  it('refuses to start enabled authentication without a bootstrap key', () => {
+    const previousKeys = process.env.API_KEYS;
+    const previousFile = process.env.API_KEYS_FILE;
+    delete process.env.API_KEYS;
+    delete process.env.API_KEYS_FILE;
+    try {
+      expect(() => setupApiGateway(express(), {
+        enableApiKeyAuth: true,
+        apiKeys: new Map(),
+      })).toThrow('no bootstrap key is configured');
+    } finally {
+      if (previousKeys === undefined) delete process.env.API_KEYS;
+      else process.env.API_KEYS = previousKeys;
+      if (previousFile === undefined) delete process.env.API_KEYS_FILE;
+      else process.env.API_KEYS_FILE = previousFile;
+    }
+  });
+
+  it('makes direct gateway setup fail closed by default in production', () => {
+    const previousNodeEnv = process.env.NODE_ENV;
+    const previousEnabled = process.env.ENABLE_API_KEYS;
+    const previousKeys = process.env.API_KEYS;
+    const previousFile = process.env.API_KEYS_FILE;
+    process.env.NODE_ENV = 'production';
+    delete process.env.ENABLE_API_KEYS;
+    delete process.env.API_KEYS;
+    delete process.env.API_KEYS_FILE;
+
+    try {
+      expect(() => setupApiGateway(express(), {
+        apiKeys: new Map(),
+      })).toThrow('no bootstrap key is configured');
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env.NODE_ENV;
+      else process.env.NODE_ENV = previousNodeEnv;
+      if (previousEnabled === undefined) delete process.env.ENABLE_API_KEYS;
+      else process.env.ENABLE_API_KEYS = previousEnabled;
+      if (previousKeys === undefined) delete process.env.API_KEYS;
+      else process.env.API_KEYS = previousKeys;
+      if (previousFile === undefined) delete process.env.API_KEYS_FILE;
+      else process.env.API_KEYS_FILE = previousFile;
+    }
+  });
+
+  it('loads a required bootstrap key from a mounted secret file', () => {
+    const directory = mkdtempSync(join(tmpdir(), 'oxscada-api-keys-'));
+    const secretFile = join(directory, 'api-keys');
+    const previousKeys = process.env.API_KEYS;
+    const previousFile = process.env.API_KEYS_FILE;
+    writeFileSync(secretFile, 'file-key:bootstrap:admin', { mode: 0o600 });
+    delete process.env.API_KEYS;
+    process.env.API_KEYS_FILE = secretFile;
+
+    try {
+      const manager = setupApiGateway(express(), {
+        enableApiKeyAuth: true,
+        apiKeys: new Map(),
+      });
+      expect(manager.getKeysMap().get('file-key')?.scopes).toEqual(['admin']);
+    } finally {
+      if (previousKeys === undefined) delete process.env.API_KEYS;
+      else process.env.API_KEYS = previousKeys;
+      if (previousFile === undefined) delete process.env.API_KEYS_FILE;
+      else process.env.API_KEYS_FILE = previousFile;
+      rmSync(directory, { recursive: true, force: true });
+    }
   });
 });
 

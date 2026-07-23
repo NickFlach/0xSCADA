@@ -16,7 +16,8 @@ COPY shared/ ./shared/
 RUN npm run build --workspace=server 2>/dev/null || npx tsc --project tsconfig.json
 
 FROM base AS production
-ENV NODE_ENV=production
+ENV NODE_ENV=production \
+    ENABLE_API_KEYS=true
 USER node
 COPY --from=deps /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist

@@ -6,7 +6,8 @@ import { securityHeaders } from "./middleware/security";
 import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
-import { setupApiGateway } from "./middleware/api-gateway";
+import { apiKeyAuthEnabled, setupApiGateway } from "./middleware/api-gateway";
+import { requestLoggingMiddleware } from "./middleware/request-logging";
 import { initializeDatabase } from "./storage";
 // Stateful startup services must stay in the static graph. On Node 20, tsx can
 // give import() a separate module instance from static consumers (#541).
@@ -41,7 +42,7 @@ const gatewayRateLimit = {
 };
 const gatewayConfig = {
   rateLimit: gatewayRateLimit,
-  enableApiKeyAuth: process.env.ENABLE_API_KEYS === 'true',
+  enableApiKeyAuth: apiKeyAuthEnabled(),
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz', '/api/docs'],
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(','),
 };
@@ -65,35 +66,13 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
+// Install response capture before the gateway's own routes so one-time
+// credentials can be returned while being explicitly redacted from logs.
+app.use(requestLoggingMiddleware());
+
 // Activate the configured gateway after parsing so its payload guard can
 // inspect request bodies. Health probes were mounted above and remain public.
-setupApiGateway(app, gatewayConfig);
-
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
-
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
-
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+const apiKeyManager = setupApiGateway(app, gatewayConfig);
 
 (async () => {
   // Initialize the database first — downstream services and health checks
@@ -158,7 +137,12 @@ app.use((req, res, next) => {
     log("Initialized demo gateway drivers for development mode");
   }
   
-  await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app, {
+    websocketAuth: {
+      required: gatewayConfig.enableApiKeyAuth,
+      apiKeys: apiKeyManager.getKeysMap(),
+    },
+  });
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

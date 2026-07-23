@@ -21,7 +21,7 @@ server:
     secretKey: API_KEYS
     # Enables API key authentication for the entire API gateway. Control-plane
     # routes require API_KEYS independently of this setting.
-    enableGlobalAuth: false
+    enableGlobalAuth: true
   resources:
     requests:
       cpu: 250m

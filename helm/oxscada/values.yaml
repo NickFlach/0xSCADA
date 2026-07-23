@@ -16,7 +16,7 @@ server:
     existingSecret: ""
     secretKey: API_KEYS
     # Require an API key on every non-public route.
-    enableGlobalAuth: false
+    enableGlobalAuth: true
   resources:
     requests:
       cpu: 200m
