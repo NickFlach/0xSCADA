@@ -1,0 +1,102 @@
+name: Anchor Pipeline Live Anvil E2E
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/anchor-pipeline-anvil.yml'
+      - 'contracts/EventAnchor.sol'
+      - 'foundry.toml'
+      - 'server/integrity/**'
+      - 'test/integrity/anchor-pipeline-anvil.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+  push:
+    branches: [main]
+    paths:
+      - 'contracts/EventAnchor.sol'
+      - 'foundry.toml'
+      - 'server/integrity/**'
+      - 'test/integrity/anchor-pipeline-anvil.test.ts'
+      - 'package.json'
+      - 'package-lock.json'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anchor-pipeline-anvil-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  live-anvil:
+    name: AnchorPipeline → EventAnchor
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+
+      - uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: stable
+
+      - run: npm ci
+
+      - name: Compile EventAnchor
+        run: forge build
+
+      - name: Start Anvil and capture its ephemeral signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          anvil \
+            --host 127.0.0.1 \
+            --port 8545 \
+            --block-time 1 \
+            > "$RUNNER_TEMP/anvil.log" 2>&1 &
+          echo "ANVIL_PID=$!" >> "$GITHUB_ENV"
+
+          for attempt in $(seq 1 30); do
+            if cast chain-id --rpc-url http://127.0.0.1:8545 >/dev/null 2>&1; then
+              break
+            fi
+            if [ "$attempt" -eq 30 ]; then
+              echo "Anvil did not become ready" >&2
+              exit 1
+            fi
+            sleep 1
+          done
+
+          anvil_private_key="$(
+            awk '
+              /Private Keys/ { in_keys = 1; next }
+              in_keys && $1 == "(0)" { print $2; exit }
+            ' "$RUNNER_TEMP/anvil.log"
+          )"
+          if ! [[ "$anvil_private_key" =~ ^0x[0-9a-fA-F]{64}$ ]]; then
+            echo "Could not derive Anvil signer from local process output" >&2
+            exit 1
+          fi
+          echo "::add-mask::$anvil_private_key"
+          echo "ANVIL_PRIVATE_KEY=$anvil_private_key" >> "$GITHUB_ENV"
+          echo "ANVIL_RPC_URL=http://127.0.0.1:8545" >> "$GITHUB_ENV"
+
+      - name: Run live anchor-chain test
+        env:
+          ANCHOR_LIVE_E2E: '1'
+        run: npx vitest run test/integrity/anchor-pipeline-anvil.test.ts --reporter=verbose
+
+      - name: Stop Anvil
+        if: always()
+        shell: bash
+        run: |
+          if [ -n "${ANVIL_PID:-}" ]; then
+            kill "$ANVIL_PID" 2>/dev/null || true
+          fi
