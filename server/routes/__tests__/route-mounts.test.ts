@@ -2,7 +2,7 @@
  * Mount-path tests for the modules extracted from server/routes.ts (#446):
  * every public URL must survive the decomposition unchanged. The generator
  * endpoints whose implementations were deleted are restored and wired to the
- * server/blueprints modules (#479); only the DB-backed /seed remains a 501.
+ * server/blueprints modules (#479), including DB-backed import and seeding.
  */
 import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import express from 'express';
@@ -25,6 +25,13 @@ vi.mock('../../storage', () => ({
     getGeneratedCode: vi.fn(async () => [{ id: 'gc-1', codeHash: 'abc', sourceType: 'phase', sourceId: 'p1', txHash: null }]),
     getAssets: vi.fn(async () => [{ id: 'asset-1', nameOrTag: 'TR-MAIN-01' }]),
     getAssetsBySiteId: vi.fn(async () => [{ id: 'asset-1' }]),
+    upsertControlModuleType: vi.fn(async (input: any) => ({ id: 'cm-new', ...input })),
+    upsertUnitType: vi.fn(async (input: any) => ({ id: 'unit-new', ...input })),
+    upsertPhaseType: vi.fn(async (input: any) => ({ id: 'phase-new', ...input })),
+    createControlModuleInstance: vi.fn(async (input: any) => ({ id: 'cmi-new', ...input })),
+    createUnitInstance: vi.fn(async (input: any) => ({ id: 'ui-new', ...input })),
+    upsertVendor: vi.fn(async (input: any) => ({ id: `v-${input.name}`, ...input })),
+    upsertDataTypeMapping: vi.fn(async (input: any) => ({ id: `dt-${input.canonicalType}`, ...input })),
   },
 }));
 
@@ -40,6 +47,7 @@ import { blueprintRoutes } from '../blueprints';
 import { vendorRoutes } from '../vendors';
 import { codegenRoutes } from '../codegen';
 import { assetRoutes } from '../assets';
+import { storage } from '../../storage';
 
 let server: Server;
 let base: string;
@@ -105,12 +113,41 @@ describe('blueprint routes keep their public paths', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.success).toBe(true);
-    expect(body.persisted).toBe(false);
+    expect(body.persisted).toBe(true);
   });
 
-  it('POST /api/blueprints/seed still answers 501 (needs the blueprint DB layer)', async () => {
+  it('POST /api/blueprints/import persists parsed entities (#511)', async () => {
+    const res = await fetch(`${base}/api/blueprints/import`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        cmTypePackage: [{
+          name: 'cm-type-MotorValve.md',
+          content: [
+            '# CM TYPE: MotorValve',
+            '## Inputs',
+            '| Name | DataType |',
+            '| --- | --- |',
+            '| OpenCmd | Bool |',
+          ].join('\n'),
+        }],
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.persisted).toBe(true);
+    expect(body.parsed.cmTypes).toBe(1);
+    expect(storage.upsertControlModuleType).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'MotorValve' }),
+    );
+  });
+
+  it('POST /api/blueprints/seed is functional and reports seeded rows', async () => {
     const res = await fetch(`${base}/api/blueprints/seed`, { method: 'POST' });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.success).toBe(true);
+    expect(body.seeded.vendors).toBe(5);
   });
 });
 

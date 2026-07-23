@@ -2,11 +2,11 @@
  * Blueprint CRUD (ISA-88 control module / unit / phase types and instances).
  * Extracted from server/routes.ts (issue #446). Mounted at /api/blueprints.
  *
- * `import` and `seed` return 501: they depend on the blueprint parser and
- * seeder deleted with server/blueprints/ in commit 6f9d9219c — see #479.
+ * Imports and default seeding are persisted through the restored blueprint
+ * storage layer (issue #511).
  */
 
-import { Router, type Response } from "express";
+import { Router } from "express";
 import { storage } from "../storage";
 import { logError } from "../logger";
 import {
@@ -14,16 +14,103 @@ import {
   validateCMReferences,
   validateUnitReferences,
   validatePhaseReferences,
+  seedBlueprintDatabase,
   type BlueprintFiles,
 } from "../blueprints";
 
 const router = Router();
 
-function lostModule501(res: Response, capability: string): void {
-  res.status(501).json({
-    error: "Not Implemented",
-    message: `${capability} depends on the server/blueprints modules deleted in commit 6f9d9219c. Tracked in issue #479.`,
-  });
+async function persistBlueprintImport(
+  parsed: ReturnType<typeof importBlueprints>,
+): Promise<Record<string, number>> {
+  const controlModuleTypeIds = new Map<string, string>();
+  const unitTypeIds = new Map<string, string>();
+
+  for (const cmType of parsed.cmTypes) {
+    const stored = await storage.upsertControlModuleType({
+      name: cmType.name,
+      inputs: cmType.inputs,
+      outputs: cmType.outputs,
+      inOuts: cmType.inOuts,
+      sourcePackage: cmType.sourceFile,
+    });
+    controlModuleTypeIds.set(cmType.name, stored.id);
+  }
+
+  for (const unitType of parsed.unitTypes) {
+    const stored = await storage.upsertUnitType({
+      name: unitType.name,
+      description: unitType.description,
+      variables: unitType.variables,
+    });
+    unitTypeIds.set(unitType.name, stored.id);
+  }
+
+  for (const phaseType of parsed.phaseTypes) {
+    await storage.upsertPhaseType({
+      name: phaseType.name,
+      description: phaseType.description,
+      linkedModules: phaseType.linkedModules,
+      inputs: phaseType.inputs,
+      outputs: phaseType.outputs,
+      inOuts: phaseType.inOuts,
+      internalValues: phaseType.internalValues,
+      hmiParameters: phaseType.hmiParameters,
+      recipeParameters: phaseType.recipeParameters,
+      reportParameters: phaseType.reportParameters,
+      sequences: phaseType.sequences,
+    });
+  }
+
+  const unitInstanceIds = new Map<string, string>();
+  let unitInstances = 0;
+  for (const group of parsed.unitInstances) {
+    const unitTypeId = unitTypeIds.get(group.unitTypeName);
+    if (!unitTypeId) continue;
+    for (const instance of group.instances) {
+      const stored = await storage.createUnitInstance({
+        name: instance.name,
+        instanceNumber: instance.instanceNumber,
+        unitTypeId,
+        controllerId: instance.controller,
+        pidDrawing: instance.pidDrawing,
+        processCell: instance.processCell,
+        area: instance.area,
+        comment: instance.comment,
+      });
+      unitInstanceIds.set(instance.name, stored.id);
+      unitInstances += 1;
+    }
+  }
+
+  let controlModuleInstances = 0;
+  for (const group of parsed.cmInstances) {
+    const controlModuleTypeId = controlModuleTypeIds.get(group.cmTypeName);
+    if (!controlModuleTypeId) continue;
+    for (const instance of group.instances) {
+      await storage.createControlModuleInstance({
+        name: instance.name,
+        instanceNumber: instance.instanceNumber,
+        controlModuleTypeId,
+        controllerId: instance.controller,
+        unitInstanceId: instance.unitInstance
+          ? unitInstanceIds.get(instance.unitInstance)
+          : undefined,
+        pidDrawing: instance.pidDrawing,
+        comment: instance.comment,
+        configuration: instance.configuration,
+      });
+      controlModuleInstances += 1;
+    }
+  }
+
+  return {
+    cmTypes: parsed.cmTypes.length,
+    cmInstances: controlModuleInstances,
+    unitTypes: parsed.unitTypes.length,
+    unitInstances,
+    phaseTypes: parsed.phaseTypes.length,
+  };
 }
 
 // Control Module Types
@@ -146,11 +233,7 @@ router.get("/design-specs", async (req, res) => {
   }
 });
 
-// Parse + validate a blueprint package (#479). Restored parser + reference
-// validators. This parses and validates only — persisting the parsed entities
-// needs the blueprint DB layer, which was never restored (separate follow-up),
-// so the parsed result is returned rather than stored.
-router.post("/import", (req, res) => {
+router.post("/import", async (req, res) => {
   try {
     const files = req.body as BlueprintFiles;
     if (!files || (!files.cmTypePackage && !files.designSpec)) {
@@ -170,16 +253,11 @@ router.post("/import", (req, res) => {
     if (refErrors.length > 0) {
       return res.status(400).json({ error: "Reference validation failed", errors: refErrors, warnings: parsed.warnings });
     }
+    const persisted = await persistBlueprintImport(parsed);
     res.json({
       success: true,
-      persisted: false,
-      parsed: {
-        cmTypes: parsed.cmTypes.length,
-        cmInstances: parsed.cmInstances.length,
-        unitTypes: parsed.unitTypes.length,
-        unitInstances: parsed.unitInstances.length,
-        phaseTypes: parsed.phaseTypes.length,
-      },
+      persisted: true,
+      parsed: persisted,
       warnings: parsed.warnings,
     });
   } catch (error) {
@@ -188,10 +266,14 @@ router.post("/import", (req, res) => {
   }
 });
 
-// Seed database with default vendors — needs the blueprint DB layer (storage
-// CRUD + tables) which was never restored; tracked as a #479 follow-up.
-router.post("/seed", (req, res) => {
-  lostModule501(res, "Blueprint database seeding (needs the blueprint DB layer)");
+router.post("/seed", async (req, res) => {
+  try {
+    const seeded = await seedBlueprintDatabase();
+    res.json({ success: true, seeded });
+  } catch (error) {
+    logError(error, "Error seeding blueprint database:");
+    res.status(500).json({ error: "Failed to seed blueprint database" });
+  }
 });
 
 // Blueprints Summary
