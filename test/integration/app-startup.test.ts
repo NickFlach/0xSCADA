@@ -101,6 +101,9 @@ describe('App Startup Integration', () => {
   test('health endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/health`);
     const body = await response.text();
+    // Let the spawned server's stdout flush so the diagnostic dump below
+    // includes the log lines emitted while serving this request.
+    await sleep(500);
     // A startup smoke test must fail when the server boots unhealthy: the
     // required components (database, store-and-forward) have no environment
     // dependencies in this configuration, so anything short of

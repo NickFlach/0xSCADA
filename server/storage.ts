@@ -19,6 +19,9 @@ let sqliteClient: Database | null = null;
 let db: any = null;
 let dbType: 'postgres' | 'sqlite' = 'postgres';
 
+// TEMP diagnostic for the CI-only unhealthy boot — remove before merge.
+console.log(`[storage] module loaded pid=${process.pid} url=${import.meta.url}`);
+
 // The module currently owns one physical database connection. Transactions
 // therefore need an application-level exclusive section: without it, unrelated
 // requests can interleave on that connection and be accidentally committed or
@@ -612,6 +615,8 @@ export const storage = {
    * connected once initialized.
    */
   healthCheck: async (): Promise<{ connected: boolean; type: string; error?: string }> => {
+    // TEMP diagnostic for the CI-only unhealthy boot — remove before merge.
+    console.log(`[storage] healthCheck pid=${process.pid} db=${db !== null} type=${dbType} url=${import.meta.url}`);
     if (!db) {
       return { connected: false, type: dbType, error: 'Database not initialized' };
     }
