@@ -15,14 +15,35 @@ spec:
       labels:
         app.kubernetes.io/component: gateway
     spec:
+      securityContext:
+        {{- toYaml .Values.gateway.podSecurityContext | nindent 8 }}
       containers:
         - name: gateway
           image: "{{ .Values.global.imageRegistry }}/gateway:{{ .Values.gateway.image.tag }}"
           imagePullPolicy: {{ .Values.global.imagePullPolicy }}
           ports:
             - containerPort: {{ .Values.gateway.port }}
+          env:
+            - name: PORT
+              value: {{ .Values.gateway.port | quote }}
+            - name: SERVER_URL
+              value: {{ default (printf "http://%s-server:%v" (include "oxscada-full.fullname" .) .Values.server.port) .Values.gateway.serverUrl | quote }}
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.gateway.securityContext | nindent 12 }}
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.gateway.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.gateway.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
 ---
 apiVersion: v1
 kind: Service

@@ -42,6 +42,12 @@ spec:
                   name: {{ . | quote }}
                   key: {{ $component.apiKeys.secretKey | quote }}
             {{- end }}
+          {{ else if eq $name "gateway" }}
+          env:
+            - name: PORT
+              value: {{ $component.port | quote }}
+            - name: SERVER_URL
+              value: {{ default (printf "http://oxscada-server:%v" $.Values.server.port) $component.serverUrl | quote }}
           {{ end }}
           resources:
             {{- toYaml $component.resources | nindent 12 }}
@@ -55,7 +61,7 @@ spec:
             periodSeconds: 20
           readinessProbe:
             httpGet:
-              path: /health
+              path: {{ if eq $name "gateway" }}/readyz{{ else }}/health{{ end }}
               port: {{ $component.port }}
             initialDelaySeconds: 5
             periodSeconds: 10

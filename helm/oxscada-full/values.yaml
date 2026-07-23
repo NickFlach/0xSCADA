@@ -57,6 +57,20 @@ gateway:
     repository: "{{ .Values.global.imageRegistry }}/gateway"
     tag: latest
   port: 8080
+  # Optional fixed upstream origin. When empty, the chart targets its server
+  # Service at http://<release>-server:<server.port>.
+  serverUrl: ""
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 100m

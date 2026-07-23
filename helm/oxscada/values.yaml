@@ -43,6 +43,9 @@ gateway:
     repository: oxscada-gateway
     tag: latest
   port: 8080
+  # Optional fixed upstream origin. When empty, the chart targets the server
+  # Service at http://oxscada-server:<server.port>.
+  serverUrl: ""
   resources:
     requests:
       cpu: 100m
