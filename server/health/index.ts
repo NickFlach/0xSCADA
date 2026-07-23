@@ -12,6 +12,9 @@ import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewa
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
 import { registry, metricsHandler } from '../metrics';
+import { fieldSimulator } from '../simulator';
+import { storeAndForwardService } from '../gateway/store-and-forward';
+import { getBridgeHealthStatus } from '../bridge';
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -65,8 +68,7 @@ healthManager.register(
 healthManager.registerSimple(
   'simulator',
   async () => {
-    // Just verify the import resolves — the simulator self-reports via events
-    const { fieldSimulator } = await import('../simulator');
+    // Just verify the singleton resolves — the simulator self-reports via events
     return fieldSimulator != null;
   },
   /* required */ false,
@@ -105,7 +107,6 @@ healthManager.registerSimple(
   'store-and-forward',
   async () => {
     try {
-      const { storeAndForwardService } = await import('../gateway/store-and-forward');
       const status = await storeAndForwardService.healthCheck();
       return status.healthy;
     } catch {
@@ -120,7 +121,6 @@ healthManager.registerSimple(
   'bridges',
   async () => {
     try {
-      const { getBridgeHealthStatus } = await import('../bridge');
       const status = await getBridgeHealthStatus();
       return status.eventAnchor.healthy && status.stateSync.healthy;
     } catch {
