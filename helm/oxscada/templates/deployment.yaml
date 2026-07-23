@@ -29,6 +29,20 @@ spec:
           ports:
             - containerPort: {{ $component.port }}
               name: http
+          {{ if eq $name "server" }}
+          env:
+            - name: OXSCADA_REPLICA_COUNT
+              value: "{{ $component.replicaCount }}"
+            - name: ENABLE_API_KEYS
+              value: {{ $component.apiKeys.enableGlobalAuth | quote }}
+            {{- with $component.apiKeys.existingSecret }}
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ . | quote }}
+                  key: {{ $component.apiKeys.secretKey | quote }}
+            {{- end }}
+          {{ end }}
           resources:
             {{- toYaml $component.resources | nindent 12 }}
           securityContext:

@@ -7,6 +7,7 @@ import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
 import { setupApiGateway } from "./middleware/api-gateway";
+import { initializeDatabase } from "./storage";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -83,7 +84,6 @@ app.use((req, res, next) => {
 (async () => {
   // Initialize the database first — downstream services and health checks
   // depend on an established connection (SQLite fallback in development).
-  const { initializeDatabase } = await import("./storage");
   await initializeDatabase();
   log("Database initialized");
 
@@ -204,6 +204,11 @@ app.use((req, res, next) => {
       // Connect to NATS for SCADA event publishing
       const { natsPublisher } = await import("./services/nats");
       await natsPublisher.connect();
+
+      // Record the boot-resolved anchor routing: runtime switches (#455) are
+      // process-local, so a restart reverts to env and this makes that visible.
+      const { logAnchorBackendBootState } = await import("./bridge/anchor-backend");
+      logAnchorBackendBootState();
 
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);

@@ -9,6 +9,12 @@ server:
     repository: oxscada-server
     tag: latest
   port: 5000
+  apiKeys:
+    # Existing Secret containing API_KEYS. The chart never generates a default
+    # credential. Control-plane routes remain fail-closed when this is empty.
+    existingSecret: ""
+    secretKey: API_KEYS
+    enableGlobalAuth: false
   resources:
     requests:
       cpu: 200m

@@ -24,6 +24,7 @@ import { geometryRoutes } from "./routes/geometry";
 import { blueprintRoutes } from "./routes/blueprints";
 import { vendorRoutes } from "./routes/vendors";
 import { codegenRoutes } from "./routes/codegen";
+import { adminAnchorRoutes } from "./routes/admin-anchor"; // #455 Anchor-Backend Switch UX
 import { getFluxPublisher } from "./services/flux";
 
 import { tagStreamServer } from "./websocket/tag-stream";
@@ -63,6 +64,7 @@ export async function registerRoutes(
   app.use("/api/blueprints", blueprintRoutes);
   app.use("/api", vendorRoutes);
   app.use("/api", codegenRoutes);
+  app.use("/api/admin/anchor-backend", adminAnchorRoutes); // #455 Anchor-Backend Switch UX
 
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {
