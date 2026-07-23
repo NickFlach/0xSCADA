@@ -338,7 +338,9 @@ Prometheus metrics exposed at `/metrics` on all services.
 90+ documents across the `docs/` directory:
 
 ### Architecture
-Bidirectional sync · Chiral network topology · Decentralized orchestration · Event batching · HSM integration · L2 kernel integration · Resonant consensus · Resonant scheduler · Sublinear solver · Proof verification
+Bidirectional sync · Chiral network topology · Decentralized orchestration · Event batching · HSM integration · L2 kernel integration · Resonant scheduler · Sublinear solver · Proof verification
+
+> Consensus: the shipping "Resonant Consensus" protocol (Kuramoto-BFT) is specified in [0xSCADA-node ADR-0001](https://github.com/NickFlach/0xSCADA-node/blob/main/docs/adr/ADR-0001-resonant-consensus.md). An earlier BLS-based proposal by the same name was not adopted and is archived at `docs/archive/resonant-consensus-bls-proposal.md`.
 
 ### ADRs (0008–0025)
 `0008` Zero-trust agents · `0009` Emergence guardrails · `0010` Agent certification · `0011` OT-IT convergence · `0012` End-to-end integration · `0013` Autonomous agents · `0014` Production scale · `0022` Constellation unification · `0023` Evolutionary paradox resolution · `0024` Sublinear decoherence prediction · `0025` Living Fano dashboard

@@ -75,7 +75,7 @@ Wave 2 will build on this integrated foundation:
 
 - **AI/ML Anomaly Detection** — Feed historian data into ML models for predictive maintenance
 - **Autonomous Agent Governance** — Agents that can propose and execute operational changes within guardrails (ADR-0007, ADR-0009)
-- **Advanced Consensus** — Resonant consensus and sublinear solver integration for multi-site coordination
+- **Advanced Consensus** — Resonant consensus (Kuramoto-BFT, shipped in 0xSCADA-node — see its ADR-0001) and sublinear solver integration for multi-site coordination
 - **Digital Twin Simulation** — Use the unified pipeline to drive real-time digital twin models
 - **Federated Learning** — Cross-site model training without centralizing sensitive process data
 

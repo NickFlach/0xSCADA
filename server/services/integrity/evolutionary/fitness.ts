@@ -15,6 +15,12 @@
 import type { Resolution } from '../paradox-resolver';
 import type { ResolutionGenome, GenomeEvaluation } from './genome';
 
+/** Clamp to [0, 1], mapping NaN/Infinity to 0 so bad inputs cannot poison ranking. */
+function clamp01(x: number): number {
+  if (!Number.isFinite(x)) return 0;
+  return x < 0 ? 0 : x > 1 ? 1 : x;
+}
+
 // ─── Types ──────────────────────────────────────────────────────────────────
 
 export interface FitnessRecord {
@@ -85,7 +91,7 @@ export class FitnessEvaluator {
         ? this.config.physicsPenaltyWeight
         : 0;
 
-    const rawFitness = Math.max(0, Math.min(1, confidenceScore + efficiencyBonus - physicsPenalty));
+    const rawFitness = clamp01(confidenceScore + efficiencyBonus - physicsPenalty);
 
     const record: FitnessRecord = {
       timestamp: Date.now(),
@@ -114,7 +120,7 @@ export class FitnessEvaluator {
     latest.validationBonus = confirmed
       ? this.config.validationConfirmBonus
       : -this.config.validationRejectPenalty;
-    latest.rawFitness = Math.max(0, Math.min(1, latest.rawFitness + latest.validationBonus));
+    latest.rawFitness = clamp01(latest.rawFitness + latest.validationBonus);
   }
 
   /**
@@ -124,19 +130,38 @@ export class FitnessEvaluator {
   getFitness(genomeId: string): number {
     const records = this.records.get(genomeId);
     if (!records || records.length === 0) return 0;
+    return this.decayWeightedAverage(records.map(r => r.rawFitness));
+  }
 
+  /**
+   * Genome-aware fitness (#451 M2): use this evaluator's records if it has any,
+   * otherwise fall back to the genome's own inherited `fitnessHistory`. Elites
+   * and mutation-clones carry their history across generations, so their
+   * fitness survives even when this evaluator's per-ID records were pruned.
+   */
+  getFitnessForGenome(genome: ResolutionGenome): number {
+    const records = this.records.get(genome.id);
+    if (records && records.length > 0) {
+      return this.decayWeightedAverage(records.map(r => r.rawFitness));
+    }
+    if (genome.fitnessHistory.length > 0) {
+      return this.decayWeightedAverage(genome.fitnessHistory);
+    }
+    return 0;
+  }
+
+  /** Exponential-decay weighted average: most recent value weighted highest. */
+  private decayWeightedAverage(values: number[]): number {
+    if (values.length === 0) return 0;
     let totalWeight = 0;
     let weightedSum = 0;
-    const n = records.length;
-
+    const n = values.length;
     for (let i = 0; i < n; i++) {
-      // Most recent record has highest weight
       const age = n - 1 - i;
       const w = Math.pow(this.config.decayFactor, age);
-      weightedSum += records[i].rawFitness * w;
+      weightedSum += values[i] * w;
       totalWeight += w;
     }
-
     return totalWeight > 0 ? weightedSum / totalWeight : 0;
   }
 
