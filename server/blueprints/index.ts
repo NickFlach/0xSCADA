@@ -9,7 +9,6 @@ export * from "./code-generator";
 export * from "./siemens-adapter";
 export * from "./rockwell-adapter";
 export * from "./seed-vendors";
-export * from "./seed-database";
 
 // Standard Control Module Types - ISA-88 Compliant
 export * from "./actuator-cm-types";

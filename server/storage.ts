@@ -8,6 +8,7 @@ import { Database } from 'sqlite3';
 import * as schema from '@shared/schema';
 import * as sqliteSchema from '@shared/schema-sqlite';
 import { randomUUID } from 'crypto';
+import { AsyncLocalStorage } from 'node:async_hooks';
 import path from 'path';
 
 const isDevelopment = process.env.NODE_ENV === 'development';
@@ -17,6 +18,34 @@ let pgClient: Client | null = null;
 let sqliteClient: Database | null = null;
 let db: any = null;
 let dbType: 'postgres' | 'sqlite' = 'postgres';
+
+// The module currently owns one physical database connection. Transactions
+// therefore need an application-level exclusive section: without it, unrelated
+// requests can interleave on that connection and be accidentally committed or
+// rolled back with an import. AsyncLocalStorage makes the mutex re-entrant for
+// storage calls made by the transaction callback itself.
+interface StorageTransactionContext {
+  active: boolean;
+}
+
+const transactionContext = new AsyncLocalStorage<StorageTransactionContext>();
+let storageLockTail: Promise<void> = Promise.resolve();
+
+async function withStorageLock<T>(operation: () => Promise<T>): Promise<T> {
+  if (transactionContext.getStore()?.active) return operation();
+
+  const previous = storageLockTail.catch(() => undefined);
+  let release!: () => void;
+  storageLockTail = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  await previous;
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
 
 type BlueprintTableName =
   | 'vendors'
@@ -104,14 +133,16 @@ CREATE TABLE IF NOT EXISTS unit_instances (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, instance_number INTEGER,
   unit_type_id TEXT NOT NULL, controller_id TEXT, pid_drawing TEXT,
   process_cell TEXT, area TEXT, comment TEXT, site_id TEXT,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  UNIQUE(unit_type_id, name)
 );
 CREATE TABLE IF NOT EXISTS control_module_instances (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, instance_number INTEGER,
   control_module_type_id TEXT NOT NULL, controller_id TEXT, unit_instance_id TEXT,
   pid_drawing TEXT, comment TEXT, configuration TEXT NOT NULL DEFAULT '{}',
   current_state TEXT NOT NULL DEFAULT '{}', site_id TEXT, asset_id TEXT,
-  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  UNIQUE(control_module_type_id, name)
 );
 CREATE TABLE IF NOT EXISTS phase_instances (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, instance_number INTEGER,
@@ -145,6 +176,10 @@ CREATE TABLE IF NOT EXISTS controllers (
   configuration TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'offline',
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_instances_type_name
+  ON unit_instances(unit_type_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_instances_type_name
+  ON control_module_instances(control_module_type_id, name);
 `;
 
 function toSnakeCase(value: string): string {
@@ -383,16 +418,29 @@ function requireDatabase(): any {
   return getDatabase();
 }
 
+/**
+ * Run a raw Drizzle operation behind the same re-entrant lock used by storage
+ * helpers. Modules that need a table not represented by the CRUD facade must
+ * use this seam instead of retaining the shared single-connection handle.
+ */
+export async function withLockedDatabase<T>(
+  operation: (database: any) => Promise<T>,
+): Promise<T> {
+  return withStorageLock(() => operation(requireDatabase()));
+}
+
 async function createRecord<T>(
   pgTable: any,
   sqliteTable: BlueprintTableName,
   input: Record<string, unknown>,
 ): Promise<T> {
-  if (dbType === 'sqlite') {
-    return await sqliteInsert(sqliteTable, input) as T;
-  }
-  const [created] = await requireDatabase().insert(pgTable).values(input).returning();
-  return created as T;
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      return await sqliteInsert(sqliteTable, input) as T;
+    }
+    const [created] = await requireDatabase().insert(pgTable).values(input).returning();
+    return created as T;
+  });
 }
 
 async function listRecords<T>(
@@ -405,13 +453,15 @@ async function listRecords<T>(
     sqliteOrder?: string;
   } = {},
 ): Promise<T[]> {
-  if (dbType === 'sqlite') {
-    return await sqliteFind(sqliteTable, options.sqliteWhere, options.sqliteOrder) as T[];
-  }
-  let query = requireDatabase().select().from(pgTable);
-  if (options.pgWhere) query = query.where(options.pgWhere);
-  if (options.pgOrder) query = query.orderBy(options.pgOrder);
-  return await query as T[];
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      return await sqliteFind(sqliteTable, options.sqliteWhere, options.sqliteOrder) as T[];
+    }
+    let query = requireDatabase().select().from(pgTable);
+    if (options.pgWhere) query = query.where(options.pgWhere);
+    if (options.pgOrder) query = query.orderBy(options.pgOrder);
+    return await query as T[];
+  });
 }
 
 async function firstRecord<T>(
@@ -430,19 +480,124 @@ async function updateRecord<T>(
   id: string,
   input: Record<string, unknown>,
 ): Promise<T> {
-  if (dbType === 'sqlite') {
-    return await sqliteUpdate(sqliteTable, id, input) as T;
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      return await sqliteUpdate(sqliteTable, id, input) as T;
+    }
+    const [updated] = await requireDatabase()
+      .update(pgTable)
+      .set(input)
+      .where(eq(pgTable.id, id))
+      .returning();
+    return updated as T;
+  });
+}
+
+async function upsertRecord<T>(
+  pgTable: any,
+  sqliteTable: BlueprintTableName,
+  insertInput: Record<string, unknown>,
+  updateInput: Record<string, unknown>,
+  pgWhere: unknown,
+  sqliteWhere: Record<string, unknown>,
+  conflictTarget: unknown[],
+): Promise<T> {
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      const [existing] = await sqliteFind(sqliteTable, sqliteWhere);
+      if (existing) {
+        return await sqliteUpdate(
+          sqliteTable,
+          existing.id as string,
+          updateInput,
+        ) as T;
+      }
+      try {
+        return await sqliteInsert(sqliteTable, insertInput) as T;
+      } catch (error) {
+        // Another process sharing the SQLite file may have won the unique-key
+        // race. Update and read back the canonical row; rethrow non-conflict
+        // failures. This also makes corrected imports converge on one value.
+        const [raced] = await sqliteFind(sqliteTable, sqliteWhere);
+        if (raced) {
+          return await sqliteUpdate(
+            sqliteTable,
+            raced.id as string,
+            updateInput,
+          ) as T;
+        }
+        throw error;
+      }
+    }
+
+    const database = requireDatabase();
+    const [upserted] = await database
+      .insert(pgTable)
+      .values(insertInput)
+      .onConflictDoUpdate({
+        target: conflictTarget,
+        set: updateInput,
+      })
+      .returning();
+    if (upserted) return upserted as T;
+
+    // PostgreSQL INSERT ... ON CONFLICT ... RETURNING should always return one
+    // row. Retain a defensive read-back so a driver anomaly fails explicitly.
+    const [existing] = await database
+      .select()
+      .from(pgTable)
+      .where(pgWhere)
+      .limit(1);
+    if (!existing) {
+      throw new Error(`Instance upsert conflict for ${sqliteTable} returned no row`);
+    }
+    return existing as T;
+  });
+}
+
+async function runStorageTransaction<T>(operation: () => Promise<T>): Promise<T> {
+  if (transactionContext.getStore()?.active) {
+    throw new Error('Nested storage transactions are not supported');
   }
-  const [updated] = await requireDatabase()
-    .update(pgTable)
-    .set(input)
-    .where(eq(pgTable.id, id))
-    .returning();
-  return updated as T;
+
+  return withStorageLock(() => {
+    const context: StorageTransactionContext = { active: true };
+    return transactionContext.run(context, async () => {
+      try {
+        requireDatabase();
+
+        if (dbType === 'postgres') {
+          if (!pgClient) throw new Error('PostgreSQL client is not initialized');
+          await pgClient.query('BEGIN');
+          try {
+            const result = await operation();
+            await pgClient.query('COMMIT');
+            return result;
+          } catch (error) {
+            await pgClient.query('ROLLBACK');
+            throw error;
+          }
+        }
+
+        await sqliteExec('BEGIN IMMEDIATE');
+        try {
+          const result = await operation();
+          await sqliteExec('COMMIT');
+          return result;
+        } catch (error) {
+          await sqliteExec('ROLLBACK');
+          throw error;
+        }
+      } finally {
+        context.active = false;
+      }
+    });
+  });
 }
 
 // Export storage object as expected by health/index.ts
 export const storage = {
+  transaction: runStorageTransaction,
   isConnected: () => db !== null,
   getHealth: () => ({
     connected: db !== null,
@@ -482,19 +637,38 @@ export const storage = {
       { name },
     ),
   upsertControlModuleType: async (input: schema.InsertControlModuleType) => {
-    const existing = await storage.getControlModuleTypeByName(input.name);
-    return existing
-      ? updateRecord<schema.ControlModuleType>(
-          schema.controlModuleTypes,
-          'control_module_types',
-          existing.id,
-          { ...input, updatedAt: new Date() },
-        )
-      : storage.createControlModuleType(input);
+    return upsertRecord<schema.ControlModuleType>(
+      schema.controlModuleTypes,
+      'control_module_types',
+      input,
+      { ...input, updatedAt: new Date() },
+      eq(schema.controlModuleTypes.name, input.name),
+      { name: input.name },
+      [schema.controlModuleTypes.name],
+    );
   },
 
   createControlModuleInstance: (input: schema.InsertControlModuleInstance) =>
     createRecord<schema.ControlModuleInstance>(schema.controlModuleInstances, 'control_module_instances', input),
+  upsertControlModuleInstance: (input: schema.InsertControlModuleInstance) =>
+    upsertRecord<schema.ControlModuleInstance>(
+      schema.controlModuleInstances,
+      'control_module_instances',
+      input,
+      { ...input, updatedAt: new Date() },
+      and(
+        eq(schema.controlModuleInstances.controlModuleTypeId, input.controlModuleTypeId),
+        eq(schema.controlModuleInstances.name, input.name),
+      ),
+      {
+        controlModuleTypeId: input.controlModuleTypeId,
+        name: input.name,
+      },
+      [
+        schema.controlModuleInstances.controlModuleTypeId,
+        schema.controlModuleInstances.name,
+      ],
+    ),
   getControlModuleInstances: () =>
     listRecords<schema.ControlModuleInstance>(schema.controlModuleInstances, 'control_module_instances'),
   getControlModuleInstancesByTypeId: (typeId: string) =>
@@ -518,19 +692,32 @@ export const storage = {
       { name },
     ),
   upsertUnitType: async (input: schema.InsertUnitType) => {
-    const existing = await storage.getUnitTypeByName(input.name);
-    return existing
-      ? updateRecord<schema.UnitType>(
-          schema.unitTypes,
-          'unit_types',
-          existing.id,
-          { ...input, updatedAt: new Date() },
-        )
-      : storage.createUnitType(input);
+    return upsertRecord<schema.UnitType>(
+      schema.unitTypes,
+      'unit_types',
+      input,
+      { ...input, updatedAt: new Date() },
+      eq(schema.unitTypes.name, input.name),
+      { name: input.name },
+      [schema.unitTypes.name],
+    );
   },
 
   createUnitInstance: (input: schema.InsertUnitInstance) =>
     createRecord<schema.UnitInstance>(schema.unitInstances, 'unit_instances', input),
+  upsertUnitInstance: (input: schema.InsertUnitInstance) =>
+    upsertRecord<schema.UnitInstance>(
+      schema.unitInstances,
+      'unit_instances',
+      input,
+      { ...input, updatedAt: new Date() },
+      and(
+        eq(schema.unitInstances.unitTypeId, input.unitTypeId),
+        eq(schema.unitInstances.name, input.name),
+      ),
+      { unitTypeId: input.unitTypeId, name: input.name },
+      [schema.unitInstances.unitTypeId, schema.unitInstances.name],
+    ),
   getUnitInstances: () => listRecords<schema.UnitInstance>(schema.unitInstances, 'unit_instances'),
   getUnitInstancesByTypeId: (typeId: string) =>
     listRecords<schema.UnitInstance>(
@@ -553,15 +740,15 @@ export const storage = {
       { name },
     ),
   upsertPhaseType: async (input: schema.InsertPhaseType) => {
-    const existing = await storage.getPhaseTypeByName(input.name);
-    return existing
-      ? updateRecord<schema.PhaseType>(
-          schema.phaseTypes,
-          'phase_types',
-          existing.id,
-          { ...input, updatedAt: new Date() },
-        )
-      : storage.createPhaseType(input);
+    return upsertRecord<schema.PhaseType>(
+      schema.phaseTypes,
+      'phase_types',
+      input,
+      { ...input, updatedAt: new Date() },
+      eq(schema.phaseTypes.name, input.name),
+      { name: input.name },
+      [schema.phaseTypes.name],
+    );
   },
 
   createPhaseInstance: (input: schema.InsertPhaseInstance) =>
@@ -606,15 +793,15 @@ export const storage = {
       { id },
     ),
   upsertVendor: async (input: schema.InsertVendor) => {
-    const existing = await storage.getVendorByName(input.name);
-    return existing
-      ? updateRecord<schema.Vendor>(
-          schema.vendors,
-          'vendors',
-          existing.id,
-          { ...input, updatedAt: new Date() },
-        )
-      : storage.createVendor(input);
+    return upsertRecord<schema.Vendor>(
+      schema.vendors,
+      'vendors',
+      input,
+      { ...input, updatedAt: new Date() },
+      eq(schema.vendors.name, input.name),
+      { name: input.name },
+      [schema.vendors.name],
+    );
   },
 
   createTemplatePackage: (input: schema.InsertTemplatePackage) =>
@@ -676,16 +863,24 @@ export const storage = {
       },
     ),
   upsertDataTypeMapping: async (input: schema.InsertDataTypeMapping) => {
-    const existing = (await storage.getDataTypeMappingsByVendor(input.vendorId))
-      .find((mapping) => mapping.canonicalType === input.canonicalType);
-    return existing
-      ? updateRecord<schema.DataTypeMapping>(
-          schema.dataTypeMappings,
-          'data_type_mappings',
-          existing.id,
-          input,
-        )
-      : storage.createDataTypeMapping(input);
+    return upsertRecord<schema.DataTypeMapping>(
+      schema.dataTypeMappings,
+      'data_type_mappings',
+      input,
+      input,
+      and(
+        eq(schema.dataTypeMappings.vendorId, input.vendorId),
+        eq(schema.dataTypeMappings.canonicalType, input.canonicalType),
+      ),
+      {
+        vendorId: input.vendorId,
+        canonicalType: input.canonicalType,
+      },
+      [
+        schema.dataTypeMappings.vendorId,
+        schema.dataTypeMappings.canonicalType,
+      ],
+    );
   },
 
   createController: (input: schema.InsertController) =>

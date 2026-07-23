@@ -13,10 +13,11 @@ import {
   importBlueprints,
   validateCMReferences,
   validateUnitReferences,
+  validateInstanceBindings,
   validatePhaseReferences,
-  seedBlueprintDatabase,
   type BlueprintFiles,
 } from "../blueprints";
+import { seedBlueprintDatabase } from "../blueprints/seed-database";
 
 const router = Router();
 
@@ -62,13 +63,18 @@ async function persistBlueprintImport(
     });
   }
 
-  const unitInstanceIds = new Map<string, string>();
+  const unitInstanceIds = new Map<string, Set<string>>();
   let unitInstances = 0;
   for (const group of parsed.unitInstances) {
-    const unitTypeId = unitTypeIds.get(group.unitTypeName);
-    if (!unitTypeId) continue;
     for (const instance of group.instances) {
-      const stored = await storage.createUnitInstance({
+      const unitTypeName = instance.unitType || group.unitTypeName;
+      const unitTypeId = unitTypeIds.get(unitTypeName);
+      if (!unitTypeId) {
+        throw new Error(
+          `Unit instance ${instance.name} references unknown Unit type ${unitTypeName}`,
+        );
+      }
+      const stored = await storage.upsertUnitInstance({
         name: instance.name,
         instanceNumber: instance.instanceNumber,
         unitTypeId,
@@ -78,7 +84,9 @@ async function persistBlueprintImport(
         area: instance.area,
         comment: instance.comment,
       });
-      unitInstanceIds.set(instance.name, stored.id);
+      const matchingIds = unitInstanceIds.get(instance.name) ?? new Set<string>();
+      matchingIds.add(stored.id);
+      unitInstanceIds.set(instance.name, matchingIds);
       unitInstances += 1;
     }
   }
@@ -88,13 +96,22 @@ async function persistBlueprintImport(
     const controlModuleTypeId = controlModuleTypeIds.get(group.cmTypeName);
     if (!controlModuleTypeId) continue;
     for (const instance of group.instances) {
-      await storage.createControlModuleInstance({
+      const matchingUnitIds = instance.unitInstance
+        ? unitInstanceIds.get(instance.unitInstance)
+        : undefined;
+      if (instance.unitInstance && matchingUnitIds?.size !== 1) {
+        throw new Error(
+          `CM instance ${instance.name} has an unresolved or ambiguous Unit instance ` +
+          `reference: ${instance.unitInstance}`,
+        );
+      }
+      await storage.upsertControlModuleInstance({
         name: instance.name,
         instanceNumber: instance.instanceNumber,
         controlModuleTypeId,
         controllerId: instance.controller,
-        unitInstanceId: instance.unitInstance
-          ? unitInstanceIds.get(instance.unitInstance)
+        unitInstanceId: matchingUnitIds
+          ? [...matchingUnitIds][0]
           : undefined,
         pidDrawing: instance.pidDrawing,
         comment: instance.comment,
@@ -248,12 +265,19 @@ router.post("/import", async (req, res) => {
     const refErrors = [
       ...validateCMReferences(parsed.cmTypes, parsed.cmInstances),
       ...validateUnitReferences(parsed.unitTypes, parsed.unitInstances),
+      ...validateInstanceBindings(
+        parsed.unitTypes,
+        parsed.unitInstances,
+        parsed.cmInstances,
+      ),
       ...validatePhaseReferences(parsed.cmTypes, parsed.phaseTypes),
     ];
     if (refErrors.length > 0) {
       return res.status(400).json({ error: "Reference validation failed", errors: refErrors, warnings: parsed.warnings });
     }
-    const persisted = await persistBlueprintImport(parsed);
+    const persisted = await storage.transaction(() =>
+      persistBlueprintImport(parsed),
+    );
     res.json({
       success: true,
       persisted: true,

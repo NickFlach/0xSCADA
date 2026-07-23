@@ -10,6 +10,7 @@ import type { Server } from 'http';
 
 vi.mock('../../storage', () => ({
   storage: {
+    transaction: vi.fn(async (operation: () => Promise<unknown>) => operation()),
     getControlModuleTypes: vi.fn(async () => [{ id: 'cm-1', name: 'Valve' }]),
     getControlModuleInstances: vi.fn(async () => [{ id: 'cmi-1' }]),
     getUnitTypes: vi.fn(async () => []),
@@ -30,6 +31,8 @@ vi.mock('../../storage', () => ({
     upsertPhaseType: vi.fn(async (input: any) => ({ id: 'phase-new', ...input })),
     createControlModuleInstance: vi.fn(async (input: any) => ({ id: 'cmi-new', ...input })),
     createUnitInstance: vi.fn(async (input: any) => ({ id: 'ui-new', ...input })),
+    upsertControlModuleInstance: vi.fn(async (input: any) => ({ id: 'cmi-new', ...input })),
+    upsertUnitInstance: vi.fn(async (input: any) => ({ id: 'ui-new', ...input })),
     upsertVendor: vi.fn(async (input: any) => ({ id: `v-${input.name}`, ...input })),
     upsertDataTypeMapping: vi.fn(async (input: any) => ({ id: `dt-${input.canonicalType}`, ...input })),
   },

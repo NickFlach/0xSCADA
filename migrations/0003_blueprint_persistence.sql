@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS vendors (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(100) NOT NULL UNIQUE,
+  name VARCHAR(100) NOT NULL,
   display_name VARCHAR(255) NOT NULL,
   description TEXT,
   platforms JSONB NOT NULL DEFAULT '[]'::jsonb,
@@ -31,7 +31,7 @@ CREATE TABLE IF NOT EXISTS template_packages (
 
 CREATE TABLE IF NOT EXISTS control_module_types (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL UNIQUE,
+  name VARCHAR(255) NOT NULL,
   vendor_id UUID REFERENCES vendors(id),
   version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
   description TEXT,
@@ -48,7 +48,7 @@ CREATE TABLE IF NOT EXISTS control_module_types (
 
 CREATE TABLE IF NOT EXISTS unit_types (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL UNIQUE,
+  name VARCHAR(255) NOT NULL,
   vendor_id UUID REFERENCES vendors(id),
   version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
   description TEXT,
@@ -61,7 +61,7 @@ CREATE TABLE IF NOT EXISTS unit_types (
 
 CREATE TABLE IF NOT EXISTS phase_types (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  name VARCHAR(255) NOT NULL UNIQUE,
+  name VARCHAR(255) NOT NULL,
   vendor_id UUID REFERENCES vendors(id),
   version VARCHAR(50) NOT NULL DEFAULT '1.0.0',
   description TEXT,
@@ -164,8 +164,7 @@ CREATE TABLE IF NOT EXISTS data_type_mappings (
   size INTEGER,
   precision INTEGER,
   metadata JSONB NOT NULL DEFAULT '{}'::jsonb,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  UNIQUE (vendor_id, canonical_type)
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS controllers (
@@ -182,9 +181,19 @@ CREATE TABLE IF NOT EXISTS controllers (
   updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_vendors_name ON vendors(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_types_name ON control_module_types(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_types_name ON unit_types(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_phase_types_name ON phase_types(name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_data_type_mappings_vendor_canonical
+  ON data_type_mappings(vendor_id, canonical_type);
 CREATE INDEX IF NOT EXISTS idx_template_packages_vendor ON template_packages(vendor_id);
 CREATE INDEX IF NOT EXISTS idx_control_module_instances_type ON control_module_instances(control_module_type_id);
 CREATE INDEX IF NOT EXISTS idx_unit_instances_type ON unit_instances(unit_type_id);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_instances_type_name
+  ON control_module_instances(control_module_type_id, name);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_instances_type_name
+  ON unit_instances(unit_type_id, name);
 CREATE INDEX IF NOT EXISTS idx_phase_instances_type ON phase_instances(phase_type_id);
 CREATE INDEX IF NOT EXISTS idx_generated_code_source ON generated_code(source_type, source_id);
 CREATE INDEX IF NOT EXISTS idx_controllers_vendor ON controllers(vendor_id);
