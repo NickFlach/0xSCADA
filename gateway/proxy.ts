@@ -510,6 +510,15 @@ function proxyHttpRequest(
         if (responseArrivedEarly) {
           discardRemainingBody = true;
           request.resume();
+          // A response can arrive before a declared Content-Length upload is
+          // complete (for example, an immediate 401). Ending the client
+          // request does not fill the missing bytes, so that upstream socket
+          // must never return to the keep-alive pool: a later request would
+          // otherwise be parsed as the remainder of this request body.
+          if (declaredLength !== null && receivedBytes < declaredLength) {
+            upstreamRequest.shouldKeepAlive = false;
+            incoming.once("end", () => incoming.socket.destroy());
+          }
           if (!upstreamBodyEnded) {
             upstreamBodyEnded = true;
             upstreamRequest.end();

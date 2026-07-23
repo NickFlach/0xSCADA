@@ -323,6 +323,55 @@ describe("HTTP proxy", () => {
     expect(result.headers.connection).toBe("close");
   });
 
+  it("never reuses an upstream socket after an incomplete declared upload", async () => {
+    const seenPaths: string[] = [];
+    const upstream = createServer((incoming, response) => {
+      seenPaths.push(incoming.url ?? "");
+      if (incoming.url === "/early") {
+        response.writeHead(401);
+        response.end("denied");
+        return;
+      }
+      incoming.resume();
+      incoming.once("end", () => response.end("next-ok"));
+    });
+    const upstreamOrigin = await listen(upstream);
+    const { origin } = await startGateway(upstreamOrigin, {
+      serverUrl: upstreamOrigin,
+      timeouts: { requestBodyMs: 250, responseHeadersMs: 250 },
+    });
+    const target = new URL(origin);
+
+    const early = await new Promise<CapturedResponse>((resolve, reject) => {
+      const clientRequest = createServerRequest({
+        hostname: target.hostname,
+        port: target.port,
+        method: "POST",
+        path: "/early",
+        headers: { "content-length": "100" },
+      }, (response) => {
+        const chunks: Buffer[] = [];
+        response.on("data", (chunk: Buffer) => chunks.push(chunk));
+        response.once("end", () => resolve({
+          statusCode: response.statusCode ?? 0,
+          headers: response.headers,
+          chunks,
+          body: Buffer.concat(chunks).toString(),
+        }));
+      });
+      clientRequest.once("error", reject);
+      clientRequest.write("partial");
+    });
+
+    expect(early.statusCode).toBe(401);
+    expect(early.headers.connection).toBe("close");
+
+    const next = await request(origin, "/next");
+    expect(next.statusCode).toBe(200);
+    expect(next.body).toBe("next-ok");
+    expect(seenPaths).toEqual(["/early", "/next"]);
+  });
+
   it("bounds incomplete request bodies and closes the client connection", async () => {
     const upstream = createServer((incoming) => incoming.resume());
     const upstreamOrigin = await listen(upstream);
