@@ -8,9 +8,7 @@ export * from "./importer";
 export * from "./code-generator";
 export * from "./siemens-adapter";
 export * from "./rockwell-adapter";
-// seed-vendors / seed-database are excluded (#479): they depend on the blueprint
-// DB tables + storage CRUD, which were never restored into the operative schema.
-// Restoring the DB layer is tracked as a separate follow-up.
+export * from "./seed-vendors";
 
 // Standard Control Module Types - ISA-88 Compliant
 export * from "./actuator-cm-types";

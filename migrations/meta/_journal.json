@@ -15,6 +15,20 @@
       "when": 1739782801000,
       "tag": "0002_seed_rbac_defaults",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1784780400000,
+      "tag": "0003_blueprint_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1784780403000,
+      "tag": "0006_blueprint_instance_identity",
+      "breakpoints": true
     }
   ]
 }

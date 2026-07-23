@@ -4,7 +4,7 @@ import { storage } from "./storage";
 import { blockchainService } from "./blockchain";
 import { logError } from "./logger";
 import { insertSiteSchema, insertEventAnchorSchema, insertMaintenanceRecordSchema } from "@shared/schema";
-import { fromZodError } from "zod-validation-error";
+import { fromZodError } from "zod-validation-error/v4";
 import { agentRoutes } from "./routes/agents";
 import { eventRoutes } from "./routes/events";
 import { batchRoutes } from "./routes/batch";
