@@ -173,9 +173,15 @@ describe('Fuzz: JSON Canonicalization', () => {
           const canonical = canonicalize(obj);
           const parsed = JSON.parse(canonical);
           const keys = Object.keys(parsed);
-          
-          const sortedKeys = [...keys].sort();
-          expect(keys).toEqual(sortedKeys);
+
+          // canonicalize() sorts keys lexicographically, but a JSON round-trip
+          // re-orders array-index-like keys (e.g. "0") ahead of string keys per
+          // ECMAScript object key enumeration. The expected order is therefore
+          // integer-index keys (ascending) followed by the remaining keys sorted.
+          const isIndex = (k: string) => /^(0|[1-9]\d*)$/.test(k) && Number(k) < 2 ** 32 - 1;
+          const intKeys = keys.filter(isIndex).sort((a, b) => Number(a) - Number(b));
+          const strKeys = keys.filter((k) => !isIndex(k)).sort();
+          expect(keys).toEqual([...intKeys, ...strKeys]);
         }
       ),
       { numRuns: 200 }
