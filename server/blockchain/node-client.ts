@@ -47,7 +47,10 @@ export interface NodeClientOptions {
 
 export class NodeUnreachableError extends Error {
   readonly code = "validator-unreachable" as const;
-  constructor(public readonly nodeId: string, cause?: unknown) {
+  constructor(
+    public readonly nodeId: string,
+    cause?: unknown,
+  ) {
     super(`Validator ${nodeId} unreachable: ${describeCause(cause)}`);
     this.name = "NodeUnreachableError";
   }
@@ -55,7 +58,10 @@ export class NodeUnreachableError extends Error {
 
 export class NodeTimeoutError extends Error {
   readonly code = "validator-timeout" as const;
-  constructor(public readonly nodeId: string, public readonly timeoutMs: number) {
+  constructor(
+    public readonly nodeId: string,
+    public readonly timeoutMs: number,
+  ) {
     super(`Validator ${nodeId} did not respond within ${timeoutMs}ms`);
     this.name = "NodeTimeoutError";
   }
@@ -63,7 +69,10 @@ export class NodeTimeoutError extends Error {
 
 export class StateKeyNotFoundError extends Error {
   readonly code = "key-not-found" as const;
-  constructor(public readonly nodeId: string, public readonly key: string) {
+  constructor(
+    public readonly nodeId: string,
+    public readonly key: string,
+  ) {
     super(`Key "${key}" not found on validator ${nodeId}`);
     this.name = "StateKeyNotFoundError";
   }
@@ -76,8 +85,33 @@ export class NodeRpcError extends Error {
     public readonly httpStatus: number,
     detail?: string,
   ) {
-    super(`Validator ${nodeId} RPC error (HTTP ${httpStatus})${detail ? `: ${detail}` : ""}`);
+    super(
+      `Validator ${nodeId} RPC error (HTTP ${httpStatus})${detail ? `: ${detail}` : ""}`,
+    );
     this.name = "NodeRpcError";
+  }
+}
+
+export type StateProtocolV2Field = "nonce" | "observedAt";
+
+/**
+ * The upstream validator returned the legacy signed-state shape. Treat this as
+ * a rollout incompatibility, not as a generic transport/RPC failure: accepting
+ * v1 would remove the request challenge and freshness guarantees.
+ */
+export class StateProtocolVersionError extends Error {
+  readonly code = "state-protocol-incompatible" as const;
+  readonly expectedProtocol = "oxscada-state-v2" as const;
+
+  constructor(
+    public readonly nodeId: string,
+    public readonly incompatibleFields: readonly StateProtocolV2Field[],
+  ) {
+    super(
+      `Validator ${nodeId} returned an incompatible signed-state response; ` +
+        `oxscada-state-v2 requires valid ${incompatibleFields.join(" and ")}`,
+    );
+    this.name = "StateProtocolVersionError";
   }
 }
 
@@ -101,9 +135,28 @@ function isSignedStateResponse(body: unknown): body is SignedStateResponse {
   return (
     typeof b.key === "string" &&
     typeof b.blockHeight === "number" &&
+    typeof b.nonce === "string" &&
+    typeof b.observedAt === "string" &&
     typeof b.signature === "string" &&
+    (b.keyId === undefined || typeof b.keyId === "string") &&
     "value" in b
   );
+}
+
+function incompatibleStateV2Fields(body: unknown): StateProtocolV2Field[] {
+  if (body === null || typeof body !== "object") return [];
+  const b = body as Record<string, unknown>;
+  const hasSignedStateCore =
+    typeof b.key === "string" &&
+    typeof b.blockHeight === "number" &&
+    typeof b.signature === "string" &&
+    "value" in b;
+  if (!hasSignedStateCore) return [];
+
+  const incompatible: StateProtocolV2Field[] = [];
+  if (typeof b.nonce !== "string") incompatible.push("nonce");
+  if (typeof b.observedAt !== "string") incompatible.push("observedAt");
+  return incompatible;
 }
 
 /** A node not found / disabled in the registry — surfaced separately by the route. */
@@ -128,7 +181,8 @@ export class NodeRpcClient {
     const injected = options.fetchImpl;
     this.fetchImpl =
       injected ??
-      ((input, init) => (globalThis.fetch as unknown as FetchLike)(input, init));
+      ((input, init) =>
+        (globalThis.fetch as unknown as FetchLike)(input, init));
   }
 
   /**
@@ -139,8 +193,14 @@ export class NodeRpcClient {
    * @param key     State key to query.
    * @throws NodeTimeoutError | NodeUnreachableError | StateKeyNotFoundError | NodeRpcError
    */
-  async getState(nodeId: string, rpcUrl: string, key: string): Promise<SignedStateResponse> {
-    const url = `${rpcUrl.replace(/\/$/, "")}/state/${encodeURIComponent(key)}`;
+  async getState(
+    nodeId: string,
+    rpcUrl: string,
+    key: string,
+    nonce?: string,
+  ): Promise<SignedStateResponse> {
+    const query = nonce ? `?nonce=${encodeURIComponent(nonce)}` : "";
+    const url = `${rpcUrl.replace(/\/$/, "")}/state/${encodeURIComponent(key)}${query}`;
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
 
@@ -179,11 +239,24 @@ export class NodeRpcClient {
     try {
       body = await res.json();
     } catch (err) {
-      throw new NodeRpcError(nodeId, res.status, `invalid JSON: ${describeCause(err)}`);
+      throw new NodeRpcError(
+        nodeId,
+        res.status,
+        `invalid JSON: ${describeCause(err)}`,
+      );
+    }
+
+    const incompatibleFields = incompatibleStateV2Fields(body);
+    if (incompatibleFields.length > 0) {
+      throw new StateProtocolVersionError(nodeId, incompatibleFields);
     }
 
     if (!isSignedStateResponse(body)) {
-      throw new NodeRpcError(nodeId, res.status, "malformed signed-state response");
+      throw new NodeRpcError(
+        nodeId,
+        res.status,
+        "malformed signed-state response",
+      );
     }
 
     return body;
@@ -193,6 +266,7 @@ export class NodeRpcClient {
 function isAbortError(err: unknown): boolean {
   return (
     err instanceof Error &&
-    (err.name === "AbortError" || (err as { code?: string }).code === "ABORT_ERR")
+    (err.name === "AbortError" ||
+      (err as { code?: string }).code === "ABORT_ERR")
   );
 }

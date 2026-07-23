@@ -32,16 +32,23 @@
 import { Router, type Request, type Response } from "express";
 import { z } from "zod";
 import pino from "pino";
+import { randomBytes } from "node:crypto";
 import { rateLimitMiddleware } from "../middleware/api-gateway";
+import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
 import {
   NodeRpcClient,
   NodeUnreachableError,
   NodeTimeoutError,
   StateKeyNotFoundError,
+  StateProtocolVersionError,
   NodeRpcError,
   UnknownValidatorError,
 } from "../blockchain/node-client";
-import { verifySignedStateResponse, type SignedStateResponse } from "../blockchain/state-signature";
+import {
+  verifySignedStateResponse,
+  verifyStateResponseFreshness,
+  type SignedStateResponse,
+} from "../blockchain/state-signature";
 import {
   getValidatorNode,
   getActiveValidatorPubkey,
@@ -60,7 +67,10 @@ const logger = pino({ name: "node-state-routes" });
  */
 export interface ValidatorRegistry {
   getNode(id: string): Promise<ValidatorNodeRecord | null>;
-  getActivePubkey(nodeId: string): Promise<ValidatorPubkeyRecord | null>;
+  getActivePubkey(
+    nodeId: string,
+    keyId: string,
+  ): Promise<ValidatorPubkeyRecord | null>;
 }
 
 const defaultRegistry: ValidatorRegistry = {
@@ -81,15 +91,13 @@ const ParamsSchema = z.object({
 // ─── Per-operator rate limiting ─────────────────────────────────────────────────
 
 /**
- * Extract the rate-limit bucket. Prefer an explicit operator identity (API key
- * record / header) and fall back to the request IP. This is the seam that a
- * Redis-backed limiter (#447) will reuse verbatim.
+ * Extract the rate-limit bucket from a server-authenticated API-key identity.
+ * An arbitrary operator header must not let an unauthenticated caller rotate
+ * rate-limit buckets.
  */
 export function operatorKeyExtractor(req: Request): string {
   const apiKeyName = (req as { apiKeyName?: string }).apiKeyName;
   if (apiKeyName) return `operator:${apiKeyName}`;
-  const headerOperator = req.header("x-operator-id");
-  if (headerOperator) return `operator:${headerOperator}`;
   return `ip:${req.ip || "unknown"}`;
 }
 
@@ -97,6 +105,9 @@ const stateQueryRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   maxRequests: 60,
   keyExtractor: operatorKeyExtractor,
+});
+const requireNodeStateRead = requireControlPlaneAccess({
+  roles: ["operator"],
 });
 
 // ─── Router factory ──────────────────────────────────────────────────────────
@@ -115,14 +126,16 @@ export function createNodeRoutes(deps: NodeRoutesDeps = {}): Router {
   const registry = deps.registry ?? defaultRegistry;
   const client = deps.client ?? new NodeRpcClient();
 
-  router.use(stateQueryRateLimit);
-
   /**
    * GET /:id/state/:key
    * Proxy a state query to validator `:id` and return its signed response after
    * verifying the signature.
    */
-  router.get("/:id/state/:key", async (req: Request, res: Response) => {
+  router.get(
+    "/:id/state/:key",
+    requireNodeStateRead,
+    stateQueryRateLimit,
+    async (req: Request, res: Response) => {
     const parsed = ParamsSchema.safeParse(req.params);
     if (!parsed.success) {
       return res.status(400).json({
@@ -133,12 +146,10 @@ export function createNodeRoutes(deps: NodeRoutesDeps = {}): Router {
     }
     const { id, key } = parsed.data;
 
-    // 1. Resolve validator + its registered verification key.
+    // 1. Resolve the validator before making any outbound request.
     let node: ValidatorNodeRecord | null;
-    let pubkey: ValidatorPubkeyRecord | null;
     try {
       node = await registry.getNode(id);
-      pubkey = node ? await registry.getActivePubkey(id) : null;
     } catch (err) {
       logger.error({ err: (err as Error).message, nodeId: id }, "validator registry lookup failed");
       return res.status(500).json({ error: "Failed to resolve validator", code: "registry-error" });
@@ -149,24 +160,56 @@ export function createNodeRoutes(deps: NodeRoutesDeps = {}): Router {
       return res.status(404).json({ error: unknown.message, code: unknown.code, nodeId: id });
     }
 
-    if (!pubkey) {
-      // We refuse to proxy a response we cannot verify.
-      return res.status(409).json({
-        error: `No active public key registered for validator ${id}`,
-        code: "no-registered-pubkey",
-        nodeId: id,
-      });
-    }
-
     // 2. Proxy the state query to the validator's RPC.
+    const nonce = randomBytes(16).toString("hex");
     let signed: SignedStateResponse;
     try {
-      signed = await client.getState(id, node.rpcUrl, key);
+      signed = await client.getState(id, node.rpcUrl, key, nonce);
     } catch (err) {
       return handleClientError(err, res, id, key);
     }
 
-    // 3. VERIFY the signature BEFORE returning to the client.
+    // 3. Resolve the exact active Ed25519 key named by the response. Selecting
+    // an arbitrary active key is unsafe during key rotation.
+    if (!signed.keyId || signed.keyId.length > 128) {
+      return res.status(502).json({
+        error: "Validator response did not identify a usable signing key",
+        code: "validator-key-id-missing",
+        nodeId: id,
+        key,
+      });
+    }
+
+    let pubkey: ValidatorPubkeyRecord | null;
+    try {
+      pubkey = await registry.getActivePubkey(id, signed.keyId);
+    } catch (err) {
+      logger.error(
+        { err: (err as Error).message, nodeId: id, keyId: signed.keyId },
+        "validator public-key lookup failed",
+      );
+      return res.status(500).json({
+        error: "Failed to resolve validator signing key",
+        code: "registry-error",
+      });
+    }
+
+    if (
+      !pubkey ||
+      pubkey.nodeId !== id ||
+      pubkey.keyId !== signed.keyId ||
+      pubkey.active !== true ||
+      pubkey.algorithm.toLowerCase() !== "ed25519"
+    ) {
+      return res.status(409).json({
+        error: `No matching active Ed25519 public key registered for validator ${id}`,
+        code: "no-matching-pubkey",
+        nodeId: id,
+        keyId: signed.keyId,
+      });
+    }
+
+    // 4. Verify integrity and request freshness before returning any value.
     const verdict = verifySignedStateResponse(signed, pubkey.publicKeyPem);
     if (!verdict.valid) {
       logger.warn(
@@ -184,17 +227,34 @@ export function createNodeRoutes(deps: NodeRoutesDeps = {}): Router {
       });
     }
 
-    // 4. Return the verified value + signature.
+    const freshness = verifyStateResponseFreshness(signed, { key, nonce });
+    if (!freshness.valid) {
+      logger.warn(
+        { nodeId: id, key, reason: freshness.reason },
+        "validator state response failed freshness verification",
+      );
+      return res.status(502).json({
+        error: "Validator response failed freshness verification",
+        code: "response-not-fresh",
+        reason: freshness.reason,
+        nodeId: id,
+        key,
+      });
+    }
+
+    // 5. Return the verified value + signature.
     return res.status(200).json({
       nodeId: id,
       key: signed.key,
       value: signed.value,
       blockHeight: signed.blockHeight,
+      observedAt: signed.observedAt,
       signature: signed.signature,
-      keyId: signed.keyId ?? pubkey.keyId ?? null,
+      keyId: signed.keyId,
       verified: true,
     });
-  });
+    },
+  );
 
   return router;
 }
@@ -209,6 +269,15 @@ function handleClientError(err: unknown, res: Response, nodeId: string, key: str
   }
   if (err instanceof NodeUnreachableError) {
     return res.status(502).json({ error: err.message, code: "validator-unreachable", nodeId });
+  }
+  if (err instanceof StateProtocolVersionError) {
+    return res.status(502).json({
+      error: err.message,
+      code: err.code,
+      nodeId,
+      expectedProtocol: err.expectedProtocol,
+      incompatibleFields: err.incompatibleFields,
+    });
   }
   if (err instanceof NodeRpcError) {
     return res.status(502).json({ error: err.message, code: "validator-rpc-error", nodeId, httpStatus: err.httpStatus });

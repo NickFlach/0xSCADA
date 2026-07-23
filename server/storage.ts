@@ -167,6 +167,7 @@ export const getValidatorNode = async (id: string): Promise<ValidatorNodeRecord 
  */
 export const getActiveValidatorPubkey = async (
   nodeId: string,
+  keyId: string,
 ): Promise<ValidatorPubkeyRecord | null> => {
   const database = getDatabase();
   if (dbType !== 'postgres') {
@@ -176,7 +177,12 @@ export const getActiveValidatorPubkey = async (
   const rows = await database
     .select()
     .from(validatorPubkeys)
-    .where(and(eq(validatorPubkeys.nodeId, nodeId), eq(validatorPubkeys.active, true)))
+    .where(and(
+      eq(validatorPubkeys.nodeId, nodeId),
+      eq(validatorPubkeys.keyId, keyId),
+      eq(validatorPubkeys.active, true),
+      eq(validatorPubkeys.algorithm, 'ed25519'),
+    ))
     .limit(1);
   const row = rows[0];
   if (!row) return null;

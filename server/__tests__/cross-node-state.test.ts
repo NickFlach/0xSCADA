@@ -16,7 +16,7 @@
  * matching the http.createServer + listen(0) convention in websocket.test.ts.
  */
 
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, beforeEach } from "vitest";
 import express from "express";
 import { createServer, type Server } from "http";
 import {
@@ -29,6 +29,7 @@ import {
   buildStateSigningMessage,
   canonicalJsonStringify,
   verifySignedStateResponse,
+  verifyStateResponseFreshness,
   type SignedStateResponse,
 } from "../blockchain/state-signature";
 import { NodeRpcClient } from "../blockchain/node-client";
@@ -38,6 +39,7 @@ import {
   type ValidatorRegistry,
 } from "../routes/nodes";
 import type { ValidatorNodeRecord, ValidatorPubkeyRecord } from "../storage";
+import { _resetControlPlaneAuthCache } from "../middleware/control-plane-auth";
 
 // ─── Test signing helpers (simulate what a validator does) ─────────────────────
 
@@ -49,14 +51,28 @@ function makeKeyPair(): { publicKeyPem: string; privateKey: KeyObject } {
 
 function signState(
   privateKey: KeyObject,
-  params: { key: string; value: unknown; blockHeight: number; keyId?: string },
+  params: {
+    key: string;
+    value: unknown;
+    blockHeight: number;
+    keyId?: string;
+    nonce?: string;
+    observedAt?: string;
+  },
 ): SignedStateResponse {
-  const message = Buffer.from(buildStateSigningMessage(params), "utf8");
+  const signedFields = {
+    ...params,
+    nonce: params.nonce ?? "test-nonce",
+    observedAt: params.observedAt ?? new Date().toISOString(),
+  };
+  const message = Buffer.from(buildStateSigningMessage(signedFields), "utf8");
   const signature = cryptoSign(null, message, privateKey).toString("hex");
   return {
-    key: params.key,
-    value: params.value,
-    blockHeight: params.blockHeight,
+    key: signedFields.key,
+    value: signedFields.value,
+    blockHeight: signedFields.blockHeight,
+    nonce: signedFields.nonce,
+    observedAt: signedFields.observedAt,
     keyId: params.keyId,
     signature,
   };
@@ -83,17 +99,40 @@ describe("canonicalJsonStringify", () => {
     expect(canonicalJsonStringify(42)).toBe("42");
     expect(canonicalJsonStringify("x")).toBe('"x"');
   });
+
+  it("preserves the special __proto__ JSON key", () => {
+    const withProtoKey = JSON.parse(
+      '{"__proto__":{"admin":true},"x":1}',
+    ) as Record<string, unknown>;
+    expect(canonicalJsonStringify(withProtoKey)).toBe(
+      '{"__proto__":{"admin":true},"x":1}',
+    );
+  });
 });
 
 describe("buildStateSigningMessage", () => {
   it("is domain-separated and field-ordered", () => {
-    const msg = buildStateSigningMessage({ key: "k", value: { x: 1 }, blockHeight: 7 });
-    expect(msg).toBe('oxscada-state-v1\nk\n7\n{"x":1}');
+    const msg = buildStateSigningMessage({
+      key: "k",
+      value: { x: 1 },
+      blockHeight: 7,
+      nonce: "challenge-1",
+      observedAt: "2026-07-23T00:00:00.000Z",
+    });
+    expect(msg).toBe(
+      'oxscada-state-v2\nk\n7\nchallenge-1\n2026-07-23T00:00:00.000Z\n{"x":1}',
+    );
   });
 
   it("is stable regardless of value object key order", () => {
-    const m1 = buildStateSigningMessage({ key: "k", value: { a: 1, b: 2 }, blockHeight: 1 });
-    const m2 = buildStateSigningMessage({ key: "k", value: { b: 2, a: 1 }, blockHeight: 1 });
+    const common = {
+      key: "k",
+      blockHeight: 1,
+      nonce: "challenge-1",
+      observedAt: "2026-07-23T00:00:00.000Z",
+    };
+    const m1 = buildStateSigningMessage({ ...common, value: { a: 1, b: 2 } });
+    const m2 = buildStateSigningMessage({ ...common, value: { b: 2, a: 1 } });
     expect(m1).toBe(m2);
   });
 });
@@ -136,7 +175,14 @@ describe("verifySignedStateResponse", () => {
 
   it("reports missing-signature", () => {
     const r = verifySignedStateResponse(
-      { key: "k", value: 1, blockHeight: 1, signature: "" },
+      {
+        key: "k",
+        value: 1,
+        blockHeight: 1,
+        nonce: "n",
+        observedAt: new Date().toISOString(),
+        signature: "",
+      },
       publicKeyPem,
     );
     expect(r).toEqual({ valid: false, reason: "missing-signature" });
@@ -144,7 +190,14 @@ describe("verifySignedStateResponse", () => {
 
   it("reports malformed-signature for non-hex / odd length", () => {
     const r = verifySignedStateResponse(
-      { key: "k", value: 1, blockHeight: 1, signature: "zz" },
+      {
+        key: "k",
+        value: 1,
+        blockHeight: 1,
+        nonce: "n",
+        observedAt: new Date().toISOString(),
+        signature: "zz",
+      },
       publicKeyPem,
     );
     expect(r.valid).toBe(false);
@@ -157,6 +210,38 @@ describe("verifySignedStateResponse", () => {
     expect(r.valid).toBe(false);
     if (!r.valid) expect(r.reason).toBe("malformed-pubkey");
   });
+
+  it("rejects a well-formed non-Ed25519 public key", () => {
+    const { publicKey } = generateKeyPairSync("rsa", { modulusLength: 2048 });
+    const rsaPublicKeyPem = publicKey
+      .export({ type: "spki", format: "pem" })
+      .toString();
+    const signed = signState(privateKey, { key: "k", value: 1, blockHeight: 1 });
+    expect(verifySignedStateResponse(signed, rsaPublicKeyPem)).toEqual({
+      valid: false,
+      reason: "malformed-pubkey",
+    });
+  });
+});
+
+describe("verifyStateResponseFreshness", () => {
+  const response = signState(makeKeyPair().privateKey, {
+    key: "temp",
+    value: 21,
+    blockHeight: 10,
+    nonce: "current-challenge",
+    observedAt: "2026-07-23T00:00:20.000Z",
+  });
+
+  it("rejects a captured response replayed for a new challenge", () => {
+    expect(
+      verifyStateResponseFreshness(response, {
+        key: "temp",
+        nonce: "different-challenge",
+        nowMs: Date.parse("2026-07-23T00:00:30.000Z"),
+      }),
+    ).toEqual({ valid: false, reason: "nonce-mismatch" });
+  });
 });
 
 // =============================================================================
@@ -168,6 +253,10 @@ interface FakeNodeControls {
   tamper: boolean;
   /** Keys the node "knows"; querying an unknown key yields 404. */
   knownKeys: Set<string>;
+  nonceOverride?: string;
+  observedAtOffsetMs?: number;
+  keyIdOverride?: string | null;
+  legacyV1?: boolean;
 }
 
 /** Stand up a real local fake validator node returning signed state responses. */
@@ -182,12 +271,36 @@ function startFakeNode(privateKey: KeyObject, controls: FakeNodeControls): Promi
     }
     const value = { reading: 42, key };
     const blockHeight = 1234;
-    const signed = signState(privateKey, { key, value, blockHeight, keyId: "node-key-1" });
+    const requestNonce =
+      typeof req.query.nonce === "string" ? req.query.nonce : "";
+    const signed = signState(privateKey, {
+      key,
+      value,
+      blockHeight,
+      keyId:
+        controls.keyIdOverride === null
+          ? undefined
+          : (controls.keyIdOverride ?? "node-key-1"),
+      nonce: controls.nonceOverride ?? requestNonce,
+      observedAt: new Date(
+        Date.now() + (controls.observedAtOffsetMs ?? 0),
+      ).toISOString(),
+    });
 
     if (controls.tamper) {
       // Mutate the value AFTER signing — exactly the in-flight tamper the issue
       // requires the server to detect.
       signed.value = { reading: 9999, key };
+    }
+    if (controls.legacyV1) {
+      res.status(200).json({
+        key: signed.key,
+        value: signed.value,
+        blockHeight: signed.blockHeight,
+        keyId: signed.keyId,
+        signature: signed.signature,
+      });
+      return;
     }
     res.status(200).json(signed);
   });
@@ -221,11 +334,22 @@ function closeServer(server: Server): Promise<void> {
 }
 
 describe("GET /api/nodes/:id/state/:key (integration)", () => {
+  const apiKey = "node-state-read-key";
+  const originalApiKeys = process.env.API_KEYS;
   const { publicKeyPem, privateKey } = makeKeyPair();
   const controls: FakeNodeControls = { tamper: false, knownKeys: new Set(["event-X"]) };
 
   let fakeNode: { server: Server; url: string };
   let proxy: { server: Server; baseUrl: string };
+
+  function fetchAsOperator(
+    url: string,
+    init: RequestInit = {},
+  ): Promise<Response> {
+    const headers = new Headers(init.headers);
+    headers.set("x-api-key", apiKey);
+    return fetch(url, { ...init, headers });
+  }
 
   function buildRegistry(rpcUrl: string, withPubkey = true): ValidatorRegistry {
     const node: ValidatorNodeRecord = {
@@ -245,16 +369,34 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     };
     return {
       getNode: async (id) => (id === "validator-2" ? node : null),
-      getActivePubkey: async (id) => (id === "validator-2" && withPubkey ? pubkey : null),
+      getActivePubkey: async (id, keyId) =>
+        id === "validator-2" &&
+        keyId === "node-key-1" &&
+        withPubkey
+          ? pubkey
+          : null,
     };
   }
 
   beforeAll(async () => {
+    process.env.API_KEYS = `${apiKey}:node-state-reader:operator`;
+    _resetControlPlaneAuthCache();
     fakeNode = await startFakeNode(privateKey, controls);
+  });
+
+  beforeEach(() => {
+    controls.tamper = false;
+    controls.nonceOverride = undefined;
+    controls.observedAtOffsetMs = undefined;
+    controls.keyIdOverride = undefined;
+    controls.legacyV1 = false;
   });
 
   afterAll(async () => {
     await closeServer(fakeNode.server);
+    if (originalApiKeys === undefined) delete process.env.API_KEYS;
+    else process.env.API_KEYS = originalApiKeys;
+    _resetControlPlaneAuthCache();
   });
 
   afterAll(async () => {
@@ -264,7 +406,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
   it("proxies, verifies the signature and returns the value (happy path)", async () => {
     controls.tamper = false;
     proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.verified).toBe(true);
@@ -275,10 +417,62 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     await closeServer(proxy.server);
   });
 
+  it("requires a local operator API key before proxying live state", async () => {
+    proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
+    const res = await fetch(
+      `${proxy.baseUrl}/api/nodes/validator-2/state/event-X`,
+    );
+    expect(res.status).toBe(401);
+    await closeServer(proxy.server);
+  });
+
+  it("rejects a validly signed response replayed for another challenge", async () => {
+    controls.nonceOverride = "captured-old-challenge";
+    proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
+    const res = await fetchAsOperator(
+      `${proxy.baseUrl}/api/nodes/validator-2/state/event-X`,
+    );
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      code: "response-not-fresh",
+      reason: "nonce-mismatch",
+    });
+    await closeServer(proxy.server);
+  });
+
+  it("reports a clear v1-to-v2 producer incompatibility", async () => {
+    controls.legacyV1 = true;
+    proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
+    const res = await fetchAsOperator(
+      `${proxy.baseUrl}/api/nodes/validator-2/state/event-X`,
+    );
+    expect(res.status).toBe(502);
+    expect(await res.json()).toMatchObject({
+      code: "state-protocol-incompatible",
+      expectedProtocol: "oxscada-state-v2",
+      incompatibleFields: ["nonce", "observedAt"],
+    });
+    await closeServer(proxy.server);
+  });
+
+  it("requires an exact active Ed25519 keyId match", async () => {
+    controls.keyIdOverride = "rotated-unknown-key";
+    proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
+    const res = await fetchAsOperator(
+      `${proxy.baseUrl}/api/nodes/validator-2/state/event-X`,
+    );
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({
+      code: "no-matching-pubkey",
+      keyId: "rotated-unknown-key",
+    });
+    await closeServer(proxy.server);
+  });
+
   it("returns 502 signature-invalid when the node tampers the response in-flight", async () => {
     controls.tamper = true;
     proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.code).toBe("signature-invalid");
@@ -289,7 +483,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
 
   it("returns 404 key-not-found for an unknown key", async () => {
     proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/does-not-exist`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/does-not-exist`);
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.code).toBe("key-not-found");
@@ -298,7 +492,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
 
   it("returns 404 unknown-validator for an unregistered id", async () => {
     proxy = await startProxyServer(buildRegistry(fakeNode.url), new NodeRpcClient());
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-99/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-99/state/event-X`);
     expect(res.status).toBe(404);
     const body = await res.json();
     expect(body.code).toBe("unknown-validator");
@@ -309,7 +503,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     // Point the registry at a port nothing is listening on.
     const deadRegistry = buildRegistry("http://127.0.0.1:1");
     proxy = await startProxyServer(deadRegistry, new NodeRpcClient({ timeoutMs: 1000 }));
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
     expect(res.status).toBe(502);
     const body = await res.json();
     expect(body.code).toBe("validator-unreachable");
@@ -327,7 +521,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     const port = typeof addr === "object" && addr ? addr.port : 0;
     const slowRegistry = buildRegistry(`http://127.0.0.1:${port}`);
     proxy = await startProxyServer(slowRegistry, new NodeRpcClient({ timeoutMs: 200 }));
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
     expect(res.status).toBe(504);
     const body = await res.json();
     expect(body.code).toBe("validator-timeout");
@@ -337,10 +531,10 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
 
   it("returns 409 when no verification pubkey is registered", async () => {
     proxy = await startProxyServer(buildRegistry(fakeNode.url, /* withPubkey */ false), new NodeRpcClient());
-    const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+    const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
     expect(res.status).toBe(409);
     const body = await res.json();
-    expect(body.code).toBe("no-registered-pubkey");
+    expect(body.code).toBe("no-matching-pubkey");
     await closeServer(proxy.server);
   });
 
@@ -358,7 +552,7 @@ describe("GET /api/nodes/:id/state/:key (integration)", () => {
     // 60 are allowed; the 61st should trip the limiter. Issue sequentially so the
     // sliding-window counter is deterministic.
     for (let i = 0; i < 61; i++) {
-      const res = await fetch(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
+      const res = await fetchAsOperator(`${proxy.baseUrl}/api/nodes/validator-2/state/event-X`);
       lastStatus = res.status;
       await res.body?.cancel().catch(() => undefined);
       if (res.status === 429) {
@@ -414,6 +608,29 @@ describe("NodeRpcClient", () => {
     });
     await expect(client.getState("v1", "http://x", "k")).rejects.toMatchObject({ code: "validator-rpc-error" });
   });
+
+  it("classifies a legacy response without v2 freshness fields", async () => {
+    const client = new NodeRpcClient({
+      fetchImpl: async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          key: "k",
+          value: 1,
+          blockHeight: 7,
+          keyId: "legacy-key",
+          signature: "00",
+        }),
+        text: async () => "",
+      }),
+    });
+
+    await expect(client.getState("v1", "http://x", "k")).rejects.toMatchObject({
+      code: "state-protocol-incompatible",
+      expectedProtocol: "oxscada-state-v2",
+      incompatibleFields: ["nonce", "observedAt"],
+    });
+  });
 });
 
 // =============================================================================
@@ -426,9 +643,9 @@ describe("operatorKeyExtractor", () => {
     expect(operatorKeyExtractor(req)).toBe("operator:acme");
   });
 
-  it("falls back to the x-operator-id header", () => {
+  it("ignores an unauthenticated x-operator-id header", () => {
     const req = { header: (h: string) => (h === "x-operator-id" ? "op-7" : undefined), ip: "1.2.3.4" } as never;
-    expect(operatorKeyExtractor(req)).toBe("operator:op-7");
+    expect(operatorKeyExtractor(req)).toBe("ip:1.2.3.4");
   });
 
   it("falls back to IP", () => {
