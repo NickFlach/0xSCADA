@@ -5,15 +5,15 @@
  * (l2 | node | both) at runtime. Workflow:
  *   1. Operator picks a target backend and runs a DRY-RUN.
  *   2. The dry-run shows projected events/min per backend, confirmation
- *      latencies and daily anchor cost, plus the confirm token.
+ *      latencies and daily anchor cost, and captures a backend revision.
  *   3. A sanity dialog forces the operator to explicitly confirm before the
- *      switch is committed (the commit echoes back the confirm token).
+ *      switch is committed against that exact reviewed revision.
  *   4. Past switches are listed from server-side history.
  *
  * Styling follows the inline-style convention used by the other wave pages.
  */
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 
 type Backend = 'l2' | 'node' | 'both';
 
@@ -35,8 +35,16 @@ interface SwitchProjection {
 interface DryRunResponse {
   dryRun: true;
   currentBackend: Backend;
+  backendRevision: number;
   proposedBackend: Backend;
-  confirmToken: string;
+  coordination: {
+    ready: boolean;
+    replicas: number;
+    reason?: string;
+  };
+  runtimeReady: boolean;
+  /** The commit endpoint can attempt hidden L2 initialization before mutation. */
+  runtimePreparationSupported: boolean;
   projection: SwitchProjection;
 }
 
@@ -46,11 +54,13 @@ interface SwitchHistoryEntry {
   previous: Backend;
   current: Backend;
   operator: string;
-  auditEventId: string;
+  auditQueueId: string;
+  auditStatus: 'queued';
 }
 
 interface StatusResponse {
   backend: Backend;
+  backendRevision: number;
   history: SwitchHistoryEntry[];
 }
 
@@ -67,7 +77,8 @@ const AnchorBackend: React.FC = () => {
   const [history, setHistory] = useState<SwitchHistoryEntry[]>([]);
   const [target, setTarget] = useState<Backend>('node');
   const [eventsPerMinute, setEventsPerMinute] = useState<number>(120);
-  const [operator, setOperator] = useState<string>('');
+  // Kept only in component memory. Never persisted to localStorage or a URL.
+  const [apiKey, setApiKey] = useState<string>('');
 
   const [dryRun, setDryRun] = useState<DryRunResponse | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -76,8 +87,15 @@ const AnchorBackend: React.FC = () => {
   const [notice, setNotice] = useState<string | null>(null);
 
   const loadStatus = useCallback(async () => {
+    if (!apiKey) {
+      setError('Enter an operator API key first');
+      return;
+    }
     try {
-      const res = await fetch(API_BASE);
+      setError(null);
+      const res = await fetch(API_BASE, {
+        headers: { 'X-API-Key': apiKey },
+      });
       if (!res.ok) throw new Error('Failed to load anchor backend status');
       const data: StatusResponse = await res.json();
       setCurrentBackend(data.backend);
@@ -85,11 +103,7 @@ const AnchorBackend: React.FC = () => {
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, []);
-
-  useEffect(() => {
-    void loadStatus();
-  }, [loadStatus]);
+  }, [apiKey]);
 
   const runDryRun = useCallback(async () => {
     setBusy(true);
@@ -99,7 +113,7 @@ const AnchorBackend: React.FC = () => {
     try {
       const res = await fetch(API_BASE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify({ backend: target, dryRun: true, eventsPerMinute }),
       });
       const data = await res.json();
@@ -110,7 +124,7 @@ const AnchorBackend: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [target, eventsPerMinute]);
+  }, [target, eventsPerMinute, apiKey]);
 
   const commitSwitch = useCallback(async () => {
     if (!dryRun) return;
@@ -119,19 +133,30 @@ const AnchorBackend: React.FC = () => {
     try {
       const res = await fetch(API_BASE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
         body: JSON.stringify({
           backend: dryRun.proposedBackend,
           dryRun: false,
-          confirmToken: dryRun.confirmToken,
+          confirm: true,
+          expectedCurrentBackend: dryRun.currentBackend,
+          expectedBackendRevision: dryRun.backendRevision,
           eventsPerMinute,
-          operator: operator || undefined,
         }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? 'Switch failed');
+      if (!res.ok) {
+        if (
+          data.code === 'anchor-backend-preview-stale' ||
+          data.code === 'anchor-backend-state-changed'
+        ) {
+          setShowConfirm(false);
+          setDryRun(null);
+        }
+        throw new Error(data.error ?? 'Switch failed');
+      }
       setNotice(
-        `Anchor backend switched to "${data.currentBackend}". Audit event: ${data.auditEventId}`,
+        `Anchor backend switched to "${data.currentBackend}". ` +
+          `Audit intent ${data.auditStatus}: ${data.auditQueueId}`,
       );
       setShowConfirm(false);
       setDryRun(null);
@@ -141,7 +166,11 @@ const AnchorBackend: React.FC = () => {
     } finally {
       setBusy(false);
     }
-  }, [dryRun, eventsPerMinute, operator, loadStatus]);
+  }, [dryRun, eventsPerMinute, apiKey, loadStatus]);
+
+  const canAttemptCommit = !!dryRun &&
+    dryRun.coordination.ready &&
+    (dryRun.runtimeReady || dryRun.runtimePreparationSupported);
 
   return (
     <div style={{ padding: 24, backgroundColor: '#0a0a0a', color: '#e5e5e5', minHeight: '100vh' }}>
@@ -150,6 +179,29 @@ const AnchorBackend: React.FC = () => {
         <p style={{ color: '#888', fontSize: 16, margin: 0 }}>
           Inspect and switch the active blockchain anchoring backend at runtime.
         </p>
+      </div>
+
+      <div style={{ padding: 20, backgroundColor: '#111827', borderRadius: 8, marginBottom: 24 }}>
+        <div style={{ fontSize: 14, color: '#888', marginBottom: 8 }}>Operator authentication</div>
+        <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 13, color: '#888', gap: 4 }}>
+            API key
+            <input
+              type="password"
+              autoComplete="off"
+              value={apiKey}
+              placeholder="X-API-Key"
+              onChange={(e) => setApiKey(e.target.value)}
+              style={inputStyle}
+            />
+          </label>
+          <button onClick={() => void loadStatus()} disabled={busy || !apiKey} style={primaryButtonStyle(busy || !apiKey)}>
+            Authenticate
+          </button>
+          <span style={{ color: '#888', fontSize: 12 }}>
+            Audit identity comes from the server-owned key record.
+          </span>
+        </div>
       </div>
 
       {/* Current backend */}
@@ -197,17 +249,7 @@ const AnchorBackend: React.FC = () => {
               style={inputStyle}
             />
           </label>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 13, color: '#888', gap: 4 }}>
-            Operator (for audit)
-            <input
-              type="text"
-              value={operator}
-              placeholder="your.name"
-              onChange={(e) => setOperator(e.target.value)}
-              style={inputStyle}
-            />
-          </label>
-          <button onClick={runDryRun} disabled={busy} style={primaryButtonStyle(busy)}>
+          <button onClick={runDryRun} disabled={busy || !apiKey} style={primaryButtonStyle(busy || !apiKey)}>
             🔍 Run Dry-Run
           </button>
         </div>
@@ -245,10 +287,37 @@ const AnchorBackend: React.FC = () => {
             {'  ·  '}
             Total daily cost: <strong>${dryRun.projection.totalDailyCostUsd.toFixed(2)}</strong>
           </div>
+          {!dryRun.coordination.ready && (
+            <div style={{ marginTop: 16, padding: 12, backgroundColor: '#7f1d1d', borderRadius: 6 }}>
+              {dryRun.coordination.reason ??
+                'Live switching is unavailable for this deployment topology.'}
+            </div>
+          )}
+          {dryRun.coordination.ready &&
+            !dryRun.runtimeReady &&
+            dryRun.runtimePreparationSupported && (
+            <div style={{ marginTop: 16, padding: 12, backgroundColor: '#78350f', borderRadius: 6 }}>
+              The target L2 runtime is not currently ready. Commit will attempt
+              to initialize and verify it before changing routing. If readiness
+              cannot be established, the current backend will remain active.
+            </div>
+          )}
+          {dryRun.coordination.ready &&
+            !dryRun.runtimeReady &&
+            !dryRun.runtimePreparationSupported && (
+            <div style={{ marginTop: 16, padding: 12, backgroundColor: '#7f1d1d', borderRadius: 6 }}>
+              The target backend runtime is unavailable and cannot be prepared
+              by this control plane.
+            </div>
+          )}
           <button
             onClick={() => setShowConfirm(true)}
-            disabled={busy}
-            style={{ ...primaryButtonStyle(busy), marginTop: 20, backgroundColor: '#ef4444' }}
+            disabled={busy || !canAttemptCommit}
+            style={{
+              ...primaryButtonStyle(busy || !canAttemptCommit),
+              marginTop: 20,
+              backgroundColor: '#ef4444',
+            }}
           >
             ⚠️ Commit Switch
           </button>
@@ -264,11 +333,11 @@ const AnchorBackend: React.FC = () => {
               You are about to switch the active anchoring backend from{' '}
               <strong>{BACKEND_LABELS[dryRun.currentBackend]}</strong> to{' '}
               <strong style={{ color: '#f59e0b' }}>{BACKEND_LABELS[dryRun.proposedBackend]}</strong>.
-              This changes where every future event is anchored and emits an auditable
-              on-chain switch event.
+              This changes where future events are routed after the selected
+              backend queues the authorized switch intent.
             </p>
             <p style={{ color: '#888', fontSize: 12 }}>
-              Confirm token: <code>{dryRun.confirmToken}</code>
+              Your authenticated operator identity will be written to the audit event.
             </p>
             <div style={{ display: 'flex', gap: 12, marginTop: 20, justifyContent: 'flex-end' }}>
               <button onClick={() => setShowConfirm(false)} disabled={busy} style={secondaryButtonStyle}>
@@ -298,7 +367,7 @@ const AnchorBackend: React.FC = () => {
                 <th style={thStyle}>When</th>
                 <th style={thStyle}>From → To</th>
                 <th style={thStyle}>Operator</th>
-                <th style={thStyle}>Audit event</th>
+                <th style={thStyle}>Audit queue</th>
               </tr>
             </thead>
             <tbody>
@@ -309,7 +378,9 @@ const AnchorBackend: React.FC = () => {
                     {h.previous} → <strong>{h.current}</strong>
                   </td>
                   <td style={tdStyle}>{h.operator}</td>
-                  <td style={{ ...tdStyle, fontFamily: 'monospace', color: '#60a5fa' }}>{h.auditEventId}</td>
+                  <td style={{ ...tdStyle, fontFamily: 'monospace', color: '#60a5fa' }}>
+                    {h.auditQueueId} ({h.auditStatus})
+                  </td>
                 </tr>
               ))}
             </tbody>

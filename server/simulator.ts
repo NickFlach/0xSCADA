@@ -1,7 +1,7 @@
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
 import { getFluxPublisher } from "./services/flux";
-import { natsPublisher } from "./services/nats";
+import { dispatchAnchorEvent } from "./bridge";
 
 interface SimulatorConfig {
   enabled: boolean;
@@ -115,19 +115,25 @@ class FieldSimulator {
         });
       } catch { /* WebSocket not connected — that's fine */ }
 
-      // Publish to NATS for blockchain anchoring
+      // Route through the canonical runtime-selected anchor backend(s).
       try {
-        natsPublisher.publish("scada.events", {
-          asset: asset.nameOrTag,
-          event_type: eventType,
-          site_id: asset.siteId,
-          site_name: asset.siteName,
-          asset_type: asset.assetType,
-          timestamp: new Date().toISOString(),
-          payload: payload,
-          details: details,
+        await dispatchAnchorEvent({
+          id: `sim-${asset.id}-${Date.now()}`,
+          timestamp: new Date(),
+          eventType,
+          siteId: asset.siteId,
+          severity: asset.critical ? "critical" : "info",
+          message: details,
+          data: {
+            asset: asset.nameOrTag,
+            siteName: asset.siteName,
+            assetType: asset.assetType,
+            payload,
+          },
         });
-      } catch { /* NATS not connected — that's fine */ }
+      } catch (error) {
+        logWarn(`Anchor queue rejected simulator event: ${error}`, "simulator");
+      }
     } catch (error) {
       logError("❌ Failed to generate event", error as any);
     }

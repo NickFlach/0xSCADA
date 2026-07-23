@@ -2,17 +2,28 @@
  * Admin: Anchor-Backend Switch (#455)
  *
  * Operator-facing endpoint to inspect and flip the active anchoring backend at
- * runtime (the dispatch lives in server/bridge/anchor-router.ts).
+ * runtime (production dispatch lives in server/bridge/index.ts).
  *
  *   POST /api/admin/anchor-backend
- *     body: { backend: 'l2'|'node'|'both', dryRun: boolean, confirmToken?, eventsPerMinute? }
+ *     body: {
+ *       backend: 'l2'|'node'|'both',
+ *       dryRun: boolean,
+ *       confirm?,
+ *       expectedCurrentBackend?,
+ *       expectedBackendRevision?,
+ *       eventsPerMinute?
+ *     }
  *
  *   - dryRun: true  -> returns a pure projection (events/min per backend, projected
  *                      confirmation latencies, projected daily anchor cost). No state
  *                      change, no confirm token required.
- *   - dryRun: false -> requires a valid confirm token (operator must explicitly
- *                      opt in). On success it flips the active backend AND emits an
- *                      auditable "anchored" event recording the switch itself.
+ *   - dryRun: false -> requires an explicit `confirm: true` acknowledgement.
+ *                      Authentication + `anchor.admin` authorization is the
+ *                      security boundary; no public confirmation secret exists.
+ *                      The commit must echo the backend + revision returned by
+ *                      its dry-run; stale previews fail with HTTP 409.
+ *                      On success it queues an authorized switch intent through
+ *                      the target backend(s), then flips the active backend.
  *
  *   GET /api/admin/anchor-backend          -> current backend + recent switch history
  *   GET /api/admin/anchor-backend/projection?backend=&eventsPerMinute=
@@ -22,13 +33,31 @@
  */
 
 import { Router } from 'express';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
-import { fromZodError } from 'zod-validation-error';
-import { anchorRouter, type AnchorBackend } from '../bridge/anchor-router';
-import { eventAnchorBridge } from '../bridge/event-anchor';
+import { fromZodError } from 'zod-validation-error/v3';
+import { anchorSwitch, type AnchorBackend } from '../bridge/anchor-switch';
+import {
+  dispatchAnchorAuditEvent,
+  isAnchorBackendRuntimeReady,
+  prepareAnchorBackendRuntime,
+} from '../bridge';
+import {
+  getAnchorBackendCoordinationStatus,
+  getAnchorBackendSnapshot,
+} from '../bridge/anchor-backend';
 import { log, logError } from '../logger';
+import {
+  controlPlanePrincipal,
+  requireControlPlaneAccess,
+} from '../middleware/control-plane-auth';
 
 const router = Router();
+router.use(requireControlPlaneAccess({ roles: ['operator'] }));
+const requireAnchorAdmin = requireControlPlaneAccess({
+  roles: ['operator'],
+  scopes: ['anchor.admin'],
+});
 
 // ── Constants ───────────────────────────────────────────────────────────────
 
@@ -47,44 +76,40 @@ const SwitchRequestSchema = z
   .object({
     backend: BackendEnum,
     dryRun: z.boolean(),
-    /** Required only when dryRun === false; validated below via superRefine. */
-    confirmToken: z.string().min(1).optional(),
+    /** Explicit safety acknowledgement; required only for a real commit. */
+    confirm: z.boolean().optional(),
+    /** Backend value shown by the dry-run the operator is confirming. */
+    expectedCurrentBackend: BackendEnum.optional(),
+    /** Optimistic-concurrency revision returned by that dry-run. */
+    expectedBackendRevision: z.number().int().nonnegative().optional(),
     /** Optional measured throughput override (events/min). */
     eventsPerMinute: z.number().nonnegative().finite().optional(),
-    /** Optional operator identity for the audit trail. */
-    operator: z.string().min(1).max(128).optional(),
   })
   .superRefine((val, ctx) => {
-    if (!val.dryRun && !val.confirmToken) {
+    if (!val.dryRun && val.confirm !== true) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ['confirmToken'],
-        message: 'confirmToken is required to commit a backend switch (dryRun=false)',
+        path: ['confirm'],
+        message: 'confirm must be true to commit a backend switch (dryRun=false)',
+      });
+    }
+    if (!val.dryRun && val.expectedCurrentBackend === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['expectedCurrentBackend'],
+        message: 'expectedCurrentBackend from a dry-run is required to commit a backend switch',
+      });
+    }
+    if (!val.dryRun && val.expectedBackendRevision === undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['expectedBackendRevision'],
+        message: 'expectedBackendRevision from a dry-run is required to commit a backend switch',
       });
     }
   });
 
 export type SwitchRequest = z.infer<typeof SwitchRequestSchema>;
-
-// ── Confirm-token gate ────────────────────────────────────────────────────────
-
-/**
- * Compute the confirm token a client must echo back to commit a switch.
- *
- * The token is deterministic from the target backend, so the operator literally
- * has to acknowledge the SPECIFIC change ("yes, switch to l2"), not blanket-allow
- * any switch. The UI surfaces this token in the sanity dialog. Exported so the
- * gate is unit-testable.
- */
-export function expectedConfirmToken(backend: AnchorBackend): string {
-  return `confirm-switch-${backend}`;
-}
-
-/** True iff the supplied token authorises a switch to `backend`. */
-export function isValidConfirmToken(backend: AnchorBackend, token: string | undefined): boolean {
-  if (!token) return false;
-  return token === expectedConfirmToken(backend);
-}
 
 // ── Switch history (auditable) ─────────────────────────────────────────────────
 
@@ -94,17 +119,16 @@ export interface SwitchHistoryEntry {
   previous: AnchorBackend;
   current: AnchorBackend;
   operator: string;
-  /** Hash/ref of the anchored audit event emitted for this switch, if any. */
-  auditEventId: string;
+  /** Correlation ID accepted by the selected backend queue(s). */
+  auditQueueId: string;
+  /** Queue acceptance is not a claim of durable storage or chain confirmation. */
+  auditStatus: 'queued';
 }
 
 /**
- * In-memory ring of recent switches. This is deliberately process-local: a full
- * persistent audit trail belongs in the anchored event stream (which we DO emit
- * below) and/or storage.ts. Kept small to bound memory.
- *
- * DEFERRED: durable history via server/storage.ts is out of scope for this issue
- * (no schema migration); the anchored event is the system-of-record.
+ * In-memory ring of recent committed switches. Backend audit delivery is only
+ * queue-acknowledged here; durable history/confirmation requires a separate
+ * persistence and receipt mechanism. Kept small to bound memory.
  */
 const MAX_HISTORY = 50;
 const switchHistory: SwitchHistoryEntry[] = [];
@@ -124,14 +148,16 @@ function recordSwitch(entry: SwitchHistoryEntry): void {
 
 /** Current active backend + recent switch history. */
 router.get('/', (_req, res) => {
+  const snapshot = getAnchorBackendSnapshot();
   res.json({
-    backend: anchorRouter.getBackend(),
+    backend: snapshot.backend,
+    backendRevision: snapshot.revision,
     history: switchHistory,
   });
 });
 
 /** Projection preview without committing (UI convenience; mirrors dry-run POST). */
-router.get('/projection', (req, res) => {
+router.get('/projection', async (req, res) => {
   const parsed = z
     .object({
       backend: BackendEnum.default('both'),
@@ -144,90 +170,226 @@ router.get('/projection', (req, res) => {
   }
 
   const eventsPerMinute = parsed.data.eventsPerMinute ?? DEFAULT_EVENTS_PER_MINUTE;
-  const projection = anchorRouter.project(eventsPerMinute, parsed.data.backend);
-  res.json({ projection });
+  const projection = anchorSwitch.project(eventsPerMinute, parsed.data.backend);
+  const coordination = getAnchorBackendCoordinationStatus();
+  const snapshot = getAnchorBackendSnapshot();
+  const runtimeReady =
+    coordination.ready &&
+    await isAnchorBackendRuntimeReady(parsed.data.backend);
+  res.json({
+    currentBackend: snapshot.backend,
+    backendRevision: snapshot.revision,
+    projection,
+    coordination,
+    runtimeReady,
+    runtimePreparationSupported: parsed.data.backend !== 'node',
+  });
 });
 
 /**
- * Inspect (dry-run) or commit (confirm-token) a backend switch.
+ * Inspect (dry-run) or commit an explicitly acknowledged backend switch.
  */
-router.post('/', async (req, res) => {
+router.post('/', requireAnchorAdmin, async (req, res) => {
   const parsed = SwitchRequestSchema.safeParse(req.body);
   if (!parsed.success) {
     return res.status(400).json({ error: fromZodError(parsed.error).message });
   }
 
-  const { backend, dryRun, confirmToken, eventsPerMinute, operator } = parsed.data;
+  const {
+    backend,
+    dryRun,
+    eventsPerMinute,
+    expectedCurrentBackend,
+    expectedBackendRevision,
+  } = parsed.data;
   const epm = eventsPerMinute ?? DEFAULT_EVENTS_PER_MINUTE;
 
   // ── Dry-run: pure projection, no state change ─────────────────────────────
   if (dryRun) {
-    const projection = anchorRouter.project(epm, backend);
+    const projection = anchorSwitch.project(epm, backend);
+    const coordination = getAnchorBackendCoordinationStatus();
+    const snapshot = getAnchorBackendSnapshot();
+    const runtimeReady =
+      coordination.ready &&
+      await isAnchorBackendRuntimeReady(backend);
     return res.json({
       dryRun: true,
-      currentBackend: anchorRouter.getBackend(),
+      currentBackend: snapshot.backend,
+      backendRevision: snapshot.revision,
       proposedBackend: backend,
-      confirmToken: expectedConfirmToken(backend), // surfaced for the sanity dialog
+      coordination,
+      runtimeReady,
+      runtimePreparationSupported: backend !== 'node',
       projection,
-    });
-  }
-
-  // ── Commit: requires a valid confirm token ────────────────────────────────
-  if (!isValidConfirmToken(backend, confirmToken)) {
-    return res.status(403).json({
-      error: 'Invalid or missing confirm token for the requested backend switch',
-      expected: expectedConfirmToken(backend),
     });
   }
 
   try {
-    const { previous, current } = anchorRouter.setBackend(backend);
-    const at = new Date();
-    const switchId = `anchor-switch-${at.getTime()}`;
-    const who = operator ?? 'unknown-operator';
+    return await anchorSwitch.runCommitExclusive(async () => {
+      // Switch commits are optimistic transactions over the exact state shown
+      // by the dry-run. This check lives inside the commit mutex so a later
+      // operator request cannot be silently reinterpreted against newer state.
+      const expectedSnapshot = {
+        backend: expectedCurrentBackend!,
+        revision: expectedBackendRevision!,
+      };
+      let currentSnapshot = getAnchorBackendSnapshot();
+      if (
+        currentSnapshot.backend !== expectedSnapshot.backend ||
+        currentSnapshot.revision !== expectedSnapshot.revision
+      ) {
+        return res.status(409).json({
+          error: 'Anchor backend changed since the dry-run; run a new dry-run before committing',
+          code: 'anchor-backend-preview-stale',
+          committed: false,
+          expectedBackend: expectedSnapshot.backend,
+          expectedBackendRevision: expectedSnapshot.revision,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+        });
+      }
 
-    // The state change emits an anchored event of its own (auditable). We route
-    // it through the existing event-anchor bridge so it lands on whatever backend
-    // is now active — the switch records itself on-chain.
-    const auditEvent = {
-      id: switchId,
-      timestamp: at,
-      eventType: 'anchor-backend-switch',
-      siteId: 'system',
-      severity: 'warning' as const,
-      message: `Anchor backend switched from "${previous}" to "${current}" by ${who}`,
-      data: { previous, current, operator: who, eventsPerMinute: epm },
-    };
+      const coordination = getAnchorBackendCoordinationStatus();
+      if (!coordination.ready) {
+        return res.status(503).json({
+          error: coordination.reason,
+          code: 'anchor-backend-coordination-unavailable',
+          replicas: coordination.replicas,
+        });
+      }
 
-    try {
-      await eventAnchorBridge.anchor(auditEvent);
-    } catch (anchorErr) {
-      // The switch itself succeeded; failing to anchor the audit event must not
-      // silently lose the record. Log loudly and still report the switch, but
-      // flag that the audit anchor did not land.
-      logError(anchorErr, 'Anchor-backend switch audit event failed to anchor');
-    }
+      // A node-booted process may safely prepare a hidden L2 pipeline here.
+      // Canonical routing remains unchanged unless every selected backend is
+      // connected and accepts the authorized intent below.
+      if (!await prepareAnchorBackendRuntime(backend)) {
+        currentSnapshot = getAnchorBackendSnapshot();
+        return res.status(503).json({
+          error: `Anchor backend "${backend}" is not initialized`,
+          code: 'anchor-backend-unavailable',
+          backend,
+          committed: false,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+        });
+      }
 
-    const entry: SwitchHistoryEntry = {
-      id: switchId,
-      at: at.toISOString(),
-      previous,
-      current,
-      operator: who,
-      auditEventId: switchId,
-    };
-    recordSwitch(entry);
+      // Preparation can await network I/O. Revalidate the preview before
+      // queueing any audit intent in case a non-control-plane writer changed
+      // the canonical store while this request held the route-local mutex.
+      currentSnapshot = getAnchorBackendSnapshot();
+      if (
+        currentSnapshot.backend !== expectedSnapshot.backend ||
+        currentSnapshot.revision !== expectedSnapshot.revision
+      ) {
+        return res.status(409).json({
+          error: 'Anchor backend changed while the target runtime was being prepared',
+          code: 'anchor-backend-state-changed',
+          committed: false,
+          expectedBackend: expectedSnapshot.backend,
+          expectedBackendRevision: expectedSnapshot.revision,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+        });
+      }
 
-    log(`Anchor backend switched ${previous} -> ${current} by ${who}`);
+      const previous = expectedSnapshot.backend;
+      const at = new Date();
+      const auditQueueId = `anchor-switch-${randomUUID()}`;
+      const who = controlPlanePrincipal(req).name;
+      const auditEvent = {
+        id: auditQueueId,
+        timestamp: at,
+        eventType: 'anchor-backend-switch-intent',
+        siteId: 'system',
+        severity: 'warning' as const,
+        message: `Authorized anchor backend switch intent from "${previous}" to "${backend}" by ${who}`,
+        data: {
+          previous,
+          requestedBackend: backend,
+          operator: who,
+          eventsPerMinute: epm,
+          expectedBackendRevision: expectedSnapshot.revision,
+          intent: 'authorized-switch',
+        },
+      };
 
-    const projection = anchorRouter.project(epm, current);
-    return res.json({
-      dryRun: false,
-      committed: true,
-      previousBackend: previous,
-      currentBackend: current,
-      auditEventId: switchId,
-      projection,
+      let auditDispatch: Awaited<ReturnType<typeof dispatchAnchorAuditEvent>>;
+      try {
+        auditDispatch = await dispatchAnchorAuditEvent(backend, auditEvent);
+      } catch (anchorErr) {
+        // Queue before mutation: rejection leaves routing untouched, so there is
+        // no rollback that could overwrite a later operator request.
+        logError(anchorErr, 'Anchor-backend switch intent was rejected before routing changed');
+        currentSnapshot = getAnchorBackendSnapshot();
+        return res.status(502).json({
+          error: 'Anchor-backend switch audit queueing failed',
+          code: 'anchor-audit-delivery-failed',
+          committed: false,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+        });
+      }
+
+      // Connectivity can change while the intent is being queued. Re-check
+      // every selected backend before exposing it as the active route.
+      if (!await isAnchorBackendRuntimeReady(backend)) {
+        currentSnapshot = getAnchorBackendSnapshot();
+        return res.status(503).json({
+          error: `Anchor backend "${backend}" became unavailable before commit`,
+          code: 'anchor-backend-unavailable',
+          backend,
+          committed: false,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+          auditQueueId: auditDispatch.auditQueueId,
+          auditStatus: auditDispatch.auditStatus,
+        });
+      }
+
+      // Guard against any out-of-band writer, including ABA changes that return
+      // to the same backend value. The queued event remains a truthful intent.
+      currentSnapshot = getAnchorBackendSnapshot();
+      if (
+        currentSnapshot.backend !== expectedSnapshot.backend ||
+        currentSnapshot.revision !== expectedSnapshot.revision
+      ) {
+        return res.status(409).json({
+          error: 'Anchor backend changed while the switch intent was queued',
+          code: 'anchor-backend-state-changed',
+          committed: false,
+          currentBackend: currentSnapshot.backend,
+          currentBackendRevision: currentSnapshot.revision,
+          auditQueueId: auditDispatch.auditQueueId,
+          auditStatus: auditDispatch.auditStatus,
+        });
+      }
+
+      const { previous: committedPrevious, current } = anchorSwitch.setBackend(backend);
+      const committedSnapshot = getAnchorBackendSnapshot();
+      const entry: SwitchHistoryEntry = {
+        id: auditQueueId,
+        at: at.toISOString(),
+        previous: committedPrevious,
+        current,
+        operator: who,
+        auditQueueId: auditDispatch.auditQueueId,
+        auditStatus: auditDispatch.auditStatus,
+      };
+      recordSwitch(entry);
+
+      log(`Anchor backend switched ${committedPrevious} -> ${current} by ${who}`);
+
+      const projection = anchorSwitch.project(epm, current);
+      return res.json({
+        dryRun: false,
+        committed: true,
+        previousBackend: committedPrevious,
+        currentBackend: current,
+        backendRevision: committedSnapshot.revision,
+        auditQueueId: auditDispatch.auditQueueId,
+        auditStatus: auditDispatch.auditStatus,
+        projection,
+      });
     });
   } catch (err) {
     logError(err, 'Failed to commit anchor-backend switch');

@@ -8,9 +8,24 @@ The `oxscada-full` Helm chart deploys the entire 0xSCADA stack in a single comma
 
 ## Quick Start
 
+Create an API-key Secret before installation so operator-only control-plane
+routes are usable:
+
 ```bash
-helm install oxscada ./helm/oxscada-full -n oxscada --create-namespace
+kubectl create namespace oxscada --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n oxscada create secret generic oxscada-api-keys \
+  --from-literal=API_KEYS='<generated-key>:anchor-operations:operator+anchor.admin'
 ```
+
+```bash
+helm install oxscada ./helm/oxscada-full -n oxscada --create-namespace \
+  --set-string server.apiKeys.existingSecret=oxscada-api-keys
+```
+
+The chart references the existing Secret and never ships a default credential.
+See [Control-Plane API Keys](../security/control-plane-api-keys.md) for secure
+key generation, required operator and service scopes, global gateway
+authentication, and rotation guidance.
 
 ## Components
 
@@ -31,6 +46,7 @@ Override values with `--set` or a custom values file:
 ```bash
 helm install oxscada ./helm/oxscada-full \
   --set server.replicaCount=3 \
+  --set-string server.apiKeys.existingSecret=oxscada-api-keys \
   --set blockchain.persistence.size=50Gi \
   --set ingress.enabled=true \
   --set ingress.hosts[0].host=oxscada.example.com

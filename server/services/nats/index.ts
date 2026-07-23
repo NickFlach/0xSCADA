@@ -16,16 +16,23 @@ class NatsPublisher {
       this.nc = await connect({ servers: this.url });
       log(`✅ NATS connected to ${this.url}`, "nats");
     } catch (err) {
-      logError(`❌ NATS connection failed (${this.url})`, err as Error);
+      this.nc = null;
+      logError(err, `❌ NATS connection failed (${this.url})`);
     }
   }
 
-  publish(subject: string, data: object) {
-    if (!this.nc) return;
+  isConnected(): boolean {
+    return this.nc !== null && !this.nc.isClosed();
+  }
+
+  publish(subject: string, data: object): boolean {
+    if (!this.isConnected() || !this.nc) return false;
     try {
       this.nc.publish(subject, sc.encode(JSON.stringify(data)));
+      return true;
     } catch (err) {
       logWarn(`NATS publish failed on ${subject}: ${err}`, "nats");
+      return false;
     }
   }
 

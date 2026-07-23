@@ -10,10 +10,10 @@ import {
   projectSwitch,
   backendsFor,
   parseBackendEnv,
-  AnchorRouter,
+  AnchorSwitch,
   DEFAULT_BACKEND_PROFILES,
   type AnchorBackend,
-} from '../bridge/anchor-router';
+} from '../bridge/anchor-switch';
 
 const MINUTES_PER_DAY = 60 * 24;
 
@@ -130,14 +130,14 @@ describe('projectSwitch', () => {
   });
 });
 
-describe('AnchorRouter', () => {
+describe('AnchorSwitch', () => {
   it('defaults backend from explicit option', () => {
-    const r = new AnchorRouter({ backend: 'l2' });
+    const r = new AnchorSwitch({ backend: 'l2' });
     expect(r.getBackend()).toBe('l2');
   });
 
   it('setBackend flips and returns previous + current', () => {
-    const r = new AnchorRouter({ backend: 'node' });
+    const r = new AnchorSwitch({ backend: 'node' });
     const result = r.setBackend('both');
     expect(result.previous).toBe('node');
     expect(result.current).toBe('both');
@@ -145,13 +145,13 @@ describe('AnchorRouter', () => {
   });
 
   it('project() uses the active backend by default', () => {
-    const r = new AnchorRouter({ backend: 'l2' });
+    const r = new AnchorSwitch({ backend: 'l2' });
     const p = r.project(120);
     expect(p.backend).toBe('l2');
   });
 
   it('dispatch fans out to every active backend for "both"', async () => {
-    const r = new AnchorRouter({ backend: 'both' });
+    const r = new AnchorSwitch({ backend: 'both' });
     const result = await r.dispatch([{ id: 'evt-12345678' }, { id: 'evt-2' }]);
     expect(result.backend).toBe('both');
     expect(result.acks).toHaveLength(2);
@@ -163,14 +163,14 @@ describe('AnchorRouter', () => {
   });
 
   it('dispatch to a single backend produces one ack', async () => {
-    const r = new AnchorRouter({ backend: 'node' });
+    const r = new AnchorSwitch({ backend: 'node' });
     const result = await r.dispatch([{ id: 'evt-1' }]);
     expect(result.acks).toHaveLength(1);
     expect(result.acks[0].backend).toBe('node');
   });
 
   it('dispatch handles an empty batch', async () => {
-    const r = new AnchorRouter({ backend: 'l2' });
+    const r = new AnchorSwitch({ backend: 'l2' });
     const result = await r.dispatch([]);
     expect(result.acks).toHaveLength(1);
     expect(result.acks[0].eventCount).toBe(0);

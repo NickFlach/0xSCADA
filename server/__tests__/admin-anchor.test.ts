@@ -1,53 +1,274 @@
 /**
- * Admin Anchor-Backend — confirm-token gate unit tests (#455)
+ * Admin Anchor-Backend shared routing-state tests (#455).
  *
- * Verifies the pure gate logic that protects non-dry-run (committing) switches:
- * an operator must echo a backend-specific confirm token, and a token for one
- * backend must NOT authorise a switch to a different backend.
+ * HTTP authentication, public-token removal, and audit identity binding are
+ * covered by control-plane-auth.test.ts. These tests prove the application
+ * singleton updates the production source consumed by both anchor paths.
  */
 
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  expectedConfirmToken,
-  isValidConfirmToken,
-} from '../routes/admin-anchor';
-import type { AnchorBackend } from '../bridge/anchor-router';
+  _resetAnchorBackendState,
+  anchorsToL2,
+  anchorsToNode,
+  getAnchorBackendCoordinationStatus,
+  getAnchorBackend,
+  getAnchorBackendSnapshot,
+  setAnchorBackend,
+} from "../bridge/anchor-backend";
+import { AnchorSwitch, anchorSwitch } from "../bridge/anchor-switch";
+import {
+  dispatchAnchorAuditEvent,
+  getActiveAnchorHealthStatus,
+  getAnchorPipeline,
+  isAnchorBackendRuntimeReady,
+  prepareAnchorBackendRuntime,
+} from "../bridge";
 
-const BACKENDS: AnchorBackend[] = ['l2', 'node', 'both'];
+const originalBackend = process.env.ANCHOR_BACKEND;
 
-describe('expectedConfirmToken', () => {
-  it('is deterministic and backend-specific', () => {
-    expect(expectedConfirmToken('l2')).toBe('confirm-switch-l2');
-    expect(expectedConfirmToken('node')).toBe('confirm-switch-node');
-    expect(expectedConfirmToken('both')).toBe('confirm-switch-both');
-  });
-
-  it('produces distinct tokens per backend', () => {
-    const tokens = new Set(BACKENDS.map(expectedConfirmToken));
-    expect(tokens.size).toBe(BACKENDS.length);
-  });
+afterEach(() => {
+  if (originalBackend === undefined) delete process.env.ANCHOR_BACKEND;
+  else process.env.ANCHOR_BACKEND = originalBackend;
+  _resetAnchorBackendState();
 });
 
-describe('isValidConfirmToken', () => {
-  it('accepts the matching token for each backend', () => {
-    for (const b of BACKENDS) {
-      expect(isValidConfirmToken(b, expectedConfirmToken(b))).toBe(true);
-    }
+describe("admin anchor switch production binding", () => {
+  it("requires connected node and L2 backends for the selected target", async () => {
+    const startedPipeline = {
+      getStats: () => ({ started: true }),
+      relayer: { getHealth: async () => ({ connected: true }) },
+    } as never;
+    const stoppedPipeline = {
+      getStats: () => ({ started: false }),
+      relayer: { getHealth: async () => ({ connected: false }) },
+    } as never;
+    const disconnectedPipeline = {
+      getStats: () => ({ started: true }),
+      relayer: { getHealth: async () => ({ connected: false }) },
+    } as never;
+
+    await expect(isAnchorBackendRuntimeReady("node", null, true)).resolves.toBe(true);
+    await expect(isAnchorBackendRuntimeReady("node", null, false)).resolves.toBe(false);
+    await expect(isAnchorBackendRuntimeReady("l2", null, true)).resolves.toBe(false);
+    await expect(isAnchorBackendRuntimeReady("both", stoppedPipeline, true)).resolves.toBe(false);
+    await expect(isAnchorBackendRuntimeReady("l2", disconnectedPipeline, true)).resolves.toBe(false);
+    await expect(isAnchorBackendRuntimeReady("l2", startedPipeline, false)).resolves.toBe(true);
+    await expect(isAnchorBackendRuntimeReady("both", startedPipeline, true)).resolves.toBe(true);
+    await expect(isAnchorBackendRuntimeReady("both", startedPipeline, false)).resolves.toBe(false);
   });
 
-  it('rejects a missing or empty token (operator must opt in)', () => {
-    expect(isValidConfirmToken('l2', undefined)).toBe(false);
-    expect(isValidConfirmToken('l2', '')).toBe(false);
+  it("prepares L2 from a node-only boot without changing routing until commit", async () => {
+    setAnchorBackend("node");
+    const ensureL2Pipeline = vi.fn().mockResolvedValue({
+      getStats: () => ({ started: true }),
+      relayer: { getHealth: async () => ({ connected: true, blockNumber: 42 }) },
+    });
+
+    await expect(prepareAnchorBackendRuntime("l2", {
+      pipeline: null,
+      ensureL2Pipeline,
+      nodeReady: () => true,
+    })).resolves.toBe(true);
+
+    expect(ensureL2Pipeline).toHaveBeenCalledOnce();
+    expect(getAnchorBackend()).toBe("node");
+    expect(anchorsToL2()).toBe(false);
   });
 
-  it('rejects a token issued for a DIFFERENT backend', () => {
-    expect(isValidConfirmToken('l2', expectedConfirmToken('node'))).toBe(false);
-    expect(isValidConfirmToken('both', expectedConfirmToken('l2'))).toBe(false);
-    expect(isValidConfirmToken('node', expectedConfirmToken('both'))).toBe(false);
+  it("requires every selected backend in active anchor health", async () => {
+    const connectedPipeline = {
+      getStats: () => ({ started: true }),
+      relayer: {
+        getHealth: async () => ({ connected: true, blockNumber: 42 }),
+      },
+    } as never;
+    const disconnectedPipeline = {
+      getStats: () => ({ started: true }),
+      relayer: {
+        getHealth: async () => ({ connected: false, error: "RPC unavailable" }),
+      },
+    } as never;
+
+    await expect(getActiveAnchorHealthStatus("node", null, false)).resolves.toMatchObject({
+      healthy: false,
+    });
+    await expect(getActiveAnchorHealthStatus("l2", disconnectedPipeline, true)).resolves.toMatchObject({
+      healthy: false,
+    });
+    await expect(getActiveAnchorHealthStatus("both", connectedPipeline, false)).resolves.toMatchObject({
+      healthy: false,
+    });
+    await expect(getActiveAnchorHealthStatus("both", connectedPipeline, true)).resolves.toMatchObject({
+      healthy: true,
+    });
   });
 
-  it('rejects an arbitrary garbage token', () => {
-    expect(isValidConfirmToken('l2', 'yes')).toBe(false);
-    expect(isValidConfirmToken('node', 'confirm')).toBe(false);
+  it("serializes complete switch commit operations and releases after failure", async () => {
+    const isolatedSwitch = new AnchorSwitch({ backend: "node" });
+    const order: string[] = [];
+    let releaseFirst!: () => void;
+    const firstGate = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+
+    const first = isolatedSwitch.runCommitExclusive(async () => {
+      order.push("first:start");
+      await firstGate;
+      order.push("first:end");
+      throw new Error("first failed");
+    });
+    const second = isolatedSwitch.runCommitExclusive(async () => {
+      order.push("second:start");
+      isolatedSwitch.setBackend("l2");
+      order.push("second:end");
+    });
+
+    await vi.waitFor(() => expect(order).toEqual(["first:start"]));
+    releaseFirst();
+    await expect(first).rejects.toThrow("first failed");
+    await second;
+
+    expect(order).toEqual([
+      "first:start",
+      "first:end",
+      "second:start",
+      "second:end",
+    ]);
+    expect(isolatedSwitch.getBackend()).toBe("l2");
+  });
+
+  it("holds process-local switching for multi-replica deployments", () => {
+    expect(getAnchorBackendCoordinationStatus({
+      OXSCADA_REPLICA_COUNT: "2",
+    })).toMatchObject({ ready: false, replicas: 2 });
+    expect(getAnchorBackendCoordinationStatus({
+      OXSCADA_REPLICA_COUNT: "1",
+    })).toEqual({ ready: true, replicas: 1 });
+    expect(getAnchorBackendCoordinationStatus({
+      OXSCADA_REPLICA_COUNT: "not-a-number",
+    })).toMatchObject({ ready: false, replicas: 0 });
+    expect(getAnchorBackendCoordinationStatus({
+      NODE_ENV: "production",
+    })).toMatchObject({ ready: false, replicas: 0 });
+  });
+
+  it("updates the same source consumed by production node/L2 routing", () => {
+    process.env.ANCHOR_BACKEND = "node";
+    _resetAnchorBackendState();
+
+    expect(anchorSwitch.getBackend()).toBe("node");
+    expect(anchorsToNode()).toBe(true);
+    expect(anchorsToL2()).toBe(false);
+
+    expect(anchorSwitch.setBackend("both")).toEqual({
+      previous: "node",
+      current: "both",
+    });
+
+    expect(getAnchorBackend()).toBe("both");
+    expect(anchorsToNode()).toBe(true);
+    expect(anchorsToL2()).toBe(true);
+  });
+
+  it("advances the backend revision on every runtime mutation, including ABA writes", () => {
+    process.env.ANCHOR_BACKEND = "node";
+    _resetAnchorBackendState();
+
+    expect(getAnchorBackendSnapshot()).toEqual({ backend: "node", revision: 0 });
+    setAnchorBackend("l2");
+    expect(getAnchorBackendSnapshot()).toEqual({ backend: "l2", revision: 1 });
+    setAnchorBackend("node");
+    expect(getAnchorBackendSnapshot()).toEqual({ backend: "node", revision: 2 });
+  });
+
+  it("keeps the authenticated runtime override authoritative over boot config", () => {
+    process.env.ANCHOR_BACKEND = "node";
+    _resetAnchorBackendState();
+
+    anchorSwitch.setBackend("l2");
+    process.env.ANCHOR_BACKEND = "node";
+
+    expect(anchorSwitch.getBackend()).toBe("l2");
+    expect(getAnchorBackend()).toBe("l2");
+    expect(anchorsToNode()).toBe(false);
+    expect(anchorsToL2()).toBe(true);
+  });
+
+  it("stops exposing a warm L2 pipeline while routing is node-only", () => {
+    const warmPipeline = {} as never;
+
+    setAnchorBackend("both");
+    expect(getAnchorPipeline(warmPipeline)).toBe(warmPipeline);
+
+    setAnchorBackend("node");
+    expect(getAnchorPipeline(warmPipeline)).toBeNull();
+  });
+
+  it("queues switch audits through every selected production backend", async () => {
+    const nodeEvents: unknown[] = [];
+    const l2Events: unknown[] = [];
+    // The explicit target must win even though mutable global state still says
+    // node-only at this pre-commit point.
+    setAnchorBackend("node");
+
+    const result = await dispatchAnchorAuditEvent(
+      "both",
+      {
+        id: "switch-1",
+        timestamp: new Date("2026-07-23T12:00:00.000Z"),
+        eventType: "anchor-backend-switch-intent",
+        siteId: "system",
+        severity: "warning",
+        message: "authorized backend switch intent",
+        data: { previous: "node", requestedBackend: "both" },
+      },
+      {
+        nodePublisher: {
+          publish: (subject, event) => {
+            nodeEvents.push({ subject, event });
+            return true;
+          },
+        },
+        l2Pipeline: {
+          ingestEvent: async (event) => {
+            l2Events.push(event);
+          },
+        },
+      },
+    );
+
+    expect(result).toEqual({
+      targetBackend: "both",
+      auditQueueId: "switch-1",
+      auditStatus: "queued",
+      nodeQueued: true,
+      l2Queued: true,
+    });
+    expect(nodeEvents).toHaveLength(1);
+    expect(nodeEvents[0]).toMatchObject({ subject: "scada.events" });
+    expect(l2Events).toHaveLength(1);
+  });
+
+  it("fails audit dispatch when the selected node backend cannot queue it", async () => {
+    setAnchorBackend("l2");
+
+    await expect(dispatchAnchorAuditEvent(
+      "node",
+      {
+        id: "switch-2",
+        timestamp: new Date("2026-07-23T12:00:00.000Z"),
+        eventType: "anchor-backend-switch-intent",
+        siteId: "system",
+        severity: "warning",
+        message: "authorized backend switch intent",
+      },
+      {
+        nodePublisher: { publish: () => false },
+        l2Pipeline: null,
+      },
+    )).rejects.toThrow("did not accept the audit event");
+
+    expect(getAnchorBackend()).toBe("l2");
   });
 });
