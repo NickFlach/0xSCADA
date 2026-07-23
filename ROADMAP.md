@@ -81,9 +81,18 @@ This roadmap documents the current state of the 0xSCADA industrial SCADA system,
 - **Safety Overrides** — Emergency stop and safety protocol implementation
 
 #### Distributed Architecture
-- **Multi-Node Coordination** — Distributed SCADA node management
-- **State Synchronization** — Cross-node data consistency
-- **Network Resilience** — Partition tolerance and recovery protocols
+
+> **Status (2026-07):** the first three items below already ship in
+> [`0xSCADA-node`](https://github.com/NickFlach/0xSCADA-node) — multi-validator
+> coordination via Kuramoto-BFT resonant consensus (its ADR-0001), state
+> synchronization through consensus rounds, and partition tolerance via the
+> Raft fallback. The node is the canonical anchor backend (see
+> `docs/architecture/anchor-backend-migration.md`, issue #443). Remaining
+> work is integration depth, not greenfield.
+
+- **Multi-Node Coordination** — ✅ shipped in `0xSCADA-node` (Kuramoto-BFT validator network)
+- **State Synchronization** — ✅ shipped in `0xSCADA-node` (consensus-driven ledger state)
+- **Network Resilience** — ✅ partial: Raft fallback in `0xSCADA-node`; store-and-forward edge queueing still open (#224)
 - **Edge Computing** — Localized control with central coordination
 
 ## 🔍 **TECHNICAL DEBT & IMPROVEMENTS**

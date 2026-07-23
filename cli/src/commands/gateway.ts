@@ -8,10 +8,27 @@ import {
   outputError,
   outputSuccess,
   outputWarning,
-  outputInfo,
   setOutputOptions,
   colors,
 } from "../output.js";
+
+interface Gateway {
+  id: string;
+  name?: string;
+  siteId?: string;
+  protocol?: string;
+  status?: string;
+  endpoint?: string;
+  tagCount?: number;
+  lastSeen?: string;
+  uptime?: string;
+  throughput?: number;
+  lastError?: string;
+}
+
+interface GatewayListResponse {
+  gateways?: Gateway[];
+}
 
 export function registerGatewayCommand(program: Command): void {
   const gateway = program
@@ -31,15 +48,19 @@ export function registerGatewayCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get("/api/gateways", {
-          params: {
-            ...(options.site && { siteId: options.site }),
-            ...(options.status && { status: options.status }),
-          },
-        });
+        const query = new URLSearchParams();
+        if (options.site) query.set("siteId", options.site);
+        if (options.status) query.set("status", options.status);
+        const qs = query.toString();
+        const response = await api.get<GatewayListResponse | Gateway[]>(
+          `/api/gateways${qs ? `?${qs}` : ""}`
+        );
         spinner?.succeed("Gateway connections retrieved");
 
-        const gateways = response.data?.gateways ?? response.data ?? [];
+        const data = response.data;
+        const gateways: Gateway[] = Array.isArray(data)
+          ? data
+          : data?.gateways ?? [];
 
         if (options.json) {
           output(gateways);
@@ -84,7 +105,7 @@ export function registerGatewayCommand(program: Command): void {
       const api = getApiClient();
 
       try {
-        const response = await api.get(`/api/gateways/${gatewayId}`);
+        const response = await api.get<Gateway>(`/api/gateways/${gatewayId}`);
         spinner?.succeed("Gateway info retrieved");
 
         if (options.json) {
@@ -92,7 +113,7 @@ export function registerGatewayCommand(program: Command): void {
           return;
         }
 
-        const gw = response.data;
+        const gw = response.data ?? ({} as Gateway);
         outputSection(`Gateway: ${gw.name ?? gatewayId}`);
         outputKeyValue([
           ["ID", gw.id],

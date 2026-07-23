@@ -9,16 +9,16 @@ import { PIDCanvas } from '../PIDCanvas';
 import { PIDDataProvider } from '../PIDDataBinding';
 import type { PIDDiagram } from '@shared/types/pid';
 
-// Mock WebSocket
-vi.stubGlobal('WebSocket', vi.fn().mockImplementation(() => ({
-  onopen: null,
-  onmessage: null,
-  onclose: null,
-  onerror: null,
-  send: vi.fn(),
-  close: vi.fn(),
-  readyState: 1,
-})));
+// Mock WebSocket — must be a constructor (PIDDataBinding calls `new WebSocket(...)`)
+vi.stubGlobal('WebSocket', class {
+  onopen: ((ev?: any) => void) | null = null;
+  onmessage: ((ev?: any) => void) | null = null;
+  onclose: ((ev?: any) => void) | null = null;
+  onerror: ((ev?: any) => void) | null = null;
+  send = vi.fn();
+  close = vi.fn();
+  readyState = 1;
+});
 
 const MOCK_DIAGRAM: PIDDiagram = {
   id: 'test-1',

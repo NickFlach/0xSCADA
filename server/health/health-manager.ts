@@ -120,14 +120,16 @@ export function createGatewayCheck(isEnabledFn: () => boolean): HealthCheck {
 export class HealthManager {
   private checks: HealthCheck[] = [];
   private cacheTtlMs: number;
+  private checkTimeoutMs: number;
   private cachedResult: HealthCheckResult | null = null;
   private cachedAt = 0;
   private periodicTimer?: ReturnType<typeof setInterval>;
   private listeners: CheckCompleteListener[] = [];
   private startTime = Date.now();
 
-  constructor(cacheTtlMs = 10_000) {
+  constructor(cacheTtlMs = 10_000, checkTimeoutMs = 10_000) {
     this.cacheTtlMs = cacheTtlMs;
+    this.checkTimeoutMs = checkTimeoutMs;
   }
 
   /** Register a full health check */
@@ -199,7 +201,7 @@ export class HealthManager {
         const result = await Promise.race([
           check.check(),
           new Promise<ServiceCheckResult>((_, reject) =>
-            setTimeout(() => reject(new Error('timeout')), 10_000),
+            setTimeout(() => reject(new Error('timeout')), this.checkTimeoutMs),
           ),
         ]);
         services.push(result);

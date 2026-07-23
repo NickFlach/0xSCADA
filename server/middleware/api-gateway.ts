@@ -11,16 +11,25 @@
 import { Request, Response, NextFunction, Router, Express } from 'express';
 import crypto from 'crypto';
 import { z, ZodSchema } from 'zod';
+import {
+  createRateLimiter,
+  type CreateRateLimiterOptions,
+  type RateLimitConfig,
+} from './rate-limiter';
+
+// Limiter implementations live in ./rate-limiter (issue #447); re-exported
+// here so existing imports keep working.
+export {
+  SlidingWindowRateLimiter,
+  RedisSlidingWindowRateLimiter,
+  createRateLimiter,
+  type RateLimitConfig,
+  type RateLimitResult,
+  type RateLimiter,
+  type RateLimiterBackendName,
+} from './rate-limiter';
 
 // --- Types ---
-
-export interface RateLimitConfig {
-  windowMs: number;
-  maxRequests: number;
-  keyExtractor?: (req: Request) => string;
-  /** Per-route overrides keyed by "METHOD /path" */
-  routeOverrides?: Record<string, { windowMs?: number; maxRequests: number }>;
-}
 
 export interface ApiKeyRecord {
   key: string;
@@ -50,61 +59,6 @@ const DEFAULT_CONFIG: ApiGatewayConfig = {
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz'],
 };
 
-// --- Sliding Window Rate Limiter ---
-
-interface WindowEntry {
-  count: number;
-  resetAt: number;
-}
-
-export class SlidingWindowRateLimiter {
-  private windows = new Map<string, WindowEntry>();
-  private cleanupTimer?: ReturnType<typeof setInterval>;
-
-  constructor(private config: RateLimitConfig) {
-    this.cleanupTimer = setInterval(() => this.cleanup(), config.windowMs * 2);
-  }
-
-  check(key: string, overrideMax?: number): { allowed: boolean; remaining: number; resetAt: number } {
-    const now = Date.now();
-    const max = overrideMax ?? this.config.maxRequests;
-    let entry = this.windows.get(key);
-
-    if (!entry || now >= entry.resetAt) {
-      entry = { count: 0, resetAt: now + this.config.windowMs };
-      this.windows.set(key, entry);
-    }
-
-    entry.count++;
-    const remaining = Math.max(0, max - entry.count);
-
-    return {
-      allowed: entry.count <= max,
-      remaining,
-      resetAt: entry.resetAt,
-    };
-  }
-
-  /** Get current count for a key without incrementing */
-  peek(key: string): number {
-    const entry = this.windows.get(key);
-    if (!entry || Date.now() >= entry.resetAt) return 0;
-    return entry.count;
-  }
-
-  private cleanup(): void {
-    const now = Date.now();
-    for (const [key, entry] of this.windows) {
-      if (now >= entry.resetAt) this.windows.delete(key);
-    }
-  }
-
-  destroy(): void {
-    if (this.cleanupTimer) clearInterval(this.cleanupTimer);
-    this.windows.clear();
-  }
-}
-
 // --- Middleware Functions ---
 
 /** Inject a unique request ID */
@@ -118,11 +72,11 @@ export function requestIdMiddleware() {
 }
 
 /** Rate limiting middleware with per-route overrides */
-export function rateLimitMiddleware(config: RateLimitConfig) {
-  const limiter = new SlidingWindowRateLimiter(config);
+export function rateLimitMiddleware(config: RateLimitConfig, limiterOptions?: CreateRateLimiterOptions) {
+  const limiter = createRateLimiter(config, limiterOptions);
   const keyFn = config.keyExtractor || ((req: Request) => req.ip || 'unknown');
 
-  return (req: Request, res: Response, next: NextFunction): void => {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
     const key = keyFn(req);
     const routeKey = `${req.method} ${req.path}`;
 
@@ -143,7 +97,16 @@ export function rateLimitMiddleware(config: RateLimitConfig) {
       maxRequests = apiKeyRecord.rateLimit;
     }
 
-    const result = limiter.check(key, maxRequests);
+    let result;
+    try {
+      result = await limiter.check(key, maxRequests);
+    } catch (err) {
+      // Backends degrade internally; anything reaching here is unexpected —
+      // fail open rather than take down the API path.
+      console.error('[rate-limiter] check failed unexpectedly, allowing request:', err);
+      next();
+      return;
+    }
 
     res.setHeader('X-RateLimit-Limit', maxRequests.toString());
     res.setHeader('X-RateLimit-Remaining', result.remaining.toString());

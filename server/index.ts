@@ -19,8 +19,10 @@ const httpServer = createServer(app);
 app.use(securityHeaders);
 app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
 
-// Health/readiness probes — mounted before auth so k8s probes work unauthenticated
-app.use(healthRouter);
+// Health/readiness probes — mounted before auth so k8s probes work
+// unauthenticated. Mounted under /api to match the public-route allowlist
+// (/api/health, /api/healthz, /api/readyz).
+app.use('/api', healthRouter);
 
 // API Gateway middleware (#256) — sets up rate limiting, API key auth, CORS, request IDs
 const gatewayRateLimit = {
@@ -88,6 +90,12 @@ app.use((req, res, next) => {
 });
 
 (async () => {
+  // Initialize the database first — downstream services and health checks
+  // depend on an established connection (SQLite fallback in development).
+  const { initializeDatabase } = await import("./storage");
+  await initializeDatabase();
+  log("Database initialized");
+
   const { fieldSimulator } = await import("./simulator");
   await fieldSimulator.initialize();
   
