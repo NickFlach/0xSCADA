@@ -7,6 +7,7 @@ import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
 import { setupApiGateway } from "./middleware/api-gateway";
+import { initializeDatabase } from "./storage";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -83,7 +84,6 @@ app.use((req, res, next) => {
 (async () => {
   // Initialize the database first — downstream services and health checks
   // depend on an established connection (SQLite fallback in development).
-  const { initializeDatabase } = await import("./storage");
   await initializeDatabase();
   log("Database initialized");
 
