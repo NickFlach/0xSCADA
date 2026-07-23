@@ -21,16 +21,16 @@ describe('App Startup Integration', () => {
     baseUrl = `http://127.0.0.1:${testPort}`;
     
     // Start the TypeScript entrypoint directly so NODE_ENV remains "test" and
-    // the smoke test behaves the same on Windows and Linux. Use an isolated
-    // SQLite database: this test verifies process startup and HTTP probes, not
-    // the separately tested Postgres integration.
+    // the smoke test behaves the same on Windows and Linux. FORCE_POSTGRES=false
+    // selects the SQLite storage branch (which writes dev-database.sqlite in the
+    // working directory; the file is gitignored): this test verifies process
+    // startup and HTTP probes, not the separately tested Postgres integration.
     serverProcess = spawn(process.execPath, ['--import', 'tsx', 'server/index.ts'], {
       env: {
         ...process.env,
         NODE_ENV: 'test',
         PORT: testPort.toString(),
         FORCE_POSTGRES: 'false',
-        SQLITE_DATABASE_PATH: ':memory:',
         SIMULATOR_ENABLED: 'false',
         ENABLE_FLUX_INTEGRATION: 'false',
       },
@@ -76,14 +76,18 @@ describe('App Startup Integration', () => {
   }, 35000); // Allow 35 seconds for full startup
 
   afterAll(async () => {
-    // Clean shutdown of server process
-    if (serverProcess && !serverProcess.killed) {
+    // Clean shutdown of server process. `killed` only records that a signal
+    // was sent, so use exitCode to know whether the process actually exited.
+    if (serverProcess && serverProcess.exitCode === null) {
+      const exited = new Promise<void>((resolve) => {
+        serverProcess.once('exit', () => resolve());
+      });
       serverProcess.kill('SIGTERM');
-      
-      // Give it 5 seconds to shut down gracefully
-      await sleep(5000);
-      
-      if (!serverProcess.killed) {
+
+      // Give it up to 5 seconds to shut down gracefully, then force-kill.
+      await Promise.race([exited, sleep(5000)]);
+
+      if (serverProcess.exitCode === null) {
         serverProcess.kill('SIGKILL');
       }
     }
