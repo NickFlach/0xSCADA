@@ -100,11 +100,21 @@ duplicate addresses at construction time.
 > Binding to port 502 requires elevated privileges on most operating systems.
 > For local development/conformance testing, set `MODBUS_SERVER_PORT=1502`.
 
+### Write safety
+
+Network writes (FC05, FC06, FC15, FC16) are disabled by default. A caller must
+construct the server with `{ allowWrites: true }` to expose them. This is only a
+fail-closed capability gate; Modbus TCP itself does not authenticate clients,
+so enabling writes still requires an explicit deployment-level network and
+authorization policy. No such policy is invented by this protocol library.
+
 ## Conformance smoke test (pymodbus)
 
 A runnable pymodbus client lives at
 `server/protocols/modbus-server/__tests__/pymodbus_smoke.py`. It exercises coil
-+ register read/write ranges and asserts values round-trip.
++ register read/write ranges and asserts values round-trip. Because that smoke
+test performs writes, its test-only server must be constructed with
+`{ allowWrites: true }` on an isolated loopback/test network.
 
 ```bash
 # 1. Start the server on a high port (example bootstrap; see "wiring" below)

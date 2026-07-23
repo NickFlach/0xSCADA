@@ -87,7 +87,31 @@ describe("ModbusTcpServer over loopback TCP", () => {
     expect(resp.readUInt16BE(9)).toBe(0xcafe);
   });
 
-  it("write (FC06) then read (FC03) round-trips over the socket", async () => {
+  it("rejects network writes by default without mutating the model", async () => {
+    const write = frame(
+      0x0002,
+      1,
+      FunctionCode.WRITE_SINGLE_REGISTER,
+      Buffer.from([0x00, 0x05, 0x12, 0x34]),
+    );
+    const resp = await exchange(port, [write], 9);
+    expect(resp.readUInt8(7)).toBe(
+      FunctionCode.WRITE_SINGLE_REGISTER | EXCEPTION_FLAG,
+    );
+    expect(resp.readUInt8(8)).toBe(0x01); // Illegal Function
+    expect(await model.readHoldingRegisters(5, 1)).toEqual([0]);
+  });
+
+  it("write (FC06) then read (FC03) works only with explicit opt-in", async () => {
+    await server.stop();
+    server = new ModbusTcpServer(model, {
+      host: "127.0.0.1",
+      port: 0,
+      allowWrites: true,
+    });
+    await server.start();
+    port = server.address()!.port;
+
     const write = frame(0x0002, 1, FunctionCode.WRITE_SINGLE_REGISTER,
       Buffer.from([0x00, 0x05, 0x12, 0x34]));
     const read = frame(0x0003, 1, FunctionCode.READ_HOLDING_REGISTERS,

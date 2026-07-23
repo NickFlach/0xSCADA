@@ -17,7 +17,13 @@
  */
 
 import net from "node:net";
-import { decodeRequest, ModbusFrameError } from "./codec";
+import {
+  decodeRequest,
+  encodeExceptionResponse,
+  ExceptionCode,
+  FunctionCode,
+  ModbusFrameError,
+} from "./codec";
 import type { ModbusDataModel } from "./data-model";
 import { processRequest } from "./handlers";
 import { log, logError, logWarn } from "../../logger";
@@ -36,12 +42,26 @@ export interface ModbusServerConfig {
   maxBufferBytes?: number;
   /** Idle socket timeout in ms (0 disables). Default 60_000. */
   socketTimeoutMs?: number;
+  /**
+   * Permit network clients to use Modbus write function codes.
+   *
+   * Defaults to false. This is a fail-closed capability gate, not client
+   * authentication; deployments must still supply an explicit network/access
+   * control policy before enabling it.
+   */
+  allowWrites?: boolean;
 }
 
 const DEFAULT_PORT = 502;
 const DEFAULT_HOST = "0.0.0.0";
 const DEFAULT_MAX_BUFFER = 64 * 1024;
 const DEFAULT_SOCKET_TIMEOUT = 60_000;
+const WRITE_FUNCTION_CODES = new Set<number>([
+  FunctionCode.WRITE_SINGLE_COIL,
+  FunctionCode.WRITE_SINGLE_REGISTER,
+  FunctionCode.WRITE_MULTIPLE_COILS,
+  FunctionCode.WRITE_MULTIPLE_REGISTERS,
+]);
 
 /**
  * A running (or runnable) Modbus TCP server backed by a `ModbusDataModel`.
@@ -54,6 +74,7 @@ export class ModbusTcpServer {
   private readonly port: number;
   private readonly maxBufferBytes: number;
   private readonly socketTimeoutMs: number;
+  private readonly allowWrites: boolean;
   private readonly sockets = new Set<net.Socket>();
   private listening = false;
 
@@ -65,6 +86,7 @@ export class ModbusTcpServer {
     this.port = config.port ?? DEFAULT_PORT;
     this.maxBufferBytes = config.maxBufferBytes ?? DEFAULT_MAX_BUFFER;
     this.socketTimeoutMs = config.socketTimeoutMs ?? DEFAULT_SOCKET_TIMEOUT;
+    this.allowWrites = config.allowWrites ?? false;
     this.server = net.createServer((socket) => this.onConnection(socket));
     this.server.on("error", (err) =>
       logError(err, "Modbus TCP server socket error"),
@@ -200,7 +222,15 @@ export class ModbusTcpServer {
       buffer = buffer.subarray(decoded.bytesConsumed);
 
       try {
-        const response = await processRequest(decoded.request, this.model);
+        const response =
+          !this.allowWrites &&
+          WRITE_FUNCTION_CODES.has(decoded.request.functionCode)
+            ? encodeExceptionResponse(
+                decoded.request.header,
+                decoded.request.functionCode,
+                ExceptionCode.ILLEGAL_FUNCTION,
+              )
+            : await processRequest(decoded.request, this.model);
         if (!socket.destroyed) {
           socket.write(response);
         }
