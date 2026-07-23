@@ -29,6 +29,7 @@ import { EventEmitter } from 'events';
 import {
   LatencyTrace,
   type Clock,
+  type GaugeMetric,
   type LatencyMeasurement,
 } from './stage-timestamps.js';
 import { registry } from '../metrics/prometheus.js';
@@ -55,7 +56,7 @@ export const PRODUCTION_LATENCY_PROBE_STATUS = Object.freeze({
  * Prometheus series even when the probe is held, so Alertmanager can distinguish
  * "not running" from "metric never existed".
  */
-export const productionLatencyProbeUpGauge = registry.gauge(
+export const productionLatencyProbeUpGauge: GaugeMetric = registry.gauge(
   'control_loop_probe_up',
   'Whether the production control-loop latency probe is actively producing end-to-end cycles (1=up, 0=held/down)',
 );

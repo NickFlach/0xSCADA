@@ -205,6 +205,26 @@ const LATENCY_BUCKETS_SECONDS = [
   0.001, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10, 30,
 ] as const;
 
+/** Public structural metric types keep generated declarations self-contained. */
+export interface MetricLabels {
+  [key: string]: string;
+}
+
+export interface GaugeMetric {
+  set(value: number, labels?: MetricLabels): void;
+  get(labels?: MetricLabels): number;
+}
+
+export interface HistogramMetric {
+  observe(value: number, labels?: MetricLabels): void;
+  collect(): Array<{
+    labels: MetricLabels;
+    buckets: Map<number, number>;
+    sum: number;
+    count: number;
+  }>;
+}
+
 /**
  * Per-stage latency histogram. Labelled by `stage` and `validator` so each
  * sentinel's pipeline stages can be sliced independently in Grafana.
@@ -212,7 +232,7 @@ const LATENCY_BUCKETS_SECONDS = [
  * Metric name (with the registry's `scada` prefix):
  *   scada_control_loop_stage_latency_seconds
  */
-export const stageLatencyHistogram = registry.histogram(
+export const stageLatencyHistogram: HistogramMetric = registry.histogram(
   'control_loop_stage_latency_seconds',
   'Per-stage control-loop latency (tick/batch/sign/anchor) in seconds',
   ['stage', 'validator'],
@@ -224,7 +244,7 @@ export const stageLatencyHistogram = registry.histogram(
  *
  * Metric name: scada_control_loop_roundtrip_latency_seconds
  */
-export const roundTripLatencyHistogram = registry.histogram(
+export const roundTripLatencyHistogram: HistogramMetric = registry.histogram(
   'control_loop_roundtrip_latency_seconds',
   'End-to-end control-loop round-trip latency (tick -> anchor-confirmed) in seconds',
   ['validator'],
@@ -238,7 +258,7 @@ export const roundTripLatencyHistogram = registry.histogram(
  *
  * Metric name: scada_control_loop_stage_slo_ok
  */
-export const stageSloGauge = registry.gauge(
+export const stageSloGauge: GaugeMetric = registry.gauge(
   'control_loop_stage_slo_ok',
   'Whether the last sampled stage latency was within its SLO budget (1=ok, 0=breach)',
   ['stage', 'validator'],
