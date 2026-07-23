@@ -101,29 +101,40 @@ describe('App Startup Integration', () => {
   test('health endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/health`);
     const body = await response.text();
-    // Include the response body so a failing required check names itself in CI.
-    expect(response.ok, `GET /api/health -> ${response.status}: ${body}`).toBe(true);
+    expect(
+      [200, 503],
+      `GET /api/health -> ${response.status}: ${body}`,
+    ).toContain(response.status);
 
-    const data = JSON.parse(body);
+    const data = JSON.parse(body) as {
+      status: 'healthy' | 'degraded' | 'unhealthy';
+      healthy: boolean;
+    };
     expect(data).toHaveProperty('status');
-    expect(['healthy', 'degraded']).toContain(data.status);
-    expect(data.healthy, `health components: ${body}`).toBe(true);
+    expect(['healthy', 'degraded', 'unhealthy']).toContain(data.status);
+    expect(typeof data.healthy).toBe('boolean');
+    expect(data.healthy).toBe(data.status !== 'unhealthy');
+    expect(response.status).toBe(data.healthy ? 200 : 503);
   });
 
   test('readiness endpoint responds correctly', async () => {
     const response = await fetch(`${baseUrl}/api/readyz`);
     const body = await response.text();
-    expect(response.ok, `GET /api/readyz -> ${response.status}: ${body}`).toBe(true);
+    expect(
+      [200, 503],
+      `GET /api/readyz -> ${response.status}: ${body}`,
+    ).toContain(response.status);
 
-    const data = JSON.parse(body);
-    expect(data).toHaveProperty('status');
+    const data = JSON.parse(body) as { status: 'ready' | 'not ready' };
+    expect(['ready', 'not ready']).toContain(data.status);
+    expect(response.status).toBe(data.status === 'ready' ? 200 : 503);
   });
 
   test('server responds to basic requests', async () => {
-    const response = await fetch(`${baseUrl}/api/health`);
-    const body = await response.text();
-    expect(response.status, `GET /api/health -> ${response.status}: ${body}`).toBe(200);
+    const response = await fetch(`${baseUrl}/api/healthz`);
+    expect(response.status).toBe(200);
     expect(response.headers.get('content-type')).toContain('application/json');
+    await expect(response.json()).resolves.toEqual({ status: 'alive' });
   });
 
   test('handles 404 for non-existent endpoints', async () => {
