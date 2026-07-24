@@ -9,6 +9,14 @@ server:
     repository: oxscada-server
     tag: latest
   port: 5000
+  apiKeys:
+    # API_KEYS is read from this pre-created Secret; the chart never generates
+    # or stores an API credential. Control-plane routes remain fail-closed when
+    # this is empty.
+    existingSecret: ""
+    secretKey: API_KEYS
+    # Require an API key on every non-public route.
+    enableGlobalAuth: true
   resources:
     requests:
       cpu: 200m
@@ -37,6 +45,9 @@ gateway:
     repository: oxscada-gateway
     tag: latest
   port: 8080
+  # Optional fixed upstream origin. When empty, the chart targets the server
+  # Service at http://oxscada-server:<server.port>.
+  serverUrl: ""
   resources:
     requests:
       cpu: 100m
@@ -109,6 +120,8 @@ observability:
 networkPolicies:
   enabled: true
 
+# Shared pod defaults for server, client, and gateway. Keep these aligned with
+# helm/oxscada-full's gateway.podSecurityContext.
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -116,6 +129,8 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# Shared container defaults for server, client, and gateway. Keep these aligned
+# with helm/oxscada-full's gateway.securityContext.
 containerSecurityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true

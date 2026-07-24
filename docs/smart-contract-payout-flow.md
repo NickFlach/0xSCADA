@@ -2,7 +2,8 @@
 
 ## Overview
 
-This document describes the automated bounty payment system using the `BountyPayment` smart contract and GitHub Actions integration.
+This document describes the maintainer-approved bounty payment system using
+the `BountyPayment` smart contract and GitHub Actions integration.
 
 ## Architecture
 
@@ -11,13 +12,13 @@ This document describes the automated bounty payment system using the `BountyPay
 │                     BOUNTY PAYMENT FLOW                         │
 ├─────────────────────────────────────────────────────────────────┤
 │                                                                 │
-│  [GitHub Issue]  →  [/claim Comment]  →  [Smart Contract]      │
+│  [GitHub Issue]  →  [Approved /claim] →  [Smart Contract]      │
 │       ↓                                         ↓               │
 │  [Work Done]     →  [PR Submitted]    →  [Contract Call]       │
 │       ↓                                         ↓               │
-│  [PR Merged]     →  [GitHub Action]   →  [Payment Sent]        │
+│  [PR Merged]     →  [Maintainer Run]  →  [Payment Sent]        │
 │       ↓                                         ↓               │
-│  [Issue Closed]  ←  [Confirmation]    ←  [TX Hash Posted]      │
+│  [Issue Closed]  ←  [Confirmation]    ←  [Audit Comment]       │
 │                                                                 │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -27,9 +28,9 @@ This document describes the automated bounty payment system using the `BountyPay
 ### Key Features
 
 1. **Bounty Registration**: Maintainers register bounties with GitHub issue numbers
-2. **Claim Mechanism**: Contributors claim bounties by commenting `/claim`
+2. **Claim Mechanism**: A maintainer approves a claim with `/claim`
 3. **Timeout System**: Claims expire after 14 days without PR submission
-4. **Automated Payment**: Payment triggered automatically on PR merge
+4. **Approved Payment**: A maintainer dispatches payment after merge
 5. **Multi-Recipient Support**: Split payments for collaborative work
 6. **Dispute Resolution**: Maintainer-controlled dispute handling
 7. **Multi-Token Support**: Native tokens (ETH/MATIC) and ERC20 tokens (USDC, DAI)
@@ -87,24 +88,34 @@ await bountyPayment.registerBounty(
 );
 ```
 
-### 2. Claim Processing (Automated)
+### 2. Claim Processing (Maintainer Approved)
 
-**When**: User comments `/claim` on issue
+**When**: A repository participant with write, maintain, or admin permission
+comments `/claim @contributor 0xWallet` on an issue
 **Who**: GitHub Actions bot
 **Action**: Call `claimBounty()` on smart contract
+
+Contributors first post their timeline, approach, and wallet for review. A
+trusted repository participant records approval with the exact contributor
+username and wallet. The workflow binds that command to the contributor's
+earlier proposal; an association filter rejects outside comments before the
+job starts, and an API permission check rejects participants without write
+access before any transaction.
 
 **Workflow**: `.github/workflows/bounty-management.yml`
 
 ```yaml
 - name: Register claim on smart contract
   run: |
-    npx hardhat run scripts/claim-bounty.ts \
+    npx tsx contracts/scripts/claim-bounty.ts \
       --issue-number ${{ github.event.issue.number }} \
-      --claimant ${{ steps.parse.outputs.wallet }} \
-      --network polygon
+      --claimant ${{ steps.validate.outputs.wallet }}
 ```
 
-**Script**: `scripts/claim-bounty.ts`
+The script reads `RPC_URL`, `BOUNTY_CONTRACT_ADDRESS`, and
+`BOUNTY_PRIVATE_KEY` from the environment.
+
+**Script**: `contracts/scripts/claim-bounty.ts`
 ```typescript
 const tx = await bountyPayment.claimBounty(
   issueNumber,
@@ -135,25 +146,49 @@ function expireClaim(
 
 This is a public function - anyone can call it to clean up expired claims.
 
-### 4. Payment Processing (Automated)
+### 4. Payment Processing (Explicit Maintainer Dispatch)
 
-**When**: PR is merged
-**Who**: GitHub Actions bot
+**When**: A maintainer verifies a merged PR and dispatches the workflow
+**Who**: An `admin`, `maintain`, or `write` repository participant
 **Action**: Call `payBounty()` on smart contract
 
 **Workflow**: `.github/workflows/bounty-management.yml`
 
 ```yaml
+on:
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      recipient_wallet:
+        required: true
+        type: string
+
 - name: Execute payment on smart contract
+  env:
+    PAYOUT_ISSUE_NUMBER: ${{ steps.authorize.outputs.issue_number }}
+    PAYOUT_PR_NUMBER: ${{ steps.authorize.outputs.pr_number }}
+    PAYOUT_RECIPIENT_WALLET: ${{ steps.authorize.outputs.wallet }}
   run: |
-    npx hardhat run scripts/pay-bounty.ts \
-      --issue-number ${{ steps.extract.outputs.issue_number }} \
-      --pr-number ${{ github.event.pull_request.number }} \
-      --recipient ${{ steps.extract.outputs.wallet }} \
-      --network polygon
+    npx tsx contracts/scripts/pay-bounty.ts \
+      --issue-number "$PAYOUT_ISSUE_NUMBER" \
+      --pr-number "$PAYOUT_PR_NUMBER" \
+      --recipient "$PAYOUT_RECIPIENT_WALLET"
 ```
 
-**Script**: `scripts/pay-bounty.ts`
+Before secrets or repository code are used, the workflow verifies the
+dispatcher permission, trusted default-branch context, merged PR and exact
+closing reference, bounty tier and claim state, a trusted claim naming the
+merged PR author, and the matching wallet. The script then uses the same three
+secret environment
+variables as the claim command and waits for a successful transaction receipt
+before the workflow updates GitHub.
+
+**Script**: `contracts/scripts/pay-bounty.ts`
 ```typescript
 const tx = await bountyPayment.payBounty(
   issueNumber,

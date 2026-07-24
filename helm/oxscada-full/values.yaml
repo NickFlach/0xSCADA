@@ -13,6 +13,15 @@ server:
     repository: "{{ .Values.global.imageRegistry }}/server"
     tag: latest
   port: 3000
+  apiKeys:
+    # API_KEYS is read from this pre-created Secret; the chart never generates
+    # or stores an API credential. Leave empty only if control-plane access is
+    # intentionally unavailable.
+    existingSecret: ""
+    secretKey: API_KEYS
+    # Enables API key authentication for the entire API gateway. Control-plane
+    # routes require API_KEYS independently of this setting.
+    enableGlobalAuth: true
   resources:
     requests:
       cpu: 250m
@@ -48,6 +57,20 @@ gateway:
     repository: "{{ .Values.global.imageRegistry }}/gateway"
     tag: latest
   port: 8080
+  # Optional fixed upstream origin. When empty, the chart targets its server
+  # Service at http://<release>-server:<server.port>.
+  serverUrl: ""
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 100m

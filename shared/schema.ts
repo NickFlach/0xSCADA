@@ -30,7 +30,7 @@ import {
   uniqueIndex,
   primaryKey,
 } from "drizzle-orm/pg-core";
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
@@ -323,6 +323,226 @@ export const certificationApprovals = pgTable("certification_approvals", {
   certIdIdx: index("idx_cert_approvals_cert_id").on(table.certificationId),
 }));
 
+// ─── Blueprint Persistence ──────────────────────────────────────────────────
+
+export const vendors = pgTable("vendors", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 100 }).notNull(),
+  displayName: varchar("display_name", { length: 255 }).notNull(),
+  description: text("description"),
+  platforms: jsonb("platforms").notNull().default(sql`'[]'::jsonb`),
+  languages: jsonb("languages").notNull().default(sql`'[]'::jsonb`),
+  configSchema: jsonb("config_schema").notNull().default(sql`'{}'::jsonb`),
+  isActive: boolean("is_active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nameIdx: uniqueIndex("idx_vendors_name").on(table.name),
+}));
+
+export const templatePackages = pgTable("template_packages", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  version: varchar("version", { length: 50 }).default("1.0.0").notNull(),
+  description: text("description"),
+  templateType: varchar("template_type", { length: 100 }).notNull(),
+  language: varchar("language", { length: 50 }).notNull(),
+  templateContent: text("template_content").notNull(),
+  placeholders: jsonb("placeholders").notNull().default(sql`'[]'::jsonb`),
+  requiredInputs: jsonb("required_inputs").notNull().default(sql`'[]'::jsonb`),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  vendorIdx: index("idx_template_packages_vendor").on(table.vendorId),
+}));
+
+export const controlModuleTypes = pgTable("control_module_types", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id),
+  version: varchar("version", { length: 50 }).default("1.0.0").notNull(),
+  description: text("description"),
+  inputs: jsonb("inputs").notNull().default(sql`'[]'::jsonb`),
+  outputs: jsonb("outputs").notNull().default(sql`'[]'::jsonb`),
+  inOuts: jsonb("in_outs").notNull().default(sql`'[]'::jsonb`),
+  dataTypeMappings: jsonb("data_type_mappings").notNull().default(sql`'{}'::jsonb`),
+  templatePackageId: uuid("template_package_id").references(() => templatePackages.id),
+  sourcePackage: text("source_package"),
+  classification: varchar("classification", { length: 100 }).default("control_module"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nameIdx: uniqueIndex("idx_control_module_types_name").on(table.name),
+}));
+
+export const controlModuleInstances = pgTable("control_module_instances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  instanceNumber: integer("instance_number"),
+  controlModuleTypeId: uuid("control_module_type_id").notNull().references(() => controlModuleTypes.id),
+  controllerId: varchar("controller_id", { length: 255 }),
+  unitInstanceId: uuid("unit_instance_id").references(() => unitInstances.id),
+  pidDrawing: text("pid_drawing"),
+  comment: text("comment"),
+  configuration: jsonb("configuration").notNull().default(sql`'{}'::jsonb`),
+  currentState: jsonb("current_state").notNull().default(sql`'{}'::jsonb`),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  assetId: varchar("asset_id", { length: 64 }).references(() => assets.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  typeIdx: index("idx_control_module_instances_type").on(
+    table.controlModuleTypeId,
+  ),
+  typeNameIdx: uniqueIndex("idx_control_module_instances_type_name").on(
+    table.controlModuleTypeId,
+    table.name,
+  ),
+}));
+
+export const unitTypes = pgTable("unit_types", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id),
+  version: varchar("version", { length: 50 }).default("1.0.0").notNull(),
+  description: text("description"),
+  variables: jsonb("variables").notNull().default(sql`'[]'::jsonb`),
+  equipmentModules: jsonb("equipment_modules").notNull().default(sql`'[]'::jsonb`),
+  templatePackageId: uuid("template_package_id").references(() => templatePackages.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nameIdx: uniqueIndex("idx_unit_types_name").on(table.name),
+}));
+
+export const unitInstances = pgTable("unit_instances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  instanceNumber: integer("instance_number"),
+  unitTypeId: uuid("unit_type_id").notNull().references(() => unitTypes.id),
+  controllerId: varchar("controller_id", { length: 255 }),
+  pidDrawing: text("pid_drawing"),
+  processCell: text("process_cell"),
+  area: text("area"),
+  comment: text("comment"),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  typeIdx: index("idx_unit_instances_type").on(table.unitTypeId),
+  typeNameIdx: uniqueIndex("idx_unit_instances_type_name").on(
+    table.unitTypeId,
+    table.name,
+  ),
+}));
+
+export const phaseTypes = pgTable("phase_types", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").references(() => vendors.id),
+  version: varchar("version", { length: 50 }).default("1.0.0").notNull(),
+  description: text("description"),
+  linkedModules: jsonb("linked_modules").notNull().default(sql`'[]'::jsonb`),
+  inputs: jsonb("inputs").notNull().default(sql`'[]'::jsonb`),
+  outputs: jsonb("outputs").notNull().default(sql`'[]'::jsonb`),
+  inOuts: jsonb("in_outs").notNull().default(sql`'[]'::jsonb`),
+  internalValues: jsonb("internal_values").notNull().default(sql`'[]'::jsonb`),
+  hmiParameters: jsonb("hmi_parameters").notNull().default(sql`'[]'::jsonb`),
+  recipeParameters: jsonb("recipe_parameters").notNull().default(sql`'[]'::jsonb`),
+  reportParameters: jsonb("report_parameters").notNull().default(sql`'[]'::jsonb`),
+  sequences: jsonb("sequences").notNull().default(sql`'{}'::jsonb`),
+  templatePackageId: uuid("template_package_id").references(() => templatePackages.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nameIdx: uniqueIndex("idx_phase_types_name").on(table.name),
+}));
+
+export const phaseInstances = pgTable("phase_instances", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  instanceNumber: integer("instance_number"),
+  phaseTypeId: uuid("phase_type_id").notNull().references(() => phaseTypes.id),
+  unitInstanceId: uuid("unit_instance_id").references(() => unitInstances.id),
+  controllerId: varchar("controller_id", { length: 255 }),
+  currentState: varchar("current_state", { length: 100 }).default("IDLE"),
+  currentStep: integer("current_step").default(0),
+  linkedModuleInstances: jsonb("linked_module_instances").notNull().default(sql`'{}'::jsonb`),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  typeIdx: index("idx_phase_instances_type").on(table.phaseTypeId),
+}));
+
+export const designSpecifications = pgTable("design_specifications", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  version: varchar("version", { length: 50 }).notNull(),
+  description: text("description"),
+  contentHash: varchar("content_hash", { length: 255 }).notNull(),
+  txHash: varchar("tx_hash", { length: 255 }),
+  content: jsonb("content").notNull().default(sql`'{}'::jsonb`),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  anchoredAt: timestamp("anchored_at", { withTimezone: true }),
+});
+
+export const generatedCode = pgTable("generated_code", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  sourceType: varchar("source_type", { length: 100 }).notNull(),
+  sourceId: varchar("source_id", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  templatePackageId: uuid("template_package_id").references(() => templatePackages.id),
+  language: varchar("language", { length: 50 }).notNull(),
+  code: text("code").notNull(),
+  codeHash: varchar("code_hash", { length: 255 }).notNull(),
+  txHash: varchar("tx_hash", { length: 255 }),
+  metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+  status: varchar("status", { length: 50 }).default("draft").notNull(),
+  generatedAt: timestamp("generated_at", { withTimezone: true }).defaultNow().notNull(),
+  approvedAt: timestamp("approved_at", { withTimezone: true }),
+  approvedBy: varchar("approved_by", { length: 255 }),
+}, (table) => ({
+  sourceIdx: index("idx_generated_code_source").on(
+    table.sourceType,
+    table.sourceId,
+  ),
+}));
+
+export const dataTypeMappings = pgTable("data_type_mappings", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  canonicalType: varchar("canonical_type", { length: 100 }).notNull(),
+  vendorType: varchar("vendor_type", { length: 100 }).notNull(),
+  size: integer("size"),
+  precision: integer("precision"),
+  metadata: jsonb("metadata").notNull().default(sql`'{}'::jsonb`),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  vendorTypeIdx: uniqueIndex("idx_data_type_mappings_vendor_canonical").on(
+    table.vendorId,
+    table.canonicalType,
+  ),
+}));
+
+export const controllers = pgTable("controllers", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  vendorId: uuid("vendor_id").notNull().references(() => vendors.id),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  model: varchar("model", { length: 255 }).notNull(),
+  firmwareVersion: varchar("firmware_version", { length: 100 }),
+  address: varchar("address", { length: 255 }),
+  configuration: jsonb("configuration").notNull().default(sql`'{}'::jsonb`),
+  status: varchar("status", { length: 50 }).default("offline").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  vendorIdx: index("idx_controllers_vendor").on(table.vendorId),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -330,6 +550,18 @@ export const insertSiteSchema = createInsertSchema(sites);
 export const insertAssetSchema = createInsertSchema(assets);
 export const insertEventAnchorSchema = createInsertSchema(eventAnchors);
 export const insertMaintenanceRecordSchema = createInsertSchema(maintenanceRecords);
+export const insertVendorSchema = createInsertSchema(vendors);
+export const insertTemplatePackageSchema = createInsertSchema(templatePackages);
+export const insertControlModuleTypeSchema = createInsertSchema(controlModuleTypes);
+export const insertControlModuleInstanceSchema = createInsertSchema(controlModuleInstances);
+export const insertUnitTypeSchema = createInsertSchema(unitTypes);
+export const insertUnitInstanceSchema = createInsertSchema(unitInstances);
+export const insertPhaseTypeSchema = createInsertSchema(phaseTypes);
+export const insertPhaseInstanceSchema = createInsertSchema(phaseInstances);
+export const insertDesignSpecificationSchema = createInsertSchema(designSpecifications);
+export const insertGeneratedCodeSchema = createInsertSchema(generatedCode);
+export const insertDataTypeMappingSchema = createInsertSchema(dataTypeMappings);
+export const insertControllerSchema = createInsertSchema(controllers);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -339,3 +571,28 @@ export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;
 export type InsertSite = typeof sites.$inferInsert;
 export type InsertAsset = typeof assets.$inferInsert;
 export type InsertEventAnchor = typeof eventAnchors.$inferInsert;
+export type InsertMaintenanceRecord = typeof maintenanceRecords.$inferInsert;
+export type Vendor = typeof vendors.$inferSelect;
+export type InsertVendor = typeof vendors.$inferInsert;
+export type TemplatePackage = typeof templatePackages.$inferSelect;
+export type InsertTemplatePackage = typeof templatePackages.$inferInsert;
+export type ControlModuleType = typeof controlModuleTypes.$inferSelect;
+export type InsertControlModuleType = typeof controlModuleTypes.$inferInsert;
+export type ControlModuleInstance = typeof controlModuleInstances.$inferSelect;
+export type InsertControlModuleInstance = typeof controlModuleInstances.$inferInsert;
+export type UnitType = typeof unitTypes.$inferSelect;
+export type InsertUnitType = typeof unitTypes.$inferInsert;
+export type UnitInstance = typeof unitInstances.$inferSelect;
+export type InsertUnitInstance = typeof unitInstances.$inferInsert;
+export type PhaseType = typeof phaseTypes.$inferSelect;
+export type InsertPhaseType = typeof phaseTypes.$inferInsert;
+export type PhaseInstance = typeof phaseInstances.$inferSelect;
+export type InsertPhaseInstance = typeof phaseInstances.$inferInsert;
+export type DesignSpecification = typeof designSpecifications.$inferSelect;
+export type InsertDesignSpecification = typeof designSpecifications.$inferInsert;
+export type GeneratedCode = typeof generatedCode.$inferSelect;
+export type InsertGeneratedCode = typeof generatedCode.$inferInsert;
+export type DataTypeMapping = typeof dataTypeMappings.$inferSelect;
+export type InsertDataTypeMapping = typeof dataTypeMappings.$inferInsert;
+export type Controller = typeof controllers.$inferSelect;
+export type InsertController = typeof controllers.$inferInsert;

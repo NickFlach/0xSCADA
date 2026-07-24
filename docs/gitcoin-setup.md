@@ -111,9 +111,9 @@ Deploy the automated bounty payment contract:
 // See full implementation in contracts/BountyPayment.sol
 // Key functions:
 // - registerBounty(issueNumber, amount, criteria)
-// - claimBounty(issueNumber, claimant, wallet)
+// - claimBounty(issueNumber, claimantWallet)
 // - payBounty(issueNumber, prNumber, recipient)
-// - releaseBounty(issueNumber) // timeout/unclaimed
+// - expireClaim(issueNumber) // after the on-chain timeout
 ```
 
 **Deployment Networks:**
@@ -124,12 +124,16 @@ Deploy the automated bounty payment contract:
 
 **Deployment Command:**
 ```bash
-cd contracts
-npx hardhat run scripts/deploy-bounty-payment.ts --network polygon
-
-# Verify on Polygonscan
-npx hardhat verify --network polygon <CONTRACT_ADDRESS>
+forge build
+forge create contracts/BountyPayment.sol:BountyPayment \
+  --rpc-url "$BOUNTY_RPC_URL" \
+  --private-key "$BOUNTY_PRIVATE_KEY" \
+  --broadcast
 ```
+
+Forge is the canonical contract tool for this repository. Record the
+`Deployed to:` address as the `BOUNTY_CONTRACT_ADDRESS` repository secret and
+verify it with the target network's explorer tooling before enabling payouts.
 
 **Save Deployed Addresses:**
 ```bash
@@ -160,7 +164,7 @@ await bountyContract.setClaimTimeout(14 * 24 * 60 * 60); // seconds
 
 ### 4.1 GitHub Actions Workflow
 
-Create workflow for automated bounty management:
+Create a workflow for trusted claim handling and explicitly approved payouts:
 
 ```yaml
 # .github/workflows/bounty-management.yml
@@ -168,25 +172,32 @@ Create workflow for automated bounty management:
 name: Bounty Management
 
 on:
-  issues:
-    types: [labeled, unlabeled]
   issue_comment:
     types: [created]
-  pull_request:
-    types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        required: true
+        type: string
+      issue_number:
+        required: true
+        type: string
+      recipient_wallet:
+        required: true
+        type: string
 
 jobs:
   handle-bounty-claim:
-    # Process /claim comments
+    # Process /claim comments only after a write-permission check
     # Validate claim format
-    # Assign issue to claimer
+    # Record the approved wallet and claim state
     # Set timeout
 
   handle-bounty-payout:
-    # Trigger on PR merge
-    # Verify PR references bounty issue
+    # Trigger only through workflow_dispatch on the default branch
+    # Verify dispatcher authorization and exact merged PR/bounty inputs
     # Call smart contract to pay bounty
-    # Post transaction hash as comment
+    # Post an auditable payment confirmation
 ```
 
 ### 4.2 Bot Configuration
@@ -194,16 +205,20 @@ jobs:
 Set up a GitHub bot or GitHub Actions for:
 - Claim validation (`/claim` command)
 - Timeout tracking (14-day expiry)
-- Payment triggers (on PR merge)
+- Maintainer-approved payment dispatches
 - Status updates
 
 **Required Secrets:**
 ```bash
 # GitHub Repository Secrets
-BOUNTY_WALLET_PRIVATE_KEY  # For signing transactions
-POLYGON_RPC_URL           # RPC endpoint
+BOUNTY_PRIVATE_KEY        # PAYOUT_ROLE signer
+BOUNTY_RPC_URL            # RPC endpoint
 BOUNTY_CONTRACT_ADDRESS   # Deployed contract address
-GITHUB_BOT_TOKEN          # For GitHub API access
+```
+
+**Repository Variable:**
+```bash
+BOUNTY_NETWORK            # Human-readable network name for confirmations
 ```
 
 ### 4.3 Label Automation
@@ -218,27 +233,33 @@ Configure automatic label management:
 
 ### 5.1 Claim Processing
 
-When a user comments `/claim`:
+After reviewing a contributor's timeline, approach, and wallet, a repository
+participant with write, maintain, or admin permission comments
+`/claim @contributor 0xWallet` (or `/agent-claim`):
 
-1. Parse claim comment for:
+1. Parse the approval command for:
+   - Contributor GitHub username
+   - Exact wallet address
+2. Find that contributor's earlier proposal and verify:
    - Timeline
    - Approach (for medium+ bounties)
-   - Wallet address
-2. Validate:
+   - The same exact wallet address
+3. Validate:
+   - Comment passes the association prefilter and its author has repository
+     write, maintain, or admin permission
    - Issue has `bounty:*` label
    - Issue not already claimed
    - Wallet address is valid EVM address
-3. Register claim in smart contract:
+4. Register claim in smart contract:
    ```javascript
    await bountyContract.claimBounty(
      issueNumber,
-     claimerGitHubId,
      walletAddress
    );
    ```
-4. Assign issue to claimer
 5. Add `bounty:claimed` label
-6. Set timeout timer (14 days)
+6. Record the claimant, approving maintainer, and wallet
+7. Set timeout timer (14 days)
 
 ### 5.2 Timeout Management
 
@@ -249,11 +270,8 @@ Daily cron job to check for expired claims:
 const expiredClaims = await checkExpiredClaims();
 
 for (const claim of expiredClaims) {
-  // Release bounty in contract
-  await bountyContract.releaseBounty(claim.issueNumber);
-
-  // Remove assignment
-  await github.removeAssignment(claim.issueNumber);
+  // Release the contract first; do not advertise an on-chain-locked bounty.
+  await bountyContract.expireClaim(claim.issueNumber);
 
   // Remove claimed label
   await github.removeLabel(claim.issueNumber, "bounty:claimed");
@@ -268,15 +286,21 @@ for (const claim of expiredClaims) {
 
 ### 5.3 Payment Processing
 
-When PR is merged:
+After the PR is merged, a maintainer runs `Bounty Management` with the exact PR
+number, bounty issue number, and approved recipient wallet:
 
-1. Verify PR references bounty issue
-2. Check all acceptance criteria met:
+1. Verify the dispatcher has `admin`, `maintain`, or `write` permission.
+2. Verify the workflow is running from the trusted default branch.
+3. Verify the PR is merged to the default branch and explicitly closes the
+   supplied bounty issue.
+4. Verify the issue has a supported bounty tier, is `bounty:claimed`, is not
+   `bounty:paid`, and contains a trusted claim for the supplied wallet.
+5. Check all acceptance criteria met:
    - All CI checks pass
    - DCO sign-off present
    - Tests pass
    - Code review approved
-3. Call smart contract:
+6. Call smart contract:
    ```javascript
    const tx = await bountyContract.payBounty(
      issueNumber,
@@ -285,7 +309,7 @@ When PR is merged:
    );
    await tx.wait();
    ```
-4. Post transaction details:
+7. Post transaction details:
    ```markdown
    🎉 Bounty paid!
 
@@ -296,8 +320,8 @@ When PR is merged:
 
    Thank you for your contribution to 0xSCADA!
    ```
-5. Update labels: `bounty:paid`
-6. Close issue
+8. Update labels: `bounty:paid`
+9. Close issue
 
 ## Step 6: Financial Management
 

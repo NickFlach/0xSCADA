@@ -66,6 +66,10 @@ export { spcService } from './spc';
 export * from './l2-rollup';
 export { l2RollupService } from './l2-rollup';
 
+// ── Alarm Correlation Service (ADR-0013 [13.2], #213) ────────────────────────
+export * from './alarm-correlation';
+export { alarmCorrelationService } from './alarm-correlation';
+
 /**
  * Initialize all services
  * 

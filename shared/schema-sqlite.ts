@@ -70,6 +70,188 @@ export const maintenanceRecords = sqliteTable("maintenance_records", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// Blueprint tables mirror the PostgreSQL schema. JSON values are stored as
+// JSON-encoded TEXT so development mode has the same row shapes.
+export const vendors = sqliteTable("vendors", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  displayName: text("display_name").notNull(),
+  description: text("description"),
+  platforms: text("platforms", { mode: "json" }).notNull().$defaultFn(() => []),
+  languages: text("languages", { mode: "json" }).notNull().$defaultFn(() => []),
+  configSchema: text("config_schema", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  isActive: integer("is_active", { mode: "boolean" }).default(true).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const templatePackages = sqliteTable("template_packages", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  vendorId: text("vendor_id").notNull(),
+  version: text("version").default("1.0.0").notNull(),
+  description: text("description"),
+  templateType: text("template_type").notNull(),
+  language: text("language").notNull(),
+  templateContent: text("template_content").notNull(),
+  placeholders: text("placeholders", { mode: "json" }).notNull().$defaultFn(() => []),
+  requiredInputs: text("required_inputs", { mode: "json" }).notNull().$defaultFn(() => []),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const controlModuleTypes = sqliteTable("control_module_types", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  vendorId: text("vendor_id"),
+  version: text("version").default("1.0.0").notNull(),
+  description: text("description"),
+  inputs: text("inputs", { mode: "json" }).notNull().$defaultFn(() => []),
+  outputs: text("outputs", { mode: "json" }).notNull().$defaultFn(() => []),
+  inOuts: text("in_outs", { mode: "json" }).notNull().$defaultFn(() => []),
+  dataTypeMappings: text("data_type_mappings", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  templatePackageId: text("template_package_id"),
+  sourcePackage: text("source_package"),
+  classification: text("classification").default("control_module"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const controlModuleInstances = sqliteTable("control_module_instances", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  instanceNumber: integer("instance_number"),
+  controlModuleTypeId: text("control_module_type_id").notNull(),
+  controllerId: text("controller_id"),
+  unitInstanceId: text("unit_instance_id"),
+  pidDrawing: text("pid_drawing"),
+  comment: text("comment"),
+  configuration: text("configuration", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  currentState: text("current_state", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  siteId: text("site_id"),
+  assetId: text("asset_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const unitTypes = sqliteTable("unit_types", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  vendorId: text("vendor_id"),
+  version: text("version").default("1.0.0").notNull(),
+  description: text("description"),
+  variables: text("variables", { mode: "json" }).notNull().$defaultFn(() => []),
+  equipmentModules: text("equipment_modules", { mode: "json" }).notNull().$defaultFn(() => []),
+  templatePackageId: text("template_package_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const unitInstances = sqliteTable("unit_instances", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  instanceNumber: integer("instance_number"),
+  unitTypeId: text("unit_type_id").notNull(),
+  controllerId: text("controller_id"),
+  pidDrawing: text("pid_drawing"),
+  processCell: text("process_cell"),
+  area: text("area"),
+  comment: text("comment"),
+  siteId: text("site_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const phaseTypes = sqliteTable("phase_types", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull().unique(),
+  vendorId: text("vendor_id"),
+  version: text("version").default("1.0.0").notNull(),
+  description: text("description"),
+  linkedModules: text("linked_modules", { mode: "json" }).notNull().$defaultFn(() => []),
+  inputs: text("inputs", { mode: "json" }).notNull().$defaultFn(() => []),
+  outputs: text("outputs", { mode: "json" }).notNull().$defaultFn(() => []),
+  inOuts: text("in_outs", { mode: "json" }).notNull().$defaultFn(() => []),
+  internalValues: text("internal_values", { mode: "json" }).notNull().$defaultFn(() => []),
+  hmiParameters: text("hmi_parameters", { mode: "json" }).notNull().$defaultFn(() => []),
+  recipeParameters: text("recipe_parameters", { mode: "json" }).notNull().$defaultFn(() => []),
+  reportParameters: text("report_parameters", { mode: "json" }).notNull().$defaultFn(() => []),
+  sequences: text("sequences", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  templatePackageId: text("template_package_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const phaseInstances = sqliteTable("phase_instances", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  instanceNumber: integer("instance_number"),
+  phaseTypeId: text("phase_type_id").notNull(),
+  unitInstanceId: text("unit_instance_id"),
+  controllerId: text("controller_id"),
+  currentState: text("current_state").default("IDLE"),
+  currentStep: integer("current_step").default(0),
+  linkedModuleInstances: text("linked_module_instances", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  siteId: text("site_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const designSpecifications = sqliteTable("design_specifications", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  version: text("version").notNull(),
+  description: text("description"),
+  contentHash: text("content_hash").notNull(),
+  txHash: text("tx_hash"),
+  content: text("content", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  siteId: text("site_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  anchoredAt: integer("anchored_at", { mode: "timestamp" }),
+});
+
+export const generatedCode = sqliteTable("generated_code", {
+  id: text("id").primaryKey(),
+  sourceType: text("source_type").notNull(),
+  sourceId: text("source_id").notNull(),
+  vendorId: text("vendor_id").notNull(),
+  templatePackageId: text("template_package_id"),
+  language: text("language").notNull(),
+  code: text("code").notNull(),
+  codeHash: text("code_hash").notNull(),
+  txHash: text("tx_hash"),
+  metadata: text("metadata", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  status: text("status").default("draft").notNull(),
+  generatedAt: integer("generated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  approvedAt: integer("approved_at", { mode: "timestamp" }),
+  approvedBy: text("approved_by"),
+});
+
+export const dataTypeMappings = sqliteTable("data_type_mappings", {
+  id: text("id").primaryKey(),
+  vendorId: text("vendor_id").notNull(),
+  canonicalType: text("canonical_type").notNull(),
+  vendorType: text("vendor_type").notNull(),
+  size: integer("size"),
+  precision: integer("precision"),
+  metadata: text("metadata", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const controllers = sqliteTable("controllers", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  vendorId: text("vendor_id").notNull(),
+  siteId: text("site_id"),
+  model: text("model").notNull(),
+  firmwareVersion: text("firmware_version"),
+  address: text("address"),
+  configuration: text("configuration", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  status: text("status").default("offline").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Basic exports for compatibility
 export const insertSiteSchema = {
   parse: (data: any) => data // Simple pass-through for development
@@ -95,3 +277,28 @@ export type MaintenanceRecord = typeof maintenanceRecords.$inferSelect;
 export type InsertSite = typeof sites.$inferInsert;
 export type InsertAsset = typeof assets.$inferInsert;
 export type InsertEventAnchor = typeof eventAnchors.$inferInsert;
+export type InsertMaintenanceRecord = typeof maintenanceRecords.$inferInsert;
+export type Vendor = typeof vendors.$inferSelect;
+export type InsertVendor = typeof vendors.$inferInsert;
+export type TemplatePackage = typeof templatePackages.$inferSelect;
+export type InsertTemplatePackage = typeof templatePackages.$inferInsert;
+export type ControlModuleType = typeof controlModuleTypes.$inferSelect;
+export type InsertControlModuleType = typeof controlModuleTypes.$inferInsert;
+export type ControlModuleInstance = typeof controlModuleInstances.$inferSelect;
+export type InsertControlModuleInstance = typeof controlModuleInstances.$inferInsert;
+export type UnitType = typeof unitTypes.$inferSelect;
+export type InsertUnitType = typeof unitTypes.$inferInsert;
+export type UnitInstance = typeof unitInstances.$inferSelect;
+export type InsertUnitInstance = typeof unitInstances.$inferInsert;
+export type PhaseType = typeof phaseTypes.$inferSelect;
+export type InsertPhaseType = typeof phaseTypes.$inferInsert;
+export type PhaseInstance = typeof phaseInstances.$inferSelect;
+export type InsertPhaseInstance = typeof phaseInstances.$inferInsert;
+export type DesignSpecification = typeof designSpecifications.$inferSelect;
+export type InsertDesignSpecification = typeof designSpecifications.$inferInsert;
+export type GeneratedCode = typeof generatedCode.$inferSelect;
+export type InsertGeneratedCode = typeof generatedCode.$inferInsert;
+export type DataTypeMapping = typeof dataTypeMappings.$inferSelect;
+export type InsertDataTypeMapping = typeof dataTypeMappings.$inferInsert;
+export type Controller = typeof controllers.$inferSelect;
+export type InsertController = typeof controllers.$inferInsert;

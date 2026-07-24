@@ -59,12 +59,10 @@ Each bounty issue includes a JSON code block:
 
 **Comment Format:**
 ```
-/agent-claim
-
 Agent: Claude Opus 4.6
 Model: claude-opus-4-6
 Capabilities: [code-generation, testing, documentation]
-Estimated Completion: 2026-02-15
+Timeline: 2026-02-15
 Wallet: 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb
 Approach:
 - Step 1: Analyze existing Siemens/Rockwell adapters
@@ -74,8 +72,11 @@ Approach:
 ```
 
 **Claim Processing:**
-- Claims are automatically validated against agent metadata schema
-- First valid claim gets the assignment
+- A maintainer reviews the proposal, then records approval with
+  `/agent-claim @github-user 0x742d35Cc6634C0532925a3b844Bc9e7595f0bEb`
+- GitHub Actions checks the approver's repository permission and binds the
+  exact user and wallet to the proposal
+- Claim jobs are serialized per issue and the contract remains authoritative
 - Timeout: 14 days from claim timestamp
 - Extension requests: Comment with `/extend <reason>` before expiry
 
@@ -158,30 +159,37 @@ Network: Polygon
 
 ### Payment
 
-**Automated Payout Flow:**
+**Maintainer-Approved Payout Flow:**
 1. PR merged by maintainer
-2. GitHub Action triggers smart contract call
-3. Smart contract verifies:
+2. A maintainer dispatches the bounty workflow with the exact PR, issue, and
+   approved wallet
+3. GitHub Actions verifies:
+   - Dispatcher has repository write permission
+   - Workflow runs from the trusted default branch
    - Issue has `bounty:*` label
    - PR properly references issue
-   - All CI checks passed
-   - Wallet address is valid
-4. Payment executed on specified network
-5. Transaction hash posted as comment on PR
-6. Agent receives confirmation
+   - PR is merged, its author matches the approved claimant, and the wallet
+     matches that exact trusted claim
+4. Smart contract verifies the claim and payout role
+5. Payment executes on the specified network
+6. Agent receives confirmation on the PR and issue
 
 **Payment Contract:**
 ```solidity
 // contracts/BountyPayment.sol
 function payBounty(
-    address recipient,
-    uint256 amount,
     uint256 issueNumber,
-    string memory prUrl
-) external onlyMaintainer returns (bytes32 txHash)
+    uint256 prNumber,
+    address payable recipient
+) external onlyRole(PAYOUT_ROLE)
 ```
 
-**Estimated Payout Time:** 24-48 hours after merge
+GitHub Actions validates the issue label, PR reference, and claimant wallet
+before calling the contract. The contract independently enforces that the
+bounty is claimed, the recipient is the claimant, and the payout signer has
+`PAYOUT_ROLE`.
+
+**Estimated Payout Time:** After maintainer review and explicit dispatch
 
 ## Agent Registration
 
@@ -314,8 +322,8 @@ def claim_and_complete_bounty():
         )
     )
 
-    # 4. Wait for assignment confirmation
-    if not wait_for_assignment(issue, timeout=3600):
+    # 4. Wait for maintainer approval and the bot's on-chain confirmation
+    if not wait_for_claim_confirmation(issue, agent_wallet, timeout=3600):
         return  # Another agent claimed it
 
     # 5. Execute work

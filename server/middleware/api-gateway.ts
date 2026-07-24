@@ -10,12 +10,14 @@
 
 import { Request, Response, NextFunction, Router, Express } from 'express';
 import crypto from 'crypto';
+import { readFileSync } from 'fs';
 import { z, ZodSchema } from 'zod';
 import {
   createRateLimiter,
   type CreateRateLimiterOptions,
   type RateLimitConfig,
 } from './rate-limiter';
+import { mutationAuthorizationMiddleware } from './control-route-policy';
 
 // Limiter implementations live in ./rate-limiter (issue #447); re-exported
 // here so existing imports keep working.
@@ -58,6 +60,20 @@ const DEFAULT_CONFIG: ApiGatewayConfig = {
   trustedProxies: [],
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz'],
 };
+
+/**
+ * Production is fail-closed when ENABLE_API_KEYS is omitted. Development and
+ * tests remain explicitly opt-in; malformed values abort startup.
+ */
+export function apiKeyAuthEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const configured = env.ENABLE_API_KEYS?.trim().toLowerCase();
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
+  if (configured) {
+    throw new Error('ENABLE_API_KEYS must be either "true" or "false"');
+  }
+  return env.NODE_ENV === 'production';
+}
 
 // --- Middleware Functions ---
 
@@ -127,13 +143,18 @@ export function rateLimitMiddleware(config: RateLimitConfig, limiterOptions?: Cr
 export function apiKeyMiddleware(keys: Map<string, ApiKeyRecord>, publicRoutes: string[] = []) {
   return (req: Request, res: Response, next: NextFunction): void => {
     // Skip auth for public routes
-    if (publicRoutes.some(route => req.path.startsWith(route))) {
+    const requestPath = req.originalUrl.split('?', 1)[0];
+    if (publicRoutes.some(route =>
+      requestPath === route || requestPath.startsWith(`${route}/`)
+    )) {
       return next();
     }
 
-    const key = (req.headers['x-api-key'] as string) || req.query.api_key as string;
+    // Query-string credentials leak through browser history, proxies, and
+    // access logs. Accept API keys only through the standard request header.
+    const key = req.headers['x-api-key'] as string | undefined;
     if (!key) {
-      res.status(401).json({ error: 'Missing API key. Provide via X-API-Key header or api_key query parameter.' });
+      res.status(401).json({ error: 'Missing API key. Provide via X-API-Key header.' });
       return;
     }
 
@@ -165,7 +186,10 @@ export function requireScope(...scopes: string[]) {
       return;
     }
 
-    const hasScope = scopes.some(s => record.scopes.includes(s) || record.scopes.includes('*'));
+    const hasScope =
+      record.scopes.includes('*') ||
+      record.scopes.includes('admin') ||
+      scopes.some(s => record.scopes.includes(s));
     if (!hasScope) {
       res.status(403).json({ error: 'Insufficient scope', required: scopes, granted: record.scopes });
       return;
@@ -284,11 +308,28 @@ export class ApiKeyManager {
 
   /** Generate a new API key */
   generate(name: string, scopes: string[], expiresInDays?: number): ApiKeyRecord {
+    const normalizedName = name.trim();
+    const normalizedScopes = Array.from(new Set(
+      scopes.map((scope) => scope.trim()).filter(Boolean),
+    ));
+    if (!normalizedName) {
+      throw new Error('API key name must be non-empty');
+    }
+    if (normalizedScopes.length === 0) {
+      throw new Error('At least one explicit API key scope is required');
+    }
+    if (
+      expiresInDays !== undefined &&
+      (!Number.isInteger(expiresInDays) || expiresInDays <= 0)
+    ) {
+      throw new Error('expiresInDays must be a positive integer');
+    }
+
     const key = `oxs_${crypto.randomBytes(32).toString('hex')}`;
     const record: ApiKeyRecord = {
       key,
-      name,
-      scopes,
+      name: normalizedName,
+      scopes: normalizedScopes,
       createdAt: new Date(),
       expiresAt: expiresInDays
         ? new Date(Date.now() + expiresInDays * 86_400_000)
@@ -316,13 +357,30 @@ export class ApiKeyManager {
 
   /** Load keys from environment variable (comma-separated key:name:scopes) */
   loadFromEnv(envVar = 'API_KEYS'): void {
-    const raw = process.env[envVar];
+    const inline = process.env[envVar]?.trim();
+    const secretFile = envVar === 'API_KEYS'
+      ? process.env.API_KEYS_FILE?.trim()
+      : undefined;
+    let raw = inline;
+
+    if (!raw && secretFile) {
+      try {
+        raw = readFileSync(secretFile, 'utf8').trim();
+      } catch (error) {
+        throw new Error(
+          `Unable to read API key secret file "${secretFile}": ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
     if (!raw) return;
 
     for (const entry of raw.split(',')) {
       const [key, name, scopeStr] = entry.trim().split(':');
       if (key && name) {
-        const scopes = scopeStr ? scopeStr.split('+') : ['*'];
+        // Missing scopes must never silently create an all-powerful key.
+        // Operators can grant `*` explicitly when that is truly intended.
+        const scopes = scopeStr ? scopeStr.split('+').filter(Boolean) : [];
         this.keys.set(key, {
           key,
           name,
@@ -345,6 +403,7 @@ export function setupApiGateway(app: Express, config: Partial<ApiGatewayConfig> 
     ...DEFAULT_CONFIG,
     ...config,
     apiKeys: config.apiKeys ?? DEFAULT_CONFIG.apiKeys,
+    enableApiKeyAuth: config.enableApiKeyAuth ?? apiKeyAuthEnabled(),
   };
 
   const keyManager = new ApiKeyManager();
@@ -355,12 +414,20 @@ export function setupApiGateway(app: Express, config: Partial<ApiGatewayConfig> 
     keyManager.getKeysMap().set(k, v);
   }
 
+  if (cfg.enableApiKeyAuth && keyManager.getKeysMap().size === 0) {
+    throw new Error(
+      'API key authentication is enabled but no bootstrap key is configured. ' +
+      'Set API_KEYS or API_KEYS_FILE before starting the server.',
+    );
+  }
+
   // Order matters
   app.use(requestIdMiddleware());
   app.use(corsMiddleware(cfg.corsOrigins));
   app.use('/api/', rateLimitMiddleware(cfg.rateLimit));
   if (cfg.enableApiKeyAuth) {
     app.use('/api/', apiKeyMiddleware(keyManager.getKeysMap(), cfg.publicRoutes));
+    app.use('/api/', mutationAuthorizationMiddleware());
   }
   app.use(requestValidation());
 
@@ -370,12 +437,29 @@ export function setupApiGateway(app: Express, config: Partial<ApiGatewayConfig> 
   });
 
   app.post('/api/v1/gateway/keys', requireScope('admin'), (req, res) => {
-    const { name, scopes, expiresInDays } = req.body;
-    if (!name) {
-      res.status(400).json({ error: 'name is required' });
+    const parsed = z.object({
+      name: z.string().trim().min(1).max(100),
+      scopes: z.array(z.string().trim().min(1).max(100)).min(1),
+      expiresInDays: z.number().int().positive().max(3650).optional(),
+    }).strict().safeParse(req.body);
+
+    if (!parsed.success) {
+      res.status(400).json({
+        error: 'name and at least one explicit scope are required',
+        details: parsed.error.issues.map((issue) => ({
+          path: issue.path.join('.'),
+          message: issue.message,
+        })),
+      });
       return;
     }
-    const record = keyManager.generate(name, scopes || ['*'], expiresInDays);
+
+    const { name, scopes, expiresInDays } = parsed.data;
+    const record = keyManager.generate(name, scopes, expiresInDays);
+    // The plaintext credential is returned once to the caller but must never
+    // be serialized by the response logger.
+    res.locals.sensitiveResponse = true;
+    res.setHeader('Cache-Control', 'no-store');
     res.status(201).json({ key: record.key, name: record.name, scopes: record.scopes, expiresAt: record.expiresAt });
   });
 
