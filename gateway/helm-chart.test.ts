@@ -4,12 +4,11 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { dump, load, loadAll } from "js-yaml";
+import { load, loadAll } from "js-yaml";
 import { describe, expect, it } from "vitest";
 
 interface ChartValues {
@@ -136,20 +135,6 @@ function expectGatewayRuntime(
   });
 }
 
-function removeUnavailableLocalDependencies(chartPath: string): void {
-  const metadataPath = join(chartPath, "Chart.yaml");
-  const metadata = load(readFileSync(metadataPath, "utf8")) as Record<string, unknown>;
-  const dependencies = Array.isArray(metadata.dependencies)
-    ? metadata.dependencies
-    : [];
-  metadata.dependencies = dependencies.filter((dependency) => {
-    if (!dependency || typeof dependency !== "object") return true;
-    const repository = (dependency as Record<string, unknown>).repository;
-    return typeof repository !== "string" || !repository.startsWith("file://");
-  });
-  writeFileSync(metadataPath, dump(metadata, { lineWidth: -1 }), "utf8");
-}
-
 describe("gateway Helm chart hardening", () => {
   it("applies defaults equivalent to the full chart gateway", () => {
     const simple = readValues("helm/oxscada/values.yaml");
@@ -186,11 +171,11 @@ describe("gateway Helm chart hardening", () => {
       cpSync(join(repositoryRoot, "helm/oxscada-full"), fullChartPath, {
         recursive: true,
       });
-      // The repository does not contain the full chart's declared file://
-      // subcharts (tracked in #548). Remove only those unavailable dependency
-      // declarations in the scratch copy so Helm still parses and renders the
-      // real parent templates and values under test.
-      removeUnavailableLocalDependencies(fullChartPath);
+      execFileSync(
+        process.env.HELM_BINARY || "helm",
+        ["dependency", "build", fullChartPath],
+        { stdio: "pipe" },
+      );
 
       const bootstrapSecretOverrides = [
         "--set-string",
@@ -246,7 +231,7 @@ describe("gateway Helm chart hardening", () => {
       expectGatewayRuntime(
         fullDefaults,
         8080,
-        "http://oxscada-full-server:3000",
+        "http://oxscada-full-server:5000",
       );
 
       const fullOverrides = gatewayDeployment(renderChart(

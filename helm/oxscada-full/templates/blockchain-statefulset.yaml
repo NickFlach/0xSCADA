@@ -1,0 +1,115 @@
+{{- if .Values.blockchain.enabled }}
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: blockchain
+spec:
+  serviceName: {{ include "oxscada-full.fullname" . }}-blockchain-headless
+  podManagementPolicy: Parallel
+  replicas: {{ .Values.blockchain.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "blockchain") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "blockchain") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.blockchain.podSecurityContext | nindent 8 }}
+      containers:
+        - name: blockchain
+          image: {{ include "oxscada-full.image" (list . .Values.blockchain.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: rpc
+              containerPort: {{ .Values.blockchain.ports.rpc }}
+            - name: p2p
+              containerPort: {{ .Values.blockchain.ports.p2p }}
+          env:
+            - name: NODE_ENV
+              value: production
+            - name: VALIDATOR_INDEX
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+          resources:
+            {{- toYaml .Values.blockchain.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.blockchain.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.blockchain.ports.rpc }}
+            initialDelaySeconds: 60
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: {{ .Values.blockchain.ports.rpc }}
+            initialDelaySeconds: 30
+            periodSeconds: 15
+      {{- if not .Values.blockchain.persistence.enabled }}
+      volumes:
+        - name: data
+          emptyDir: {}
+      {{- end }}
+  {{- if .Values.blockchain.persistence.enabled }}
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        {{- with .Values.blockchain.persistence.storageClass }}
+        storageClassName: {{ . | quote }}
+        {{- end }}
+        resources:
+          requests:
+            storage: {{ .Values.blockchain.persistence.size }}
+  {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: blockchain
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "blockchain") | nindent 4 }}
+  ports:
+    - name: rpc
+      port: {{ .Values.blockchain.ports.rpc }}
+      targetPort: rpc
+    - name: p2p
+      port: {{ .Values.blockchain.ports.p2p }}
+      targetPort: p2p
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-blockchain-headless
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: blockchain
+spec:
+  clusterIP: None
+  publishNotReadyAddresses: true
+  selector:
+    {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "blockchain") | nindent 4 }}
+  ports:
+    - name: rpc
+      port: {{ .Values.blockchain.ports.rpc }}
+      targetPort: rpc
+    - name: p2p
+      port: {{ .Values.blockchain.ports.p2p }}
+      targetPort: p2p
+{{- end }}

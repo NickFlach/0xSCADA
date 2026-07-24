@@ -96,7 +96,7 @@ jobs:
         run: npm audit --audit-level=high
 
   helm-gateway:
-    name: Helm Gateway Render
+    name: Helm Chart Validation
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -110,8 +110,11 @@ jobs:
       - run: npm ci
       - name: Register the simple chart dependency repository
         run: helm repo add bitnami https://charts.bitnami.com/bitnami --force-update
-      - name: Render and verify the gateway Deployment
-        run: npx vitest run gateway/helm-chart.test.ts
+      - name: Build, lint, package, and verify Helm charts
+        run: >-
+          npx vitest run
+          gateway/helm-chart.test.ts
+          gateway/full-stack-helm-chart.test.ts
         env:
           RUN_HELM_RENDER_TEST: '1'
 

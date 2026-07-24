@@ -1,46 +1,65 @@
-# 0xSCADA Full Stack Helm Values
+# Default values for the parent-authoritative 0xSCADA full-stack chart.
 
 global:
-  namespace: oxscada
   imagePullPolicy: IfNotPresent
-  imageRegistry: ghcr.io/nickflach/0xscada
+  imageRegistry: ghcr.io/nickflach
 
-# ─── Server ────────────────────────────────────────────────────────────────
 server:
   enabled: true
   replicaCount: 2
   image:
-    repository: "{{ .Values.global.imageRegistry }}/server"
+    repository: oxscada-server
     tag: latest
-  port: 3000
+  port: 5000
+  database:
+    # Existing Secret containing DATABASE_URL. The chart deliberately does not
+    # store a database credential in values.
+    existingSecret: oxscada-database
+    secretKey: DATABASE_URL
   apiKeys:
-    # API_KEYS is read from this pre-created Secret; the chart never generates
-    # or stores an API credential. Leave empty only if control-plane access is
-    # intentionally unavailable.
+    # Existing Secret containing API_KEYS. Control-plane routes remain
+    # fail-closed when this is empty.
     existingSecret: ""
     secretKey: API_KEYS
     # Enables API key authentication for the entire API gateway. Control-plane
     # routes require API_KEYS independently of this setting.
     enableGlobalAuth: true
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    readOnlyRootFilesystem: true
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 250m
       memory: 512Mi
     limits:
-      cpu: 1000m
+      cpu: "1"
       memory: 1Gi
-  env:
-    NODE_ENV: production
-    DATABASE_URL: "postgresql://oxscada:oxscada@postgresql:5432/oxscada"
 
-# ─── Client ────────────────────────────────────────────────────────────────
 client:
   enabled: true
   replicaCount: 2
   image:
-    repository: "{{ .Values.global.imageRegistry }}/client"
+    repository: oxscada-client
     tag: latest
   port: 80
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 101
+    fsGroup: 101
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 100m
@@ -49,12 +68,11 @@ client:
       cpu: 500m
       memory: 256Mi
 
-# ─── Gateway ───────────────────────────────────────────────────────────────
 gateway:
   enabled: true
   replicaCount: 1
   image:
-    repository: "{{ .Values.global.imageRegistry }}/gateway"
+    repository: oxscada-gateway
     tag: latest
   port: 8080
   # Optional fixed upstream origin. When empty, the chart targets its server
@@ -79,49 +97,103 @@ gateway:
       cpu: 500m
       memory: 512Mi
 
-# ─── Blockchain (Hardhat/Geth fork) ───────────────────────────────────────
 blockchain:
   enabled: true
   replicaCount: 1
   image:
-    repository: "{{ .Values.global.imageRegistry }}/blockchain"
+    repository: oxscada-validator
     tag: latest
   ports:
     rpc: 8545
-    ws: 8546
+    p2p: 30303
+  podSecurityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    fsGroup: 1000
+    seccompProfile:
+      type: RuntimeDefault
+  securityContext:
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop: ["ALL"]
   resources:
     requests:
       cpu: 500m
       memory: 1Gi
     limits:
-      cpu: 2000m
+      cpu: "2"
       memory: 4Gi
   persistence:
     enabled: true
     size: 10Gi
     storageClass: ""
 
-# ─── Observability (Prometheus + Grafana) ──────────────────────────────────
 observability:
   enabled: true
   prometheus:
     enabled: true
+    image:
+      registry: docker.io
+      repository: prom/prometheus
+      tag: v2.48.0
     port: 9090
     retention: 15d
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 65534
+      fsGroup: 65534
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
     resources:
       requests:
         cpu: 250m
         memory: 512Mi
+      limits:
+        cpu: "1"
+        memory: 2Gi
+    persistence:
+      enabled: false
+      size: 20Gi
+      storageClass: ""
   grafana:
     enabled: true
-    port: 3001
-    adminPassword: admin
+    image:
+      registry: docker.io
+      repository: grafana/grafana
+      tag: "10.2.0"
+    port: 3000
+    admin:
+      # Existing Secret containing the Grafana admin password.
+      existingSecret: oxscada-grafana
+      secretKey: admin-password
+    podSecurityContext:
+      runAsNonRoot: true
+      runAsUser: 472
+      fsGroup: 472
+      seccompProfile:
+        type: RuntimeDefault
+    securityContext:
+      allowPrivilegeEscalation: false
+      readOnlyRootFilesystem: true
+      capabilities:
+        drop: ["ALL"]
     resources:
       requests:
         cpu: 100m
         memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi
+    persistence:
+      enabled: false
+      size: 10Gi
+      storageClass: ""
 
-# ─── Ingress ───────────────────────────────────────────────────────────────
 ingress:
   enabled: false
   className: nginx
@@ -135,14 +207,4 @@ ingress:
           service: server
         - path: /gateway
           service: gateway
-
-# ─── PostgreSQL ────────────────────────────────────────────────────────────
-postgresql:
-  enabled: true
-  auth:
-    username: oxscada
-    password: oxscada
-    database: oxscada
-  primary:
-    persistence:
-      size: 5Gi
+  tls: []
