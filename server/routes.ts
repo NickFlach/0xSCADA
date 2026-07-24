@@ -31,6 +31,7 @@ import { getFluxPublisher } from "./services/flux";
 
 import { tagStreamServer } from "./websocket/tag-stream";
 import { unifiedStreamServer } from "./websocket/unified-stream";
+import { cachedEventBridge } from "./websocket/cached-event-bridge";
 import type { WebSocketAuthOptions } from "./websocket/upgrade-auth";
 
 export interface RouteRegistrationOptions {
@@ -96,6 +97,7 @@ export async function registerRoutes(
   };
   tagStreamServer.initialize(httpServer, "/ws/tags", websocketAuth);
   unifiedStreamServer.initialize(httpServer, "/ws", websocketAuth); // unified endpoint (#255)
+  cachedEventBridge.initializeLocalAlarmFanout();
 
   // Start alarm-correlation idle-group sweeps (#213). Registered here rather
   // than in services/initializeServices(), which no startup path invokes.

@@ -84,8 +84,7 @@ export async function initializeServices(): Promise<void> {
     { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
     { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
-    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
-    { name: 'Alarm Correlation', service: () => import('./alarm-correlation').then(m => m.alarmCorrelationService.initialize()) }
+    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) }
   ];
 
   for (const { name, service } of services) {
@@ -176,14 +175,6 @@ export async function getServicesHealthStatus(): Promise<{
         return await spcService.healthCheck();
       } catch {
         return { healthy: false, message: 'SPC service not available' };
-      }
-    },
-    alarmCorrelation: async () => {
-      try {
-        const { alarmCorrelationService } = await import('./alarm-correlation');
-        return await alarmCorrelationService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Alarm correlation service not available' };
       }
     }
   };

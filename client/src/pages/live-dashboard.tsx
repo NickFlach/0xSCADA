@@ -41,6 +41,7 @@ const StatusBadge: React.FC<{ status: string }> = ({ status }) => {
     degraded: '#f59e0b', uncertain: '#f59e0b',
     unhealthy: '#ef4444', bad: '#ef4444', disconnected: '#ef4444',
     active: '#ef4444', acknowledged: '#f59e0b', cleared: '#6b7280',
+    suppressed: '#64748b', shelved: '#64748b',
   };
   return (
     <span style={{
@@ -85,8 +86,13 @@ const TagTable: React.FC<{ tags: Map<string, TagValue> }> = ({ tags }) => (
 
 const AlarmList: React.FC<{ alarms: AlarmEvent[] }> = ({ alarms }) => {
   const severityOrder = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+  const suppressedCount = alarms.filter((alarm) =>
+    (alarm as any).state === 'suppressed'
+  ).length;
   const sorted = [...alarms]
-    .filter((a) => (a as any).state !== 'cleared')
+    .filter((a) =>
+      (a as any).state !== 'cleared' && (a as any).state !== 'suppressed'
+    )
     .sort((a, b) => (severityOrder as any)[(a as any).severity] - (severityOrder as any)[(b as any).severity]);
 
   return (
@@ -108,6 +114,11 @@ const AlarmList: React.FC<{ alarms: AlarmEvent[] }> = ({ alarms }) => {
         </div>
       ))}
       {sorted.length === 0 && <p style={{ textAlign: 'center', color: '#666', padding: 20 }}>No active alarms</p>}
+      {suppressedCount > 0 && (
+        <p style={{ textAlign: 'center', color: '#94a3b8', fontSize: 11 }}>
+          {suppressedCount} consequential alarm{suppressedCount === 1 ? '' : 's'} grouped under a root cause
+        </p>
+      )}
     </div>
   );
 };
