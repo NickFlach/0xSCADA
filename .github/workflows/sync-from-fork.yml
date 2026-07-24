@@ -42,10 +42,12 @@ jobs:
         id: compare
         run: |
           AHEAD=$(git rev-list --count origin/main..fork/main)
-          BEHIND=$(git rev-list --count fork/main..origin/main)
+          # Merge commits from prior sync PRs are expected on this side and
+          # are NOT divergence — only non-merge commits the fork lacks are.
+          BEHIND=$(git rev-list --no-merges --count fork/main..origin/main)
           echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
           echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
-          echo "Fork is $AHEAD ahead, $BEHIND behind"
+          echo "Fork is $AHEAD ahead; $BEHIND non-merge commits here are missing from the fork"
 
       - name: Open/refresh sync PR (fast-forwardable)
         if: steps.compare.outputs.ahead != '0' && steps.compare.outputs.behind == '0'
@@ -69,5 +71,5 @@ jobs:
           TITLE="Fork sync blocked: histories diverged"
           if ! gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' | grep -q .; then
             gh issue create --title "$TITLE" \
-              --body "flaukowski/0xSCADA main and this repo's main have both moved independently (fork ahead ${{ steps.compare.outputs.ahead }}, parent ahead ${{ steps.compare.outputs.behind }}). Automated fast-forward sync is not possible — reconcile manually, then close this issue."
+              --body "flaukowski/0xSCADA main and this repo's main have both moved independently (fork ahead ${{ steps.compare.outputs.ahead }}; ${{ steps.compare.outputs.behind }} non-merge commit(s) here are missing from the fork). Automated sync is paused — reconcile manually (back-merge or cherry-pick into the fork), then close this issue."
           fi
