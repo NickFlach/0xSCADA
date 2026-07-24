@@ -8,6 +8,10 @@
  */
 
 import { useEffect, useRef, useState, useCallback } from "react";
+import {
+  buildWebSocketProtocols,
+  useApiCredential,
+} from "../lib/api-credential";
 
 export interface TagValue {
   tagName: string;
@@ -53,6 +57,7 @@ export interface UseTagStreamReturn {
 
 export function useTagStream(options: UseTagStreamOptions = {}): UseTagStreamReturn {
   const { tags: initialTags, autoConnect = true } = options;
+  const { apiKey } = useApiCredential();
   const wsRef = useRef<WebSocket | null>(null);
   const [connected, setConnected] = useState(false);
   const [tagValues, setTagValues] = useState<Map<string, TagValue>>(new Map());
@@ -88,7 +93,11 @@ export function useTagStream(options: UseTagStreamOptions = {}): UseTagStreamRet
   const connect = useCallback(() => {
     if (wsRef.current?.readyState === WebSocket.OPEN) return;
 
-    const ws = new WebSocket(getWsUrl());
+    const protocols = buildWebSocketProtocols(apiKey);
+    const ws = new WebSocket(
+      getWsUrl(),
+      protocols.length > 0 ? protocols : undefined,
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -155,7 +164,7 @@ export function useTagStream(options: UseTagStreamOptions = {}): UseTagStreamRet
         }
       } catch { /* ignore parse errors */ }
     };
-  }, [getWsUrl, initialTags, send]);
+  }, [getWsUrl, initialTags, send, apiKey]);
 
   useEffect(() => {
     mountedRef.current = true;

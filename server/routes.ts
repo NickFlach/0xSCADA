@@ -29,10 +29,16 @@ import { getFluxPublisher } from "./services/flux";
 
 import { tagStreamServer } from "./websocket/tag-stream";
 import { unifiedStreamServer } from "./websocket/unified-stream";
+import type { WebSocketAuthOptions } from "./websocket/upgrade-auth";
+
+export interface RouteRegistrationOptions {
+  websocketAuth?: WebSocketAuthOptions;
+}
 
 export async function registerRoutes(
   httpServer: Server,
-  app: Express
+  app: Express,
+  options: RouteRegistrationOptions = {},
 ): Promise<Server> {
 
   // ==========================================================================
@@ -79,9 +85,14 @@ export async function registerRoutes(
   // ==========================================================================
   // WEBSOCKET EVENT STREAM
   // ==========================================================================
-  // WebSocket servers initialize if available
-  try { tagStreamServer?.initialize(httpServer, "/ws/tags"); } catch {}
-  try { unifiedStreamServer?.initialize(httpServer, "/ws"); } catch {}  // unified endpoint (#255)
+  // Authentication runs in the HTTP upgrade handler because WebSocket
+  // handshakes bypass Express middleware.
+  const websocketAuth = options.websocketAuth ?? {
+    required: false,
+    apiKeys: new Map(),
+  };
+  tagStreamServer.initialize(httpServer, "/ws/tags", websocketAuth);
+  unifiedStreamServer.initialize(httpServer, "/ws", websocketAuth); // unified endpoint (#255)
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).

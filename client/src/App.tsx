@@ -20,6 +20,7 @@ import Integrity from './pages/integrity';
 
 // Admin: Anchor-Backend Switch UX (issue #455)
 import AnchorBackend from './pages/admin/AnchorBackend';
+import ApiCredentialControl from './components/ApiCredentialControl';
 
 const App: React.FC = () => {
   return (
@@ -73,6 +74,7 @@ const App: React.FC = () => {
             </a>
           </Link>
         </nav>
+        <ApiCredentialControl />
       </header>
 
       {/* Main Content */}

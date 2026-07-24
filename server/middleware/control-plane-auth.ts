@@ -32,16 +32,19 @@ export interface ControlPlaneAccess {
   scopes?: readonly string[];
 }
 
-let cachedApiKeysRaw: string | undefined;
+let cachedApiKeysSignature: string | undefined;
 let cachedApiKeys = new Map<string, ApiKeyRecord>();
 
 function configuredApiKeys(): Map<string, ApiKeyRecord> {
-  const raw = process.env.API_KEYS;
-  if (raw === cachedApiKeysRaw) return cachedApiKeys;
+  const signature = JSON.stringify([
+    process.env.API_KEYS ?? null,
+    process.env.API_KEYS_FILE ?? null,
+  ]);
+  if (signature === cachedApiKeysSignature) return cachedApiKeys;
 
   const manager = new ApiKeyManager();
   manager.loadFromEnv();
-  cachedApiKeysRaw = raw;
+  cachedApiKeysSignature = signature;
   cachedApiKeys = manager.getKeysMap();
   return cachedApiKeys;
 }
@@ -145,6 +148,6 @@ export function controlPlanePrincipal(req: Request): ControlPlanePrincipal {
 
 /** Test hook for environment-isolated authentication tests. */
 export function _resetControlPlaneAuthCache(): void {
-  cachedApiKeysRaw = undefined;
+  cachedApiKeysSignature = undefined;
   cachedApiKeys = new Map();
 }

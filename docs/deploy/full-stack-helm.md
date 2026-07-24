@@ -14,7 +14,7 @@ routes are usable:
 ```bash
 kubectl create namespace oxscada --dry-run=client -o yaml | kubectl apply -f -
 kubectl -n oxscada create secret generic oxscada-api-keys \
-  --from-literal=API_KEYS='<generated-key>:anchor-operations:operator+anchor.admin'
+  --from-literal=API_KEYS='<generated-key>:bootstrap-admin:admin'
 ```
 
 ```bash
@@ -22,7 +22,8 @@ helm install oxscada ./helm/oxscada-full -n oxscada --create-namespace \
   --set-string server.apiKeys.existingSecret=oxscada-api-keys
 ```
 
-The chart references the existing Secret and never ships a default credential.
+Global authentication is on by default; rendering fails until the existing
+Secret name is supplied. The chart never ships a default credential.
 See [Control-Plane API Keys](../security/control-plane-api-keys.md) for secure
 key generation, required operator and service scopes, global gateway
 authentication, and rotation guidance.

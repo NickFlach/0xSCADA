@@ -9,6 +9,19 @@ Kubernetes deployments for the three core 0xSCADA services: server, client, and 
 - `k8s/app/gateway-deployment.yaml` — API gateway (2 replicas)
 
 ## Deployment
+
+Create the API-key bootstrap Secret before applying the raw manifests:
+
+```bash
+kubectl create namespace oxscada --dry-run=client -o yaml | kubectl apply -f -
+kubectl -n oxscada create secret generic oxscada-api-keys \
+  --from-literal=API_KEYS='<generated-key>:bootstrap-admin:admin'
+```
+
+Generate the key with a cryptographically secure secret generator and keep it
+outside source control. The server deployment intentionally fails to start
+when the Secret or `API_KEYS` entry is absent.
+
 ```bash
 kubectl apply -f k8s/app/ -n oxscada
 ```

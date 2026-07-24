@@ -10,7 +10,11 @@
  * - Heartbeat/ping support
  */
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useRef, useState, useCallback, useMemo } from "react";
+import {
+  buildWebSocketProtocols,
+  useApiCredential,
+} from "../lib/api-credential";
 
 export type ConnectionStatus = "connecting" | "connected" | "disconnected" | "error";
 
@@ -30,6 +34,8 @@ export interface UseWebSocketOptions {
   reconnectInterval?: number;
   maxReconnectAttempts?: number;
   heartbeatInterval?: number;
+  /** Optional application protocols; defaults to the tab-scoped API key protocol. */
+  protocols?: string[];
 }
 
 export interface UseWebSocketReturn {
@@ -51,7 +57,14 @@ export function useWebSocket({
   reconnectInterval = 3000,
   maxReconnectAttempts = 10,
   heartbeatInterval = 25000,
+  protocols,
 }: UseWebSocketOptions): UseWebSocketReturn {
+  const { apiKey } = useApiCredential();
+  const effectiveProtocols = useMemo(
+    () => protocols ?? buildWebSocketProtocols(apiKey),
+    [protocols, apiKey],
+  );
+  const protocolSignature = effectiveProtocols.join(",");
   const [status, setStatus] = useState<ConnectionStatus>("disconnected");
   const [lastMessage, setLastMessage] = useState<WebSocketMessage | null>(null);
   const [reconnectAttempts, setReconnectAttempts] = useState(0);
@@ -93,7 +106,10 @@ export function useWebSocket({
     setStatus("connecting");
 
     try {
-      wsRef.current = new WebSocket(url);
+      wsRef.current = new WebSocket(
+        url,
+        effectiveProtocols.length > 0 ? effectiveProtocols : undefined,
+      );
 
       wsRef.current.onopen = () => {
         if (!mountedRef.current) return;
@@ -152,6 +168,7 @@ export function useWebSocket({
     reconnectAttempts,
     clearTimers,
     startHeartbeat,
+    protocolSignature,
   ]);
 
   const disconnect = useCallback(() => {
@@ -181,7 +198,7 @@ export function useWebSocket({
       mountedRef.current = false;
       disconnect();
     };
-  }, [url]); // Only reconnect if URL changes
+  }, [url, protocolSignature]); // Reconnect if URL or tab credential changes
 
   return {
     status,

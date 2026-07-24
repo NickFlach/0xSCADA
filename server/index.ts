@@ -2,11 +2,12 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { securityHeaders, rateLimit } from "./middleware/security";
+import { securityHeaders } from "./middleware/security";
 import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
-import { setupApiGateway } from "./middleware/api-gateway";
+import { apiKeyAuthEnabled, setupApiGateway } from "./middleware/api-gateway";
+import { requestLoggingMiddleware } from "./middleware/request-logging";
 import { initializeDatabase } from "./storage";
 // Stateful startup services must stay in the static graph. On Node 20, tsx can
 // give import() a separate module instance from static consumers (#541).
@@ -25,14 +26,9 @@ export { log } from "./logger";
 const app = express();
 const httpServer = createServer(app);
 
-// Apply security headers and rate limiting
+// Apply security headers. API rate limiting is installed by setupApiGateway
+// after body parsing so one gateway owns authentication and quota state.
 app.use(securityHeaders);
-app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
-
-// Health/readiness probes — mounted before auth so k8s probes work
-// unauthenticated. Mounted under /api to match the public-route allowlist
-// (/api/health, /api/healthz, /api/readyz).
-app.use('/api', healthRouter);
 
 // API Gateway middleware (#256) — sets up rate limiting, API key auth, CORS, request IDs
 const gatewayRateLimit = {
@@ -41,13 +37,10 @@ const gatewayRateLimit = {
 };
 const gatewayConfig = {
   rateLimit: gatewayRateLimit,
-  enableApiKeyAuth: process.env.ENABLE_API_KEYS === 'true',
+  enableApiKeyAuth: apiKeyAuthEnabled(),
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz', '/api/docs'],
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(','),
 };
-
-// Wire OpenAPI docs to gateway config so Swagger UI reflects live settings
-registerSwaggerRoutes(app, gatewayConfig);
 
 declare module "http" {
   interface IncomingMessage {
@@ -65,31 +58,19 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+// Install response capture before the gateway's own routes so one-time
+// credentials can be returned while being explicitly redacted from logs.
+app.use(requestLoggingMiddleware());
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+// Activate the configured gateway after parsing so its payload guard can
+// inspect request bodies.
+const apiKeyManager = setupApiGateway(app, gatewayConfig);
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+// Register every /api route behind the gateway pipeline. The exact probe/docs
+// allowlist skips authentication only; those routes still receive request IDs,
+// CORS, logging, and rate limiting. /api/metrics is intentionally not public.
+app.use('/api', healthRouter);
+registerSwaggerRoutes(app, gatewayConfig);
 
 (async () => {
   // Initialize the database first — downstream services and health checks
@@ -154,7 +135,12 @@ app.use((req, res, next) => {
     log("Initialized demo gateway drivers for development mode");
   }
   
-  await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app, {
+    websocketAuth: {
+      required: gatewayConfig.enableApiKeyAuth,
+      apiKeys: apiKeyManager.getKeysMap(),
+    },
+  });
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;

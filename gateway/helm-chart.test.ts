@@ -192,10 +192,28 @@ describe("gateway Helm chart hardening", () => {
       // real parent templates and values under test.
       removeUnavailableLocalDependencies(fullChartPath);
 
-      const simpleDefaults = gatewayDeployment(renderChart(
+      const bootstrapSecretOverrides = [
+        "--set-string",
+        "server.apiKeys.existingSecret=render-test-api-keys",
+      ];
+      expect(() => renderChart(
         "oxscada",
         simpleChartPath,
         ["--set", "postgresql.enabled=false"],
+      )).toThrow(/server\.apiKeys\.existingSecret is required/u);
+      expect(() => renderChart(
+        "oxscada-full",
+        fullChartPath,
+      )).toThrow(/server\.apiKeys\.existingSecret is required/u);
+
+      const simpleDefaults = gatewayDeployment(renderChart(
+        "oxscada",
+        simpleChartPath,
+        [
+          "--set",
+          "postgresql.enabled=false",
+          ...bootstrapSecretOverrides,
+        ],
       ));
       expect(simpleDefaults.metadata?.name).toBe("oxscada-gateway");
       expectGatewayRuntime(simpleDefaults, 8080, "http://oxscada-server:5000");
@@ -210,6 +228,7 @@ describe("gateway Helm chart hardening", () => {
           "gateway.port=18080",
           "--set-string",
           "gateway.serverUrl=https://upstream.internal:8443",
+          ...bootstrapSecretOverrides,
         ],
       ));
       expectGatewayRuntime(
@@ -221,6 +240,7 @@ describe("gateway Helm chart hardening", () => {
       const fullDefaults = gatewayDeployment(renderChart(
         "oxscada-full",
         fullChartPath,
+        bootstrapSecretOverrides,
       ));
       expect(fullDefaults.metadata?.name).toBe("oxscada-full-gateway");
       expectGatewayRuntime(
@@ -237,6 +257,7 @@ describe("gateway Helm chart hardening", () => {
           "gateway.port=28080",
           "--set-string",
           "gateway.serverUrl=https://full-upstream.internal:9443",
+          ...bootstrapSecretOverrides,
         ],
       ));
       expectGatewayRuntime(
