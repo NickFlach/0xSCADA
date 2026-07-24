@@ -11,7 +11,13 @@ import { getRedisClient, isRedisHealthy } from '../services/cache/redis-client.j
 import { eventCache, type CachedEvent } from '../services/cache/event-cache.js';
 import { unifiedStreamServer } from './unified-stream.js';
 import { tagStreamServer, type TagUpdate } from './tag-stream.js';
+import {
+  alarmCorrelationService,
+  type AlarmCorrelationService,
+} from '../services/alarm-correlation';
+import type { AlarmWireSnapshot } from '@shared/types/alarm-correlation';
 import type Redis from 'ioredis';
+import { randomUUID } from 'node:crypto';
 
 const CHANNEL_EVENTS = '0xscada:ws:events';
 const CHANNEL_TAGS = '0xscada:ws:tags';
@@ -19,6 +25,15 @@ const CHANNEL_ALARMS = '0xscada:ws:alarms';
 const RECENT_TAG_CACHE_KEY = '0xscada:ws:recent-tags';
 const MAX_CACHED_TAG_VALUES = 5000;
 const TAG_CACHE_TTL = 60; // seconds
+
+type CorrelationSource = Pick<
+  AlarmCorrelationService,
+  'on' | 'off' | 'ingest'
+>;
+
+interface AlarmSink {
+  broadcastAlarm(alarm: any): void;
+}
 
 /**
  * Cached Event Bridge wires Redis pub/sub into the WebSocket layer:
@@ -30,16 +45,38 @@ const TAG_CACHE_TTL = 60; // seconds
  * 3. **Catch-up** — caches recent events in Redis sorted sets so new
  *    subscribers receive a backlog on connect.
  */
-class CachedEventBridge {
+export class CachedEventBridge {
   private publisher: Redis | null = null;
   private subscriber: Redis | null = null;
   private isInitialized = false;
+  private isLocalAlarmFanoutInitialized = false;
+  private readonly instanceId = randomUUID();
+  private readonly alarmSnapshotHandler = (snapshot: AlarmWireSnapshot): void => {
+    this.broadcastAlarmSnapshot(snapshot);
+  };
+
+  constructor(
+    private readonly correlationService: CorrelationSource = alarmCorrelationService,
+    private readonly tagAlarmSink: AlarmSink = tagStreamServer,
+    private readonly unifiedAlarmSink: AlarmSink = unifiedStreamServer,
+  ) {}
+
+  /**
+   * Wire process-local correlation snapshots to both WebSocket servers.
+   * This is independent of Redis health and safe to call repeatedly.
+   */
+  initializeLocalAlarmFanout(): void {
+    if (this.isLocalAlarmFanoutInitialized) return;
+    this.correlationService.on('alarm-snapshot', this.alarmSnapshotHandler);
+    this.isLocalAlarmFanoutInitialized = true;
+  }
 
   /**
    * Initialize pub/sub connections and start listening.
    * Safe to call multiple times — only initializes once.
    */
   async initialize(): Promise<void> {
+    this.initializeLocalAlarmFanout();
     if (this.isInitialized || !isRedisHealthy()) return;
 
     try {
@@ -124,17 +161,24 @@ class CachedEventBridge {
 
   /**
    * Publish an alarm — fans out to all instances.
+   *
+   * Every alarm passes through the correlation engine first (#213); the
+   * broadcast payload is enriched with a `correlation` field carrying
+   * group membership, root-cause, and suppression info so consumers can
+   * de-clutter without any alarm being silently dropped.
    */
   async publishAlarm(alarm: Record<string, unknown>): Promise<void> {
-    tagStreamServer.broadcastAlarm(alarm as any);
-    unifiedStreamServer.broadcastAlarm(alarm);
-
-    if (!this.publisher) return;
+    this.initializeLocalAlarmFanout();
     try {
-      await this.publisher.publish(CHANNEL_ALARMS, JSON.stringify(alarm));
+      const outcome = this.correlationService.ingest(alarm);
+      if (outcome) return;
     } catch {
-      // Non-fatal
+      // Correlation must never block alarm fan-out
     }
+
+    // Inputs without a normalizable timestamp still retain the bridge's
+    // historical best-effort delivery behavior.
+    this.broadcastRawAlarm(alarm);
   }
 
   /**
@@ -169,10 +213,16 @@ class CachedEventBridge {
    * Graceful shutdown.
    */
   async destroy(): Promise<void> {
+    if (this.isLocalAlarmFanoutInitialized) {
+      this.correlationService.off('alarm-snapshot', this.alarmSnapshotHandler);
+      this.isLocalAlarmFanoutInitialized = false;
+    }
     if (this.subscriber) {
       await this.subscriber.unsubscribe();
       this.subscriber.disconnect();
+      this.subscriber = null;
     }
+    this.publisher = null;
     this.isInitialized = false;
   }
 
@@ -188,9 +238,50 @@ class CachedEventBridge {
         unifiedStreamServer.broadcastEvent(data);
         break;
       case CHANNEL_ALARMS:
-        unifiedStreamServer.broadcastAlarm(data);
+        if (data?._bridgeOrigin === this.instanceId) break;
+        if (data && typeof data === 'object') delete data._bridgeOrigin;
+        try {
+          this.tagAlarmSink.broadcastAlarm(data);
+        } catch {
+          // One local sink must not block the other.
+        }
+        try {
+          this.unifiedAlarmSink.broadcastAlarm(data);
+        } catch {
+          // WebSocket delivery is best effort.
+        }
         break;
     }
+  }
+
+  private broadcastAlarmSnapshot(snapshot: AlarmWireSnapshot): void {
+    this.broadcastRawAlarm(snapshot);
+  }
+
+  private broadcastRawAlarm(
+    alarm: Record<string, unknown> | AlarmWireSnapshot,
+  ): void {
+    try {
+      this.tagAlarmSink.broadcastAlarm(alarm as any);
+    } catch {
+      // One local sink must not block the other.
+    }
+    try {
+      this.unifiedAlarmSink.broadcastAlarm(alarm);
+    } catch {
+      // Correlation state changes must survive delivery failures.
+    }
+
+    if (!this.publisher) return;
+    const remotePayload = {
+      ...alarm,
+      _bridgeOrigin: this.instanceId,
+    };
+    void this.publisher
+      .publish(CHANNEL_ALARMS, JSON.stringify(remotePayload))
+      .catch(() => {
+        // Redis fan-out is optional and process-local delivery already ran.
+      });
   }
 }
 

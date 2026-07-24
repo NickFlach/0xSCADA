@@ -10,6 +10,7 @@ import type { PIDDiagram } from '@shared/types/pid';
 import { PIDCanvas } from '../components/pid/PIDCanvas';
 import { PIDDataProvider } from '../components/pid/PIDDataBinding';
 import { PIDEditor } from '../components/pid/PIDEditor';
+import { apiFetch } from '../lib/api-credential';
 
 // =============================================================================
 // DEMO DIAGRAM (used when no API data available)
@@ -127,7 +128,7 @@ const PIDViewPage: React.FC = () => {
       return;
     }
 
-    fetch(`/api/pid/diagrams/${diagramId}`)
+    apiFetch(`/api/pid/diagrams/${diagramId}`)
       .then(res => {
         if (!res.ok) throw new Error('Failed to load diagram');
         return res.json();
@@ -138,7 +139,7 @@ const PIDViewPage: React.FC = () => {
 
   const handleSave = async (updated: PIDDiagram) => {
     try {
-      const res = await fetch(`/api/pid/diagrams/${updated.id}`, {
+      const res = await apiFetch(`/api/pid/diagrams/${updated.id}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(updated),

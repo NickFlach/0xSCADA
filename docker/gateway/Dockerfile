@@ -1,30 +1,27 @@
-# 0xSCADA Gateway Service
-FROM node:20-alpine AS base
+# 0xSCADA standalone HTTP/WebSocket gateway
+FROM node:20-alpine AS build
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci
+COPY gateway/ ./gateway/
+RUN npm run build:gateway
+
+FROM node:20-alpine AS production
 WORKDIR /app
 RUN apk add --no-cache dumb-init
 
-FROM base AS deps
-COPY package.json package-lock.json ./
-RUN npm ci --omit=dev
+ENV NODE_ENV=production \
+    HOST=0.0.0.0 \
+    PORT=8080
 
-FROM base AS build
-COPY package.json package-lock.json ./
-RUN npm ci
-COPY tsconfig.json ./
-COPY server/ ./server/
-COPY shared/ ./shared/
-RUN npm run build --workspace=server 2>/dev/null || npx tsc --project tsconfig.json
+COPY --from=build --chown=node:node /app/dist/gateway/index.cjs ./dist/gateway/index.cjs
 
-FROM base AS production
-ENV NODE_ENV=production
 USER node
-COPY --from=deps /app/node_modules ./node_modules
-COPY --from=build /app/dist ./dist
-COPY package.json ./
-
 EXPOSE 8080
+
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD wget -qO- http://localhost:8080/health || exit 1
 
 ENTRYPOINT ["dumb-init", "--"]
-CMD ["node", "dist/server/gateway.js"]
+CMD ["node", "dist/gateway/index.cjs"]

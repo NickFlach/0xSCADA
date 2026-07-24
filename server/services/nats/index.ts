@@ -22,16 +22,23 @@ class NatsPublisher {
       this.nc = await connect({ servers: this.url });
       log(`✅ NATS connected to ${this.url}`, "nats");
     } catch (err) {
+      this.nc = null;
       logError(err, `❌ NATS connection failed (${this.url})`);
     }
   }
 
-  publish(subject: string, data: object) {
-    if (!this.nc) return;
+  isConnected(): boolean {
+    return this.nc !== null && !this.nc.isClosed();
+  }
+
+  publish(subject: string, data: object): boolean {
+    if (!this.isConnected() || !this.nc) return false;
     try {
       this.nc.publish(subject, sc.encode(JSON.stringify(data)));
+      return true;
     } catch (err) {
       logWarn(`NATS publish failed on ${subject}: ${err}`, "nats");
+      return false;
     }
   }
 
@@ -43,16 +50,16 @@ class NatsPublisher {
    * Respects ANCHOR_BACKEND (#443): when the operator pins anchoring to
    * the legacy L2 path, nothing is published toward the node.
    */
-  publishScadaEvent(event: ScadaEventWire) {
-    if (!anchorsToNode()) return;
+  publishScadaEvent(event: ScadaEventWire): boolean {
+    if (!anchorsToNode()) return false;
     let wire: ScadaEventWire;
     try {
       wire = buildScadaEventWire(event);
     } catch (err) {
       logError(err as Error, "NATS scada.events payload violates the wire schema — dropped");
-      return;
+      return false;
     }
-    this.publish(SCADA_EVENTS_SUBJECT, wire);
+    return this.publish(SCADA_EVENTS_SUBJECT, wire);
   }
 
   async close() {

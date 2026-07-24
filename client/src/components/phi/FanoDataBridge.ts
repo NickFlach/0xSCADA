@@ -8,6 +8,7 @@
 import { BloomParams, BloomStyle, DEFAULT_BLOOM } from './BloomRenderer';
 import { FlowParams, DEFAULT_FLOW } from './FlowRenderer';
 import { FANO_LINES } from './FanoGeometry';
+import { apiFetch } from '../../lib/api-credential';
 
 export interface PhiApiResponse {
   phi: number;
@@ -82,8 +83,8 @@ export class FanoDataBridge {
   private async fetchAndUpdate(): Promise<void> {
     try {
       const [phiRes, classRes] = await Promise.allSettled([
-        fetch('/api/geometry/phi').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<PhiApiResponse>; }),
-        fetch('/api/geometry/classes').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<ClassApiResponse>; }),
+        apiFetch('/api/geometry/phi').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<PhiApiResponse>; }),
+        apiFetch('/api/geometry/classes').then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json() as Promise<ClassApiResponse>; }),
       ]);
       const phiData = phiRes.status === 'fulfilled' ? phiRes.value : null;
       const classData = classRes.status === 'fulfilled' ? classRes.value : null;
