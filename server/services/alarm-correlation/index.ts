@@ -50,7 +50,7 @@ export function normalizeSeverity(raw: unknown): AlarmSeverity {
 }
 
 function isRecognizedSeverity(raw: unknown): boolean {
-  if (raw === undefined || raw === null || raw === '') return true;
+  if (isMissingSeverity(raw)) return true;
   return [
     'critical',
     'emergency',
@@ -61,6 +61,14 @@ function isRecognizedSeverity(raw: unknown): boolean {
     'low',
     'info',
   ].includes(String(raw).toLowerCase());
+}
+
+function isMissingSeverity(raw: unknown): boolean {
+  return (
+    raw === undefined
+    || raw === null
+    || (typeof raw === 'string' && raw.trim() === '')
+  );
 }
 
 function normalizeState(raw: unknown): AlarmLifecycleState | null {
@@ -126,6 +134,12 @@ export function normalizeAlarm(raw: Record<string, unknown>): CorrelatedAlarm | 
   if (timestamp === null) return null;
   const rawSeverity = raw.severity ?? raw.priority;
   if (!isRecognizedSeverity(rawSeverity)) return null;
+  // Existing live producers may omit severity. Keep accepting those inputs,
+  // but map the unknown severity to the fail-safe floor so it can never be
+  // hidden by suppression. Explicit "info" remains a suppressible severity.
+  const severity = isMissingSeverity(rawSeverity)
+    ? 'critical'
+    : normalizeSeverity(rawSeverity);
   const state = normalizeState(raw.state);
   if (!state) return null;
 
@@ -143,7 +157,7 @@ export function normalizeAlarm(raw: Record<string, unknown>): CorrelatedAlarm | 
     equipmentId,
     siteId: typeof raw.siteId === 'string' ? raw.siteId : undefined,
     processArea: typeof raw.processArea === 'string' ? raw.processArea : undefined,
-    severity: normalizeSeverity(rawSeverity),
+    severity,
     state,
     message: String(raw.message ?? raw.name ?? raw.alarmName ?? ''),
     timestamp,

@@ -160,10 +160,10 @@ export interface CorrelationMetrics {
   alarmsIngested: number;
   groupsCreated: number;
   groupsClosed: number;
-  /** Unique alarm ids that have entered engine-owned suppression. */
+  /** Unique ingested alarm instances that entered engine-owned suppression. */
   alarmsSuppressed: number;
   alarmsUnsuppressed: number;
-  /** unique suppressed alarm ids / ingested alarms — the alarm-fatigue KPI */
+  /** unique suppressed alarm instances / ingested alarms — the alarm-fatigue KPI */
   suppressionRate: number;
   openGroups: number;
   trackedAlarms: number;

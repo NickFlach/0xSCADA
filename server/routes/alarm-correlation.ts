@@ -314,6 +314,7 @@ router.put("/topology", requireAlarmConfigure, (req, res) => {
   }
   try {
     const nodes = engine.topology.upsertMany(parsed.data.nodes);
+    engine.reconcileTopology();
     res.json({ upserted: nodes.length, nodes });
   } catch (error) {
     res.status(400).json({ error: error instanceof Error ? error.message : "invalid topology" });
@@ -329,6 +330,7 @@ router.delete(
         error: `Equipment ${req.params.equipmentId} not found`,
       });
     }
+    engine.reconcileTopology();
     res.json({ removed: true });
   },
 );

@@ -153,6 +153,38 @@ describe('alarm correlation local fanout', () => {
     });
   });
 
+  it('keeps missing live severity unsuppressed while preserving explicit info', async () => {
+    for (const [label, severity, expectedSeverity, suppressed] of [
+      ['missing', undefined, 'critical', false],
+      ['blank', '', 'critical', false],
+      ['explicit-info', 'info', 'info', true],
+    ] as const) {
+      const { service, tagSink, bridge } = setup();
+      service.engine.setSuppressionPolicy({ enabled: true });
+
+      await bridge.publishAlarm({
+        id: `${label}-root`,
+        tagId: `${label}.ALARM`,
+        state: 'active',
+        severity: 'high',
+        timestamp: 1000,
+      });
+      await bridge.publishAlarm({
+        id: `${label}-member`,
+        tagId: `${label}.ALARM`,
+        state: 'active',
+        timestamp: 1100,
+        ...(severity === undefined ? {} : { severity }),
+      });
+
+      expect(latest(tagSink, `${label}-member`)).toMatchObject({
+        severity: expectedSeverity,
+        state: suppressed ? 'suppressed' : 'active',
+        correlation: { suppressed },
+      });
+    }
+  });
+
   it('processes and broadcasts a same-id cleared lifecycle update once', async () => {
     const { service, tagSink, unifiedSink, bridge } = setup();
 

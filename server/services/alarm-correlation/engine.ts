@@ -90,8 +90,12 @@ export class AlarmCorrelationEngine extends EventEmitter {
     alarmsSuppressed: 0,
     alarmsUnsuppressed: 0,
   };
-  /** Lifetime unique alarm ids that have entered engine-owned suppression. */
-  private everSuppressedAlarmIds = new Set<string>();
+  /**
+   * Alarm ids already counted for suppression while their groups are
+   * retained. Entries are discarded with group eviction, bounding this set
+   * by the retained-group/member caps after synchronous cap enforcement.
+   */
+  private suppressionCountedAlarmIds = new Set<string>();
 
   constructor(options: CorrelationEngineOptions = {}) {
     super();
@@ -366,6 +370,24 @@ export class AlarmCorrelationEngine extends EventEmitter {
     return { ...this.suppressionPolicy };
   }
 
+  /** Re-elect roots and reapply fail-safe suppression after topology changes. */
+  reconcileTopology(): void {
+    for (const group of this.groups.values()) {
+      if (group.state !== 'open') continue;
+      const previousRoot = group.rootCauseAlarmId;
+      this.electRootCause(group);
+      if (group.rootCauseAlarmId !== previousRoot) {
+        this.emit('root-cause-changed', {
+          groupId: group.id,
+          previous: previousRoot,
+          current: group.rootCauseAlarmId,
+        });
+      }
+      this.applySuppression(group);
+      this.emit('group-updated', group);
+    }
+  }
+
   getMetrics(): CorrelationMetrics {
     const openGroups = Array.from(this.groups.values()).filter(
       (g) => g.state === 'open'
@@ -539,8 +561,8 @@ export class AlarmCorrelationEngine extends EventEmitter {
       if (!alreadySuppressed && shouldSuppress) {
         group.suppressedAlarmIds.push(alarm.id);
         alarm.state = 'suppressed';
-        if (!this.everSuppressedAlarmIds.has(alarm.id)) {
-          this.everSuppressedAlarmIds.add(alarm.id);
+        if (!this.suppressionCountedAlarmIds.has(alarm.id)) {
+          this.suppressionCountedAlarmIds.add(alarm.id);
           this.metrics.alarmsSuppressed++;
         }
         this.emit('alarm-suppressed', {
@@ -602,6 +624,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
     this.unsuppressActiveMembers(group);
     for (const alarmId of group.alarmIds) {
       this.alarmIndex.delete(alarmId);
+      this.suppressionCountedAlarmIds.delete(alarmId);
     }
     this.groupLastTouchedAt.delete(group.id);
     this.groups.delete(group.id);

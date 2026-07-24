@@ -918,6 +918,62 @@ describe('AlarmCorrelationEngine', () => {
     expect(metrics.suppressionRate).toBeGreaterThanOrEqual(0);
     expect(metrics.suppressionRate).toBeLessThanOrEqual(1);
   });
+
+  it('bounds suppression identity bookkeeping to retained groups under churn', () => {
+    const engine = new AlarmCorrelationEngine({
+      maxGroups: 1,
+      suppressionPolicy: { enabled: true },
+    });
+    const churnGroups = 2000;
+
+    for (let index = 0; index < churnGroups; index++) {
+      const timestamp = index * 10_000;
+      engine.ingest(alarm({
+        id: `churn-root-${index}`,
+        tagId: `CHURN-${index}.ALARM`,
+        timestamp,
+        severity: 'high',
+      }));
+      engine.ingest(alarm({
+        id: `churn-member-${index}`,
+        tagId: `CHURN-${index}.ALARM`,
+        timestamp: timestamp + 100,
+        severity: 'medium',
+      }));
+    }
+
+    expect(engine.getGroups()).toHaveLength(1);
+    expect(engine.getMetrics()).toMatchObject({
+      alarmsIngested: churnGroups * 2,
+      alarmsSuppressed: churnGroups,
+      trackedAlarms: 2,
+      suppressionRate: 0.5,
+    });
+
+    // Reusing an id from the first evicted group counts a new retained alarm
+    // instance, proving its prior bookkeeping entry was released.
+    engine.ingest(alarm({
+      id: 'churn-root-0',
+      tagId: 'CHURN-REUSED.ALARM',
+      timestamp: churnGroups * 10_000,
+      severity: 'high',
+    }));
+    engine.ingest(alarm({
+      id: 'churn-member-0',
+      tagId: 'CHURN-REUSED.ALARM',
+      timestamp: churnGroups * 10_000 + 100,
+      severity: 'medium',
+    }));
+    const afterReuse = engine.getMetrics();
+    expect(afterReuse).toMatchObject({
+      alarmsIngested: churnGroups * 2 + 2,
+      alarmsSuppressed: churnGroups + 1,
+      trackedAlarms: 2,
+    });
+    expect(Number.isFinite(afterReuse.suppressionRate)).toBe(true);
+    expect(afterReuse.suppressionRate).toBeGreaterThanOrEqual(0);
+    expect(afterReuse.suppressionRate).toBeLessThanOrEqual(1);
+  });
 });
 
 // ── Normalization & service ───────────────────────────────────────────────
@@ -964,6 +1020,23 @@ describe('normalizeAlarm', () => {
     expect(normalizeSeverity('WARNING')).toBe('medium');
     expect(normalizeSeverity('alarm')).toBe('high');
     expect(normalizeSeverity(undefined)).toBe('info');
+  });
+
+  it('maps missing live severity to the fail-safe floor but preserves explicit info', () => {
+    for (const severity of [undefined, '', '   ']) {
+      expect(normalizeAlarm({
+        id: `missing-${String(severity)}`,
+        tagId: 'MISSING.SEVERITY',
+        timestamp: 1,
+        ...(severity === undefined ? {} : { severity }),
+      })?.severity).toBe('critical');
+    }
+    expect(normalizeAlarm({
+      id: 'explicit-info',
+      tagId: 'EXPLICIT.INFO',
+      timestamp: 1,
+      severity: 'info',
+    })?.severity).toBe('info');
   });
 
   it('rejects alarms without a usable timestamp', () => {

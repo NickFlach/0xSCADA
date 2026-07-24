@@ -566,6 +566,164 @@ describe("alarm-correlation HTTP authorization", () => {
     expect(validBody.results[0]?.reason).not.toMatch(/duplicate/);
   });
 
+  it("reconciles suppression immediately through topology PUT and DELETE routes", async () => {
+    const originalOptIn =
+      process.env.ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION;
+    process.env.ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION = "true";
+    const rootEquipment = "HTTP-TOPOLOGY-ROOT";
+    const memberEquipment = "HTTP-TOPOLOGY-MEMBER";
+    const rootAlarm = "http-topology-root-alarm";
+    const memberAlarm = "http-topology-member-alarm";
+
+    const configure = (
+      method: "PUT" | "DELETE",
+      path: string,
+      body?: Record<string, unknown>,
+    ) => request(
+      testServer,
+      {
+        method,
+        path,
+        scope: "configure",
+        authorizedStatus: 200,
+        body,
+      },
+      keys.configure,
+    );
+    const readGroup = async (groupId: string) => {
+      const response = await request(
+        testServer,
+        {
+          method: "GET",
+          path: `/groups/${groupId}`,
+          scope: "read",
+          authorizedStatus: 200,
+        },
+        keys.read,
+      );
+      expect(response.status).toBe(200);
+      return response.json() as Promise<{
+        alarmIds: string[];
+        suppressedAlarmIds: string[];
+        alarms: Array<{ id: string; state: string }>;
+      }>;
+    };
+
+    try {
+      const initialTopology = await configure("PUT", "/topology", {
+        nodes: [
+          {
+            equipmentId: rootEquipment,
+            siteId: "site-a",
+            causalDownstream: [memberEquipment],
+          },
+          {
+            equipmentId: memberEquipment,
+            siteId: "site-a",
+            causalDownstream: [],
+          },
+        ],
+      });
+      expect(initialTopology.status).toBe(200);
+
+      const enabled = await configure("PUT", "/suppression-policy", {
+        enabled: true,
+      });
+      expect(enabled.status).toBe(200);
+
+      const now = Date.now();
+      for (const alarm of [
+        {
+          id: rootAlarm,
+          tagId: `${rootEquipment}.TRIP`,
+          equipmentId: rootEquipment,
+          timestamp: now,
+          severity: "high",
+        },
+        {
+          id: memberAlarm,
+          tagId: `${memberEquipment}.TRIP`,
+          equipmentId: memberEquipment,
+          timestamp: now + 100,
+          severity: "medium",
+        },
+      ]) {
+        const response = await request(
+          testServer,
+          {
+            method: "POST",
+            path: "/alarms",
+            scope: "ingest",
+            authorizedStatus: 200,
+            body: { alarms: [alarm] },
+          },
+          keys.ingest,
+        );
+        expect(response.status).toBe(200);
+      }
+
+      const groupsResponse = await request(
+        testServer,
+        routeCases[0],
+        keys.read,
+      );
+      const groupsBody = await groupsResponse.json() as {
+        groups: Array<{ id: string; alarmIds: string[] }>;
+      };
+      const groupId = groupsBody.groups.find(
+        (group) => group.alarmIds.includes(rootAlarm),
+      )?.id;
+      expect(groupId).toBeDefined();
+
+      let group = await readGroup(groupId!);
+      expect(group.suppressedAlarmIds).toEqual([memberAlarm]);
+
+      const removed = await configure(
+        "DELETE",
+        `/topology/${memberEquipment}`,
+      );
+      expect(removed.status).toBe(200);
+      group = await readGroup(groupId!);
+      expect(group.suppressedAlarmIds).toEqual([]);
+      expect(group.alarms.find((alarm) => alarm.id === memberAlarm)?.state)
+        .toBe("active");
+
+      const restoredSameSite = await configure("PUT", "/topology", {
+        nodes: [{
+          equipmentId: memberEquipment,
+          siteId: "site-a",
+          causalDownstream: [],
+        }],
+      });
+      expect(restoredSameSite.status).toBe(200);
+      group = await readGroup(groupId!);
+      expect(group.suppressedAlarmIds).toEqual([memberAlarm]);
+
+      const movedCrossSite = await configure("PUT", "/topology", {
+        nodes: [{
+          equipmentId: memberEquipment,
+          siteId: "site-b",
+          causalDownstream: [],
+        }],
+      });
+      expect(movedCrossSite.status).toBe(200);
+      group = await readGroup(groupId!);
+      expect(group.suppressedAlarmIds).toEqual([]);
+      expect(group.alarms.find((alarm) => alarm.id === memberAlarm)?.state)
+        .toBe("active");
+    } finally {
+      await configure("PUT", "/suppression-policy", { enabled: false });
+      await configure("DELETE", `/topology/${memberEquipment}`);
+      await configure("DELETE", `/topology/${rootEquipment}`);
+      if (originalOptIn === undefined) {
+        delete process.env.ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION;
+      } else {
+        process.env.ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION =
+          originalOptIn;
+      }
+    }
+  });
+
   it("keeps suppression fail-safe without explicit ephemeral opt-in", async () => {
     const response = await request(
       testServer,
