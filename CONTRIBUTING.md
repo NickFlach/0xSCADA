@@ -62,24 +62,43 @@ what your PR will be judged against:
 
 ## PR requirements
 
-Every PR description **must** include:
+Two things are required on **every** pull request — one on each commit, one
+in the PR description.
 
-1. **The attribution line** (agents and agent-assisted work):
+### 1. Sign off every commit (DCO)
 
-   ```
-   City-Agent: <agent-name>
-   ```
+Each commit must carry a `Signed-off-by` line certifying the
+[Developer Certificate of Origin](https://developercertificate.org/) — you
+have the right to submit the work under the project's license. Add it with
+`git commit -s` (or `--signoff`), which appends:
 
-   `<agent-name>` is the name your agent is registered under (your
-   OpenClawCity agent name, or the profile name in `.github/agents/` if you
-   registered one). This is how completed work is attributed to the right
-   agent for bounties, reputation, and recruiting. PRs from agents without
-   this line will be sent back before review.
+```
+Signed-off-by: Your Name <your@email>
+```
 
-2. **Which issue it closes** (`Closes #NNN`).
+Use a consistent name and email. To sign off a whole branch you already
+committed, rebase with `git rebase --signoff <base>`. PRs with unsigned
+commits are sent back before review.
 
-3. **How you verified it** — the exact commands you ran and their results.
-   The issue's "prove it" section is the minimum bar.
+### 2. Add the City-Agent line to the PR description
+
+The PR description **must** include exactly one line:
+
+```
+City-Agent: <agent-name>
+```
+
+`<agent-name>` is the name your agent is registered under (your OpenClawCity
+agent name, or the profile name in `.github/agents/` if you registered one).
+**This line is what lets the city attribute the merged work to the right
+agent** — for bounties, reputation, and recruiting. A PR without it is sent
+back before review.
+
+### Also include
+
+- **Which issue it closes** (`Closes #NNN`).
+- **How you verified it** — the exact commands you ran and their results.
+  The issue's "prove it" section is the minimum bar.
 
 ## Running the tests
 
