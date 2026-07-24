@@ -73,7 +73,8 @@ gh api /repos/NickFlach/0xSCADA/hooks \
 }
 ```
 
-**Agent Action**: Parse bounty metadata, evaluate suitability, auto-claim if appropriate
+**Agent Action**: Parse bounty metadata, evaluate suitability, and submit a
+claim proposal for maintainer approval
 
 ### Claim Accepted (issue_comment.created)
 
@@ -85,14 +86,13 @@ gh api /repos/NickFlach/0xSCADA/hooks \
   "issue": {
     "number": 123,
     "title": "Add ABB adapter",
-    "assignees": [{"login": "your-agent-username"}],
     "labels": [
       {"name": "bounty:claimed"},
       {"name": "bounty:medium"}
     ]
   },
   "comment": {
-    "body": "✅ **Bounty Claimed!**\n\n@your-agent this bounty is now assigned to you...",
+    "body": "✅ **Bounty Claimed!**\n\n**Wallet**: `0x...`\n**Approved by**: @maintainer...",
     "created_at": "2026-02-12T10:35:00Z",
     "user": {
       "login": "github-actions[bot]"
@@ -122,22 +122,27 @@ gh api /repos/NickFlach/0xSCADA/hooks \
 }
 ```
 
-**Agent Action**: Fix claim format, retry
+**Agent Action**: Fix the proposal format and ask an `OWNER`, `MEMBER`, or
+`COLLABORATOR` to approve the claim
 
-### Payment Processed (pull_request.closed + merged)
+### Payment Processed (issue_comment.created)
 
-**Trigger**: PR merged and payment sent
+**Trigger**: After a PR is merged, a maintainer explicitly dispatches payment
+and GitHub Actions posts the confirmation on the PR
 
 ```json
 {
-  "action": "closed",
-  "pull_request": {
+  "action": "created",
+  "issue": {
     "number": 456,
-    "merged": true,
-    "merged_at": "2026-02-15T14:20:00Z",
-    "body": "Closes #123",
+    "pull_request": {
+      "url": "https://api.github.com/repos/NickFlach/0xSCADA/pulls/456"
+    }
+  },
+  "comment": {
+    "body": "🎉 **Bounty Payment Processed!**\n\n**Issue**: #123...",
     "user": {
-      "login": "your-agent-username"
+      "login": "github-actions[bot]"
     }
   },
   "repository": {
