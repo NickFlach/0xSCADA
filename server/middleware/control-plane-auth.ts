@@ -62,13 +62,22 @@ function rolesFor(record: ApiKeyRecord): string[] {
 }
 
 function authenticate(req: Request): ApiKeyRecord | undefined {
-  const attached = (req as Request & { apiKeyRecord?: ApiKeyRecord }).apiKeyRecord;
-  if (attached) return attached;
-
   // Credentials in a query string leak into access logs and browser history.
   // Sensitive routes intentionally accept only the standard header form.
   const key = req.header("x-api-key");
   if (!key) return undefined;
+
+  const attached = (req as Request & { apiKeyRecord?: ApiKeyRecord }).apiKeyRecord;
+  if (attached) {
+    // A preceding gateway may attach a record from a credential source with a
+    // different trust policy. Re-bind that record to the exact header value
+    // before accepting it at the control-plane boundary.
+    if (attached.key !== key) return undefined;
+    if (attached.expiresAt && attached.expiresAt.getTime() <= Date.now()) {
+      return undefined;
+    }
+    return attached;
+  }
 
   const record = configuredApiKeys().get(key);
   if (!record) return undefined;
