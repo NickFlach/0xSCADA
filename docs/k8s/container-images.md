@@ -31,3 +31,7 @@ oxscada container push -t v1.0.0
 - Read-only root filesystem
 - Health checks on all images
 - `dumb-init` for proper signal handling
+
+The gateway image contains only the bundled `dist/gateway/index.cjs` runtime
+artifact. Set its required `SERVER_URL` environment variable to the fixed
+0xSCADA server origin; the image does not start or import the server process.

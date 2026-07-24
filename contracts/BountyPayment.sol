@@ -9,7 +9,7 @@ import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 /**
  * @title BountyPayment
  * @notice Automated bounty payment system for 0xSCADA GitHub contributions
- * @dev Supports both human contributors and AI agents with automated payment on PR merge
+ * @dev Supports both human contributors and AI agents with maintainer-approved payouts
  *
  * Key Features:
  * - Register bounties with GitHub issue numbers
@@ -224,7 +224,7 @@ contract BountyPayment is AccessControl, ReentrancyGuard {
     // ═══════════════════════════════════════════════════════════════════
 
     /**
-     * @notice Claim a bounty (called via GitHub Actions when user comments /claim)
+     * @notice Claim a bounty after a trusted maintainer approves /claim
      * @param issueNumber GitHub issue number
      * @param claimant Claimant's wallet address
      */

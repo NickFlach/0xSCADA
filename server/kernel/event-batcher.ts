@@ -151,8 +151,11 @@ export class EventBatcher extends EventEmitter {
 
       // Start batch timer if this is the first event
       if (this.eventQueue.length === 1) {
-        this.startBatchTimer();
+        // Capture the latency origin before scheduling. Node timers use a
+        // monotonic clock while Date.now() is millisecond-rounded; recording
+        // this afterwards can make a 100 ms timeout report 99 ms in CI.
         this.currentBatchStartTime = Date.now();
+        this.startBatchTimer();
       }
 
       // Check if we should flush due to count threshold. Flushing is deferred

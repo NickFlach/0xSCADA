@@ -1,0 +1,129 @@
+name: Bounty Contract Smoke
+
+on:
+  pull_request:
+    paths:
+      - "contracts/BountyPayment.sol"
+      - "contracts/scripts/**"
+      - "foundry.toml"
+      - ".github/workflows/bounty-management.yml"
+      - ".github/workflows/bounty-contract-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-anvil:
+    name: Claim and pay against Anvil
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: v1.7.1
+
+      - name: Build contracts
+        run: forge build
+
+      - name: Exercise the bounty lifecycle
+        shell: bash
+        env:
+          RPC_URL: http://127.0.0.1:8545
+        run: |
+          set -euo pipefail
+
+          stdbuf -oL anvil > /tmp/anvil.log 2>&1 &
+          ANVIL_PID=$!
+          trap 'kill "$ANVIL_PID"' EXIT
+
+          for attempt in {1..20}; do
+            if cast block-number --rpc-url "$RPC_URL" >/dev/null 2>&1; then
+              break
+            fi
+            sleep 0.25
+          done
+          cast block-number --rpc-url "$RPC_URL" >/dev/null
+
+          BOUNTY_PRIVATE_KEY=$(sed -nE 's/.*(0x[0-9a-fA-F]{64}).*/\1/p' /tmp/anvil.log | head -n 1)
+          test -n "$BOUNTY_PRIVATE_KEY"
+          CLAIMANT=$(cast wallet address --private-key "$BOUNTY_PRIVATE_KEY")
+          export BOUNTY_PRIVATE_KEY CLAIMANT
+
+          DEPLOY_OUTPUT=$(forge create contracts/BountyPayment.sol:BountyPayment \
+            --broadcast \
+            --private-key "$BOUNTY_PRIVATE_KEY" \
+            --rpc-url "$RPC_URL")
+          BOUNTY_CONTRACT_ADDRESS=$(echo "$DEPLOY_OUTPUT" | awk '/Deployed to:/ { print $3 }')
+          test -n "$BOUNTY_CONTRACT_ADDRESS"
+          export BOUNTY_CONTRACT_ADDRESS
+
+          cast send "$BOUNTY_CONTRACT_ADDRESS" \
+            "registerBounty(uint256,uint256,address,string,bool)" \
+            486 1 0x0000000000000000000000000000000000000000 \
+            '{"source":"ci-smoke"}' true \
+            --private-key "$BOUNTY_PRIVATE_KEY" \
+            --rpc-url "$RPC_URL"
+
+          cast send "$BOUNTY_CONTRACT_ADDRESS" \
+            --value 1wei \
+            --private-key "$BOUNTY_PRIVATE_KEY" \
+            --rpc-url "$RPC_URL"
+
+          npx tsx contracts/scripts/claim-bounty.ts \
+            --issue-number 486 \
+            --claimant "$CLAIMANT"
+
+          # Re-running the same operation reconciles partial workflow retries
+          # without sending a second transaction.
+          npx tsx contracts/scripts/claim-bounty.ts \
+            --issue-number 486 \
+            --claimant "$CLAIMANT"
+
+          npx tsx contracts/scripts/pay-bounty.ts \
+            --issue-number 486 \
+            --pr-number 1 \
+            --recipient "$CLAIMANT"
+
+          npx tsx contracts/scripts/pay-bounty.ts \
+            --issue-number 486 \
+            --pr-number 1 \
+            --recipient "$CLAIMANT"
+
+          PAID=$(cast call "$BOUNTY_CONTRACT_ADDRESS" \
+            "totalPaidOut()(uint256)" \
+            --rpc-url "$RPC_URL")
+          test "$PAID" = "1"
+
+          cast send "$BOUNTY_CONTRACT_ADDRESS" \
+            "registerBounty(uint256,uint256,address,string,bool)" \
+            487 1 0x0000000000000000000000000000000000000000 \
+            '{"source":"ci-expiry"}' true \
+            --private-key "$BOUNTY_PRIVATE_KEY" \
+            --rpc-url "$RPC_URL"
+
+          npx tsx contracts/scripts/claim-bounty.ts \
+            --issue-number 487 \
+            --claimant "$CLAIMANT"
+
+          cast rpc evm_increaseTime 1209601 --rpc-url "$RPC_URL"
+          cast rpc evm_mine --rpc-url "$RPC_URL"
+
+          npx tsx contracts/scripts/expire-claim.ts --issue-number 487
+          npx tsx contracts/scripts/expire-claim.ts --issue-number 487
+
+          # The expiry transition must genuinely reopen the contract bounty.
+          npx tsx contracts/scripts/claim-bounty.ts \
+            --issue-number 487 \
+            --claimant "$CLAIMANT"

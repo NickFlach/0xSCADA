@@ -1,17 +1,12 @@
 import { Router } from "express";
 import { PhiAlertingService } from "../services/geometry/phi-alerting";
 import { getFluxPublisher } from "../services/flux";
+import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
 
 const router = Router();
-
-// Auth middleware placeholder — same pattern as other protected routes
-function requireAuth(req: import('express').Request, res: import('express').Response, next: import('express').NextFunction) {
-  // TODO: implement real auth check (JWT / session validation)
-  // For now, allow all requests through (placeholder)
-  next();
-}
-
-router.use(requireAuth);
+const requireAlarmWrite = requireControlPlaneAccess({
+  scopes: ["alarms.write"],
+});
 
 // Phi alerting instance — must be initialized explicitly via initPhiAlerting()
 let _phiAlerting: PhiAlertingService | null = null;
@@ -54,7 +49,7 @@ router.get("/phi/history", async (req, res) => {
   res.json({ history: getPhiAlerting().getHistory() });
 });
 
-router.post("/phi/check", async (req, res) => {
+router.post("/phi/check", requireAlarmWrite, async (_req, res) => {
   const alarm = getPhiAlerting().check();
   res.json({ alarm: alarm || null, message: alarm ? "Alarm raised" : "Phi within thresholds" });
 });

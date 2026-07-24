@@ -18,6 +18,10 @@ import Intelligence from './pages/intelligence';
 import SecurityCompliance from './pages/security-compliance';
 import Integrity from './pages/integrity';
 
+// Admin: Anchor-Backend Switch UX (issue #455)
+import AnchorBackend from './pages/admin/AnchorBackend';
+import ApiCredentialControl from './components/ApiCredentialControl';
+
 const App: React.FC = () => {
   return (
     <div style={{ backgroundColor: '#0a0a0a', minHeight: '100vh', color: '#e5e5e5' }}>
@@ -64,7 +68,13 @@ const App: React.FC = () => {
               Integrity
             </a>
           </Link>
+          <Link href="/admin/anchor-backend">
+            <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
+              Anchor Backend
+            </a>
+          </Link>
         </nav>
+        <ApiCredentialControl />
       </header>
 
       {/* Main Content */}
@@ -79,7 +89,10 @@ const App: React.FC = () => {
           <Route path="/intelligence" component={Intelligence} />
           <Route path="/security" component={SecurityCompliance} />
           <Route path="/integrity" component={Integrity} />
-          
+
+          {/* Admin: Anchor-Backend Switch UX (issue #455) */}
+          <Route path="/admin/anchor-backend" component={AnchorBackend} />
+
           {/* Catch-all route */}
           <Route>
             <div style={{ padding: 24 }}>

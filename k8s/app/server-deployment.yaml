@@ -40,6 +40,13 @@ spec:
               value: production
             - name: PORT
               value: "5000"
+            - name: ENABLE_API_KEYS
+              value: "true"
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: oxscada-api-keys
+                  key: API_KEYS
           resources:
             requests:
               cpu: 200m
