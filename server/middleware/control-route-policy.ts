@@ -55,6 +55,19 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
     description: "Change tuning envelopes or create tuning proposals.",
   },
   {
+    id: "alarm-correlation-control",
+    pathPrefix: "/api/alarm-correlation",
+    scopes: Object.freeze([
+      "alarms.ingest",
+      "alarms.acknowledge",
+      "alarms.clear",
+      "alarms.configure",
+    ]),
+    description:
+      "Mutate alarm-correlation input, lifecycle, rules, topology, or policy. "
+      + "Route-local guards enforce the exact per-action scope.",
+  },
+  {
     id: "alarm-control",
     pathPrefix: "/api/alarms",
     scopes: Object.freeze(["alarms.write"]),

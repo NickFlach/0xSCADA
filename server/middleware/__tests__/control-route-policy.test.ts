@@ -25,6 +25,12 @@ const records: ApiKeyRecord[] = [
     createdAt: new Date(),
   },
   {
+    key: "alarm-ingest-key",
+    name: "alarm-ingester",
+    scopes: ["alarms.ingest"],
+    createdAt: new Date(),
+  },
+  {
     key: "tuning-write-key",
     name: "tuning-writer",
     scopes: ["tuning.write"],
@@ -57,6 +63,9 @@ async function startApp(logs: string[] = []): Promise<string> {
   app.post("/api/sites", (_req, res) => res.status(201).json({ created: true }));
   app.post("/api/alarms/phi/check", (_req, res) =>
     res.status(201).json({ checked: true })
+  );
+  app.post("/api/alarm-correlation/alarms", (_req, res) =>
+    res.status(201).json({ ingested: true })
   );
   app.post("/api/tuning/loops/loop-1/tune/relay", (_req, res) =>
     res.status(201).json({ proposed: true })
@@ -110,6 +119,7 @@ describe("control route policy inventory", () => {
         "tuning-proposal-decision",
         "tuning-control",
         "alarm-control",
+        "alarm-correlation-control",
         "geometry-control",
       ]),
     );
@@ -119,6 +129,17 @@ describe("control route policy inventory", () => {
     expect(mutationPolicyFor("POST", "/api/sites")?.scopes).toEqual(["write"]);
     expect(mutationPolicyFor("POST", "/API/SITES")?.scopes).toEqual(["write"]);
     expect(mutationPolicyFor("GET", "/api/sites")).toBeUndefined();
+  });
+
+  it("maps alarm-correlation mutations to its exact action-scope floor", () => {
+    expect(
+      mutationPolicyFor("POST", "/api/alarm-correlation/alarms")?.scopes,
+    ).toEqual([
+      "alarms.ingest",
+      "alarms.acknowledge",
+      "alarms.clear",
+      "alarms.configure",
+    ]);
   });
 });
 
@@ -174,6 +195,19 @@ describe("mutating REST authorization", () => {
     expect((await fetch(`${baseUrl}/api/sites`, {
       method: "POST",
       headers: { "X-API-Key": "alarm-key" },
+    })).status).toBe(403);
+  });
+
+  it("accepts an exact alarm-correlation action scope but rejects generic write", async () => {
+    const baseUrl = await startApp();
+    const path = "/api/alarm-correlation/alarms";
+    expect((await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "X-API-Key": "alarm-ingest-key" },
+    })).status).toBe(201);
+    expect((await fetch(`${baseUrl}${path}`, {
+      method: "POST",
+      headers: { "X-API-Key": "write-key" },
     })).status).toBe(403);
   });
 

@@ -38,7 +38,8 @@ narrower control-route policy applies:
 | `read` | Conventional least-privilege grant for REST clients; also permits WebSocket streams |
 | `stream.read` | WebSocket streams without general REST-read naming |
 | `write` | Ordinary API mutations |
-| `alarms.write` | Alarm evaluation/injection/suppression family |
+| `alarms.write` | Legacy `/api/alarms` evaluation/injection/suppression family |
+| `alarms.ingest`, `alarms.acknowledge`, `alarms.clear`, `alarms.configure` | Alarm-correlation ingestion, lifecycle actions, and configuration; feature routes require the exact action scope |
 | `geometry.write` | Geometry rule and recalibration mutations |
 | `operator+anchor.admin` | Anchor-backend inspection and switching |
 | `safety.resume` | Blueprint safe-state resume |
