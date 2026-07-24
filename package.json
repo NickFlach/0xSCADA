@@ -61,7 +61,7 @@
     "@vitest/coverage-v8": "^4.0.18",
     "drizzle-kit": "^0.31.9",
     "esbuild": "0.28.1",
-    "fast-check": "^3.23.2",
+    "fast-check": "^4.9.0",
     "jsdom": "^29.1.1",
     "tsx": "^4.7.0",
     "typescript": "^5.3.0",
