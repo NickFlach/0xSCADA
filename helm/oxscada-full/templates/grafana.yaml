@@ -1,0 +1,121 @@
+{{- if and .Values.observability.enabled .Values.observability.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-grafana-datasources
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  datasources.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        url: {{ printf "http://%s-prometheus:%v" (include "oxscada-full.fullname" .) .Values.observability.prometheus.port }}
+        access: proxy
+        isDefault: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-grafana
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "grafana") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "grafana") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.observability.grafana.podSecurityContext | nindent 8 }}
+      containers:
+        - name: grafana
+          image: {{ include "oxscada-full.image" (list . .Values.observability.grafana.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.observability.grafana.port }}
+          env:
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.observability.grafana.admin.existingSecret | quote }}
+                  key: {{ .Values.observability.grafana.admin.secretKey | quote }}
+          resources:
+            {{- toYaml .Values.observability.grafana.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.observability.grafana.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: datasources
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.observability.grafana.port }}
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/health
+              port: {{ .Values.observability.grafana.port }}
+            periodSeconds: 10
+      volumes:
+        - name: datasources
+          configMap:
+            name: {{ include "oxscada-full.fullname" . }}-grafana-datasources
+        {{- if .Values.observability.grafana.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxscada-full.fullname" . }}-grafana
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+        - name: tmp
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-grafana
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "grafana") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.observability.grafana.port }}
+      targetPort: http
+{{- if .Values.observability.grafana.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-grafana
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.observability.grafana.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.observability.grafana.persistence.size }}
+{{- end }}
+{{- end }}

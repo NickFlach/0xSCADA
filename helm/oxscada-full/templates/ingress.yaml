@@ -1,25 +1,47 @@
 {{- if .Values.ingress.enabled }}
+{{- $servicePorts := dict
+  "server" .Values.server.port
+  "client" .Values.client.port
+  "gateway" .Values.gateway.port
+  "blockchain" .Values.blockchain.ports.rpc
+  "prometheus" .Values.observability.prometheus.port
+  "grafana" .Values.observability.grafana.port
+-}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "oxscada-full.fullname" . }}
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
   annotations:
-    {{- toYaml .Values.ingress.annotations | nindent 4 }}
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
 spec:
-  ingressClassName: {{ .Values.ingress.className }}
+  {{- with .Values.ingress.className }}
+  ingressClassName: {{ . }}
+  {{- end }}
+  {{- with .Values.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
   rules:
     {{- range .Values.ingress.hosts }}
-    - host: {{ .host }}
+    - host: {{ .host | quote }}
       http:
         paths:
           {{- range .paths }}
+          {{- $port := index $servicePorts .service }}
+          {{- if not $port }}
+          {{- fail (printf "ingress service %q is not a chart component" .service) }}
+          {{- end }}
           - path: {{ .path }}
             pathType: Prefix
             backend:
               service:
                 name: {{ include "oxscada-full.fullname" $ }}-{{ .service }}
                 port:
-                  number: 80
+                  number: {{ $port }}
           {{- end }}
     {{- end }}
 {{- end }}
