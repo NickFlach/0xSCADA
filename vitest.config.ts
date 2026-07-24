@@ -33,7 +33,7 @@ export default defineConfig({
           environment: "node",
           globals: true,
           include: [
-            "{server,cli,shared}/**/*.{test,spec}.{ts,tsx}",
+            "{server,cli,shared,gateway}/**/*.{test,spec}.{ts,tsx}",
             "test/**/*.{test,spec}.{ts,tsx}",
           ],
           // Excluded from the default unit run (they belong to the separate

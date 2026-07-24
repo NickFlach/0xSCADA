@@ -19,8 +19,19 @@ Client (nginx:80) → Server (:5000) → PostgreSQL (:5432)
 Gateway (:8080) → Server (:5000)
 ```
 
+The gateway is a stateless HTTP/WebSocket reverse proxy. `SERVER_URL` is
+required and must be one fixed `http://` or `https://` origin without embedded
+credentials, a path, query, or fragment. HTTP traffic is forwarded unchanged
+to that origin, and WebSocket upgrades are accepted only on `/ws` and
+`/ws/tags`.
+
+`GET /health` is a process-only liveness check and remains healthy while the
+server is unavailable. `GET /readyz` checks the configured server's
+`/api/healthz` endpoint and is the Kubernetes readiness probe. Request bodies
+larger than 10 MiB are rejected by the gateway.
+
 ## Features
-- Health checks (liveness + readiness) on all pods
+- Separate process liveness and upstream-aware readiness checks
 - Resource limits and requests
 - Security contexts (non-root, read-only FS, no privilege escalation)
 - Rolling update strategy

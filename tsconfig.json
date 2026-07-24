@@ -29,6 +29,7 @@
     "server/**/*",
     "client/**/*",
     "shared/**/*",
+    "gateway/**/*",
     "*.ts",
     "*.tsx"
   ],
