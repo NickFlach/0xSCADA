@@ -14,6 +14,7 @@
  */
 
 import React, { useCallback, useState } from 'react';
+import { apiFetch, useApiCredential } from '../../lib/api-credential';
 
 type Backend = 'l2' | 'node' | 'both';
 
@@ -77,8 +78,7 @@ const AnchorBackend: React.FC = () => {
   const [history, setHistory] = useState<SwitchHistoryEntry[]>([]);
   const [target, setTarget] = useState<Backend>('node');
   const [eventsPerMinute, setEventsPerMinute] = useState<number>(120);
-  // Kept only in component memory. Never persisted to localStorage or a URL.
-  const [apiKey, setApiKey] = useState<string>('');
+  const { apiKey } = useApiCredential();
 
   const [dryRun, setDryRun] = useState<DryRunResponse | null>(null);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -93,9 +93,7 @@ const AnchorBackend: React.FC = () => {
     }
     try {
       setError(null);
-      const res = await fetch(API_BASE, {
-        headers: { 'X-API-Key': apiKey },
-      });
+      const res = await apiFetch(API_BASE);
       if (!res.ok) throw new Error('Failed to load anchor backend status');
       const data: StatusResponse = await res.json();
       setCurrentBackend(data.backend);
@@ -111,9 +109,9 @@ const AnchorBackend: React.FC = () => {
     setNotice(null);
     setDryRun(null);
     try {
-      const res = await fetch(API_BASE, {
+      const res = await apiFetch(API_BASE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ backend: target, dryRun: true, eventsPerMinute }),
       });
       const data = await res.json();
@@ -131,9 +129,9 @@ const AnchorBackend: React.FC = () => {
     setBusy(true);
     setError(null);
     try {
-      const res = await fetch(API_BASE, {
+      const res = await apiFetch(API_BASE, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           backend: dryRun.proposedBackend,
           dryRun: false,
@@ -184,22 +182,13 @@ const AnchorBackend: React.FC = () => {
       <div style={{ padding: 20, backgroundColor: '#111827', borderRadius: 8, marginBottom: 24 }}>
         <div style={{ fontSize: 14, color: '#888', marginBottom: 8 }}>Operator authentication</div>
         <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: 13, color: '#888', gap: 4 }}>
-            API key
-            <input
-              type="password"
-              autoComplete="off"
-              value={apiKey}
-              placeholder="X-API-Key"
-              onChange={(e) => setApiKey(e.target.value)}
-              style={inputStyle}
-            />
-          </label>
           <button onClick={() => void loadStatus()} disabled={busy || !apiKey} style={primaryButtonStyle(busy || !apiKey)}>
-            Authenticate
+            Load authenticated status
           </button>
           <span style={{ color: '#888', fontSize: 12 }}>
-            Audit identity comes from the server-owned key record.
+            {apiKey
+              ? 'Using the tab-scoped credential from the application header.'
+              : 'Set a tab-scoped credential in the application header first.'}
           </span>
         </div>
       </div>

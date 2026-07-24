@@ -32,16 +32,19 @@ export interface ControlPlaneAccess {
   scopes?: readonly string[];
 }
 
-let cachedApiKeysRaw: string | undefined;
+let cachedApiKeysSignature: string | undefined;
 let cachedApiKeys = new Map<string, ApiKeyRecord>();
 
 function configuredApiKeys(): Map<string, ApiKeyRecord> {
-  const raw = process.env.API_KEYS;
-  if (raw === cachedApiKeysRaw) return cachedApiKeys;
+  const signature = JSON.stringify([
+    process.env.API_KEYS ?? null,
+    process.env.API_KEYS_FILE ?? null,
+  ]);
+  if (signature === cachedApiKeysSignature) return cachedApiKeys;
 
   const manager = new ApiKeyManager();
   manager.loadFromEnv();
-  cachedApiKeysRaw = raw;
+  cachedApiKeysSignature = signature;
   cachedApiKeys = manager.getKeysMap();
   return cachedApiKeys;
 }
@@ -62,13 +65,22 @@ function rolesFor(record: ApiKeyRecord): string[] {
 }
 
 function authenticate(req: Request): ApiKeyRecord | undefined {
-  const attached = (req as Request & { apiKeyRecord?: ApiKeyRecord }).apiKeyRecord;
-  if (attached) return attached;
-
   // Credentials in a query string leak into access logs and browser history.
   // Sensitive routes intentionally accept only the standard header form.
   const key = req.header("x-api-key");
   if (!key) return undefined;
+
+  const attached = (req as Request & { apiKeyRecord?: ApiKeyRecord }).apiKeyRecord;
+  if (attached) {
+    // A preceding gateway may attach a record from a credential source with a
+    // different trust policy. Re-bind that record to the exact header value
+    // before accepting it at the control-plane boundary.
+    if (attached.key !== key) return undefined;
+    if (attached.expiresAt && attached.expiresAt.getTime() <= Date.now()) {
+      return undefined;
+    }
+    return attached;
+  }
 
   const record = configuredApiKeys().get(key);
   if (!record) return undefined;
@@ -136,6 +148,6 @@ export function controlPlanePrincipal(req: Request): ControlPlanePrincipal {
 
 /** Test hook for environment-isolated authentication tests. */
 export function _resetControlPlaneAuthCache(): void {
-  cachedApiKeysRaw = undefined;
+  cachedApiKeysSignature = undefined;
   cachedApiKeys = new Map();
 }

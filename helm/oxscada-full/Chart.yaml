@@ -1,28 +1,17 @@
 apiVersion: v2
 name: oxscada-full
-description: Full-stack 0xSCADA deployment — server, client, gateway, protocols, blockchain, and observability
+description: Full-stack 0xSCADA deployment — server, client, gateway, blockchain, and observability
 type: application
-version: 0.1.0
+version: 0.1.1
 appVersion: "1.0.0"
-
-dependencies:
-  - name: server
-    version: "0.1.0"
-    repository: "file://charts/server"
-    condition: server.enabled
-  - name: client
-    version: "0.1.0"
-    repository: "file://charts/client"
-    condition: client.enabled
-  - name: gateway
-    version: "0.1.0"
-    repository: "file://charts/gateway"
-    condition: gateway.enabled
-  - name: blockchain
-    version: "0.1.0"
-    repository: "file://charts/blockchain"
-    condition: blockchain.enabled
-  - name: observability
-    version: "0.1.0"
-    repository: "file://charts/observability"
-    condition: observability.enabled
+keywords:
+  - scada
+  - blockchain
+  - industrial
+  - observability
+home: https://github.com/NickFlach/0xSCADA
+sources:
+  - https://github.com/NickFlach/0xSCADA
+maintainers:
+  - name: NickFlach
+    url: https://github.com/NickFlach

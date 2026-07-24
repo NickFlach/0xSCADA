@@ -16,9 +16,17 @@
 
 import { WebSocket, WebSocketServer } from 'ws';
 import type { Server as HttpServer, IncomingMessage } from 'http';
+import type { Duplex } from 'stream';
 import { URL } from 'url';
 import { tagStreamServer, type TagUpdate } from './tag-stream.js';
 import type { EventFilters, WebSocketMetrics } from './types.js';
+import {
+  authorizeWebSocketUpgrade,
+  rejectWebSocketUpgrade,
+  selectOxscadaWebSocketProtocol,
+  type AuthenticatedWebSocketRequest,
+  type WebSocketAuthOptions,
+} from './upgrade-auth.js';
 
 // ── Unified Message Schema ───────────────────────────────────────────────────
 
@@ -39,6 +47,7 @@ export interface UnifiedClient {
   eventFilters: Partial<EventFilters>;
   connectedAt: Date;
   isAlive: boolean;
+  authenticated: boolean;
   messagesSent: number;
   messagesReceived: number;
 }
@@ -51,24 +60,48 @@ export class UnifiedStreamServer {
   private startTime = Date.now();
   private pingInterval?: ReturnType<typeof setInterval>;
   private totalEventsDelivered = 0;
+  private httpServer?: HttpServer;
+  private upgradeHandler?: (
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ) => void;
 
   /**
    * Attach to an HTTP server and listen on the given path (default /ws).
    * Also wires into the existing TagStreamServer for tag data.
    */
-  initialize(httpServer: HttpServer, path = '/ws'): void {
-    this.wss = new WebSocketServer({ noServer: true });
+  initialize(
+    httpServer: HttpServer,
+    path = '/ws',
+    auth: WebSocketAuthOptions = { required: false, apiKeys: new Map() },
+  ): void {
+    this.wss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: selectOxscadaWebSocketProtocol,
+    });
+    this.httpServer = httpServer;
 
-    httpServer.on('upgrade', (request: IncomingMessage, socket, head) => {
+    this.upgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
       const reqUrl = new URL(request.url || '/', `http://${request.headers.host}`);
       if (reqUrl.pathname !== path) return; // let tag-stream / event-stream handle their own paths
+
+      const decision = authorizeWebSocketUpgrade(
+        request as AuthenticatedWebSocketRequest,
+        auth,
+      );
+      if (!decision.ok) {
+        rejectWebSocketUpgrade(socket, decision);
+        return;
+      }
 
       this.wss!.handleUpgrade(request, socket, head, (ws) => {
         this.wss!.emit('connection', ws, request);
       });
-    });
+    };
+    httpServer.on('upgrade', this.upgradeHandler);
 
-    this.wss.on('connection', (ws: WebSocket, _request: IncomingMessage) => {
+    this.wss.on('connection', (ws: WebSocket, request: AuthenticatedWebSocketRequest) => {
       const clientId = crypto.randomUUID();
       const client: UnifiedClient = {
         id: clientId,
@@ -78,6 +111,7 @@ export class UnifiedStreamServer {
         eventFilters: {},
         connectedAt: new Date(),
         isAlive: true,
+        authenticated: !!request.apiKeyRecord,
         messagesSent: 0,
         messagesReceived: 0,
       };
@@ -232,7 +266,8 @@ export class UnifiedStreamServer {
     return {
       activeConnections: this.clients.size,
       totalConnections: this.clients.size,
-      authenticatedConnections: 0,
+      authenticatedConnections: Array.from(this.clients.values())
+        .filter((client) => client.authenticated).length,
       totalSubscriptions: Array.from(this.clients.values())
         .reduce((sum, c) => sum + c.subscribedChannels.size, 0),
       totalEventsDelivered: this.totalEventsDelivered,
@@ -269,9 +304,14 @@ export class UnifiedStreamServer {
 
   destroy(): void {
     if (this.pingInterval) clearInterval(this.pingInterval);
+    if (this.httpServer && this.upgradeHandler) {
+      this.httpServer.off('upgrade', this.upgradeHandler);
+    }
     for (const client of this.clients.values()) client.ws.close(1000);
     this.clients.clear();
     this.wss?.close();
+    this.httpServer = undefined;
+    this.upgradeHandler = undefined;
   }
 
   // ── Private Helpers ────────────────────────────────────────────────────────

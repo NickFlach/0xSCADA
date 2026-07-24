@@ -1,0 +1,53 @@
+# Dependabot configuration.
+#
+# Rationale: this repo has a tightly-pinned, interlocking dependency tree
+# (zod 3, react 18, vite 7, tailwind 3, typescript 5, a v3/v4/v5 zod-validation
+# split, etc.), so arbitrary major bumps break the build and cannot merge
+# unattended. Policy: group minor + patch updates so the safe bumps flow and
+# merge on their own, and DEFER all majors — dependabot will not open them.
+# To take on a specific major, do it as a dedicated migration PR (or briefly
+# remove/narrow the ignore below for that package).
+version: 2
+updates:
+  # Root application (server + React frontend + contracts tooling)
+  - package-ecosystem: "npm"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      npm-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      # Defer every major bump; take majors on deliberately, one migration PR
+      # at a time (vite↔@vitejs/plugin-react, tailwind 4, zod 4, react 19,
+      # typescript, js-yaml 5, etc. all have coordination/migration cost).
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # CLI package
+  - package-ecosystem: "npm"
+    directory: "/cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 10
+    groups:
+      cli-minor-patch:
+        update-types:
+          - "minor"
+          - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
+
+  # GitHub Actions workflows
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns:
+          - "*"

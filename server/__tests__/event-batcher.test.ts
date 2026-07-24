@@ -136,7 +136,9 @@ describe("EventBatcher", () => {
 
       const batch = await batchPromise;
       expect(batch.events).toHaveLength(1);
-      expect(batch.metrics.batch_latency_ms).toBeGreaterThanOrEqual(100);
+      // setTimeout may fire with the Date.now() delta rounding just under the
+      // configured window (observed 99ms for a 100ms timer on CI runners).
+      expect(batch.metrics.batch_latency_ms).toBeGreaterThanOrEqual(95);
 
       await fastBatcher.shutdown();
     });

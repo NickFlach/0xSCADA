@@ -1,0 +1,117 @@
+{{- if and .Values.observability.enabled .Values.observability.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-prometheus
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+      - job_name: oxscada-server
+        metrics_path: /api/metrics
+        static_configs:
+          - targets:
+              - {{ printf "%s-server:%v" (include "oxscada-full.fullname" .) .Values.server.port | quote }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-prometheus
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "prometheus") | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "prometheus") | nindent 8 }}
+    spec:
+      securityContext:
+        {{- toYaml .Values.observability.prometheus.podSecurityContext | nindent 8 }}
+      containers:
+        - name: prometheus
+          image: {{ include "oxscada-full.image" (list . .Values.observability.prometheus.image) | quote }}
+          imagePullPolicy: {{ .Values.global.imagePullPolicy }}
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - {{ printf "--storage.tsdb.retention.time=%s" .Values.observability.prometheus.retention | quote }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.observability.prometheus.port }}
+          resources:
+            {{- toYaml .Values.observability.prometheus.resources | nindent 12 }}
+          securityContext:
+            {{- toYaml .Values.observability.prometheus.securityContext | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: {{ .Values.observability.prometheus.port }}
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: {{ .Values.observability.prometheus.port }}
+            periodSeconds: 10
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "oxscada-full.fullname" . }}-prometheus
+        {{- if .Values.observability.prometheus.persistence.enabled }}
+        - name: data
+          persistentVolumeClaim:
+            claimName: {{ include "oxscada-full.fullname" . }}-prometheus
+        {{- else }}
+        - name: data
+          emptyDir: {}
+        {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-prometheus
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "oxscada-full.selectorLabels" (dict "root" . "component" "prometheus") | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.observability.prometheus.port }}
+      targetPort: http
+{{- if .Values.observability.prometheus.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "oxscada-full.fullname" . }}-prometheus
+  labels:
+    {{- include "oxscada-full.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  accessModes: ["ReadWriteOnce"]
+  {{- with .Values.observability.prometheus.persistence.storageClass }}
+  storageClassName: {{ . | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.observability.prometheus.persistence.size }}
+{{- end }}
+{{- end }}

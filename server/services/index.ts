@@ -69,6 +69,9 @@ export { l2RollupService } from './l2-rollup';
 // ── Digital Twin Service (ADR-0013 [13.3], #214) ─────────────────────────────
 export * from './twin';
 export { digitalTwinService } from './twin';
+// ── Alarm Correlation Service (ADR-0013 [13.2], #213) ────────────────────────
+export * from './alarm-correlation';
+export { alarmCorrelationService } from './alarm-correlation';
 
 /**
  * Initialize all services

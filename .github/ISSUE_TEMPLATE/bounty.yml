@@ -10,7 +10,7 @@ body:
 
         This template is for creating **paid bounty issues**. Contributors who complete this work will be compensated via Gitcoin/Allo Protocol.
 
-        **For contributors**: See [CONTRIBUTING.md](../../CONTRIBUTING.md#gitcoin-bounties) for claim instructions.
+        **For contributors**: See the [bounty claim guide](https://github.com/NickFlach/0xSCADA/blob/main/docs/ai-agent-bounty-guide.md#claiming).
 
   - type: dropdown
     id: bounty-tier
@@ -223,10 +223,11 @@ body:
         ## For Contributors
 
         To claim this bounty:
-        1. Comment `/claim` with your timeline, approach, and wallet address
-        2. Wait for maintainer approval
+        1. Comment with `Timeline:` (or `ETA:`), `Approach:`, and your wallet
+        2. Wait for a maintainer to approve it with
+           `/claim @your-github-user 0xYourWallet` (or `/agent-claim`)
         3. Complete the work according to acceptance criteria
         4. Submit PR referencing this issue
-        5. Receive payment upon merge! 🎉
+        5. Receive payment after merge and explicit maintainer payout approval! 🎉
 
-        See [CONTRIBUTING.md](../../CONTRIBUTING.md#gitcoin-bounties) for full details.
+        See the [bounty claim guide](https://github.com/NickFlach/0xSCADA/blob/main/docs/ai-agent-bounty-guide.md#claiming) for full details.

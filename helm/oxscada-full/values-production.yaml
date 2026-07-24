@@ -1,0 +1,64 @@
+# Representative production overrides used by documentation and CI rendering.
+# Create the referenced Secrets before installing this values file.
+
+global:
+  imagePullPolicy: IfNotPresent
+
+server:
+  replicaCount: 3
+  image:
+    tag: "1.0.0"
+  database:
+    existingSecret: oxscada-production-database
+  apiKeys:
+    existingSecret: oxscada-production-api-keys
+    enableGlobalAuth: true
+
+client:
+  replicaCount: 3
+  image:
+    tag: "1.0.0"
+
+gateway:
+  replicaCount: 2
+  image:
+    tag: "1.0.0"
+
+blockchain:
+  replicaCount: 3
+  image:
+    tag: "1.0.0"
+  persistence:
+    enabled: true
+    size: 50Gi
+
+observability:
+  prometheus:
+    persistence:
+      enabled: true
+      size: 50Gi
+  grafana:
+    admin:
+      existingSecret: oxscada-production-grafana
+    persistence:
+      enabled: true
+      size: 10Gi
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+  hosts:
+    - host: oxscada.example.com
+      paths:
+        - path: /
+          service: client
+        - path: /api
+          service: server
+        - path: /gateway
+          service: gateway
+  tls:
+    - secretName: oxscada-production-tls
+      hosts:
+        - oxscada.example.com

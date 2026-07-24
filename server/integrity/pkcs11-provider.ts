@@ -66,15 +66,23 @@ export interface Pkcs11Provider {
  */
 export class Pkcs11jsProvider implements Pkcs11Provider {
   private pkcs11: any;
+  private constants: any;
   private session: unknown;
   private opened = false;
+  private readonly loadPkcs11js: () => any;
+
+  constructor(loadPkcs11js?: () => any) {
+    this.loadPkcs11js = loadPkcs11js ?? (() => {
+      // Lazy, optional native dependency — not required to build/test the app.
+      // eslint-disable-next-line @typescript-eslint/no-var-requires
+      return require('pkcs11js');
+    });
+  }
 
   async open(config: Pkcs11OpenConfig): Promise<void> {
     let pkcs11js: any;
     try {
-      // Lazy, optional native dependency — not required to build/test the app.
-      // eslint-disable-next-line @typescript-eslint/no-var-requires
-      pkcs11js = require('pkcs11js');
+      pkcs11js = this.loadPkcs11js();
     } catch {
       throw new Error(
         'PKCS#11 signing requires the optional `pkcs11js` dependency. Install it (npm i pkcs11js) and provide a PKCS#11 module path (HSMConfig.pkcs11Library).',
@@ -106,6 +114,10 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
     pkcs11.C_Login(session, pkcs11js.CKU_USER, config.pin);
 
     this.pkcs11 = pkcs11;
+    // PKCS#11 constants are module exports, not properties of a PKCS11
+    // instance. Passing instance.CKA_* (undefined) into a native template can
+    // corrupt the binding's memory instead of producing a JavaScript error.
+    this.constants = pkcs11js;
     this.session = session;
     this.opened = true;
   }
@@ -117,8 +129,8 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
   private findHandle(cls: number, label: string): unknown | null {
     const p = this.pkcs11;
     p.C_FindObjectsInit(this.session, [
-      { type: p.CKA_CLASS, value: cls },
-      { type: p.CKA_LABEL, value: label },
+      { type: this.constants.CKA_CLASS, value: cls },
+      { type: this.constants.CKA_LABEL, value: label },
     ]);
     try {
       const handle = p.C_FindObjects(this.session);
@@ -132,16 +144,16 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
 
   async findPrivateKeyHandle(label: string): Promise<Pkcs11KeyHandle | null> {
     this.ensureOpen();
-    return this.findHandle(this.pkcs11.CKO_PRIVATE_KEY, label);
+    return this.findHandle(this.constants.CKO_PRIVATE_KEY, label);
   }
 
   async findPublicKey(label: string): Promise<Pkcs11PublicKey | null> {
     this.ensureOpen();
-    const handle = this.findHandle(this.pkcs11.CKO_PUBLIC_KEY, label);
+    const handle = this.findHandle(this.constants.CKO_PUBLIC_KEY, label);
     if (!handle) return null;
     const attrs = this.pkcs11.C_GetAttributeValue(this.session, handle, [
-      { type: this.pkcs11.CKA_MODULUS },
-      { type: this.pkcs11.CKA_PUBLIC_EXPONENT },
+      { type: this.constants.CKA_MODULUS },
+      { type: this.constants.CKA_PUBLIC_EXPONENT },
     ]);
     return { modulus: Buffer.from(attrs[0].value), exponent: Buffer.from(attrs[1].value) };
   }
@@ -156,22 +168,28 @@ export class Pkcs11jsProvider implements Pkcs11Provider {
 
   private mechanismFor(algorithm: NodeRsaAlgorithm): number {
     switch (algorithm) {
-      case 'RSA-SHA256': return this.pkcs11.CKM_SHA256_RSA_PKCS;
-      case 'RSA-SHA384': return this.pkcs11.CKM_SHA384_RSA_PKCS;
-      case 'RSA-SHA512': return this.pkcs11.CKM_SHA512_RSA_PKCS;
+      case 'RSA-SHA256': return this.constants.CKM_SHA256_RSA_PKCS;
+      case 'RSA-SHA384': return this.constants.CKM_SHA384_RSA_PKCS;
+      case 'RSA-SHA512': return this.constants.CKM_SHA512_RSA_PKCS;
     }
   }
 
   async listKeyLabels(): Promise<string[]> {
     this.ensureOpen();
     const p = this.pkcs11;
-    p.C_FindObjectsInit(this.session, [{ type: p.CKA_CLASS, value: p.CKO_PUBLIC_KEY }]);
+    p.C_FindObjectsInit(this.session, [
+      { type: this.constants.CKA_CLASS, value: this.constants.CKO_PUBLIC_KEY },
+    ]);
     const labels: string[] = [];
     try {
       for (;;) {
         const handle = p.C_FindObjects(this.session);
         if (!handle) break;
-        const attrs = p.C_GetAttributeValue(this.session, handle, [{ type: p.CKA_LABEL }]);
+        const attrs = p.C_GetAttributeValue(
+          this.session,
+          handle,
+          [{ type: this.constants.CKA_LABEL }],
+        );
         labels.push(Buffer.from(attrs[0].value).toString('utf8'));
       }
     } finally {

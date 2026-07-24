@@ -10,7 +10,15 @@
 
 import { WebSocket, WebSocketServer } from "ws";
 import type { Server as HttpServer, IncomingMessage } from "http";
+import type { Duplex } from "stream";
 import { URL } from "url";
+import {
+  authorizeWebSocketUpgrade,
+  rejectWebSocketUpgrade,
+  selectOxscadaWebSocketProtocol,
+  type AuthenticatedWebSocketRequest,
+  type WebSocketAuthOptions,
+} from "./upgrade-auth";
 
 // --- Types ---
 
@@ -65,18 +73,42 @@ export class TagStreamServer {
       } catch { /* consumer error — never disrupt broadcasting */ }
     }
   }
+  private httpServer?: HttpServer;
+  private upgradeHandler?: (
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ) => void;
 
-  initialize(httpServer: HttpServer, path = "/ws/tags"): void {
-    this.wss = new WebSocketServer({ noServer: true });
+  initialize(
+    httpServer: HttpServer,
+    path = "/ws/tags",
+    auth: WebSocketAuthOptions = { required: false, apiKeys: new Map() },
+  ): void {
+    this.wss = new WebSocketServer({
+      noServer: true,
+      handleProtocols: selectOxscadaWebSocketProtocol,
+    });
+    this.httpServer = httpServer;
 
-    httpServer.on("upgrade", (request: IncomingMessage, socket, head) => {
+    this.upgradeHandler = (request: IncomingMessage, socket: Duplex, head: Buffer) => {
       const reqUrl = new URL(request.url || "/", `http://${request.headers.host}`);
       if (reqUrl.pathname !== path) return; // let other WSS handle
+
+      const decision = authorizeWebSocketUpgrade(
+        request as AuthenticatedWebSocketRequest,
+        auth,
+      );
+      if (!decision.ok) {
+        rejectWebSocketUpgrade(socket, decision);
+        return;
+      }
 
       this.wss!.handleUpgrade(request, socket, head, (ws) => {
         this.wss!.emit("connection", ws, request);
       });
-    });
+    };
+    httpServer.on("upgrade", this.upgradeHandler);
 
     this.wss.on("connection", (ws: WebSocket, request: IncomingMessage) => {
       const clientId = crypto.randomUUID();
@@ -254,12 +286,17 @@ export class TagStreamServer {
 
   destroy(): void {
     if (this.pingInterval) clearInterval(this.pingInterval);
+    if (this.httpServer && this.upgradeHandler) {
+      this.httpServer.off("upgrade", this.upgradeHandler);
+    }
     for (const client of this.clients.values()) {
       client.ws.close(1000);
     }
     this.clients.clear();
     this.wss?.close();
     this.updateListeners.clear();
+    this.httpServer = undefined;
+    this.upgradeHandler = undefined;
   }
 }
 

@@ -25,6 +25,8 @@ services:
     environment:
       - NODE_ENV=production
       - DATABASE_URL=postgresql://scada:scada@db:5432/scada
+      - ENABLE_API_KEYS=${ENABLE_API_KEYS:-true}
+      - API_KEYS_FILE=/run/secrets/api_keys
       - GATEWAY_MODE=edge
       - LOG_LEVEL=${LOG_LEVEL:-warn}
       - OPCUA_ENDPOINT=${OPCUA_ENDPOINT:-opc.tcp://host.docker.internal:4840}
@@ -41,6 +43,8 @@ services:
           memory: 128M
     networks:
       - scada-edge
+    secrets:
+      - api_keys
 
   # ---------------------------------------------------------------------------
   # PostgreSQL (lightweight edge database)
@@ -74,3 +78,7 @@ networks:
 
 volumes:
   pgdata:
+
+secrets:
+  api_keys:
+    file: ${API_KEYS_FILE:?Set API_KEYS_FILE to a bootstrap API-key secret file}

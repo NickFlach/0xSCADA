@@ -119,14 +119,21 @@ describe('Fuzz: ApiKeyManager', () => {
   it('should generate keys that pass validation', () => {
     fc.assert(
       fc.property(
-        fc.string({ minLength: 1, maxLength: 255 }),
-        fc.array(fc.string({ minLength: 1, maxLength: 50 }), { minLength: 1, maxLength: 10 }),
+        fc.string({ minLength: 1, maxLength: 255 })
+          .filter((value) => value.trim().length > 0),
+        fc.array(
+          fc.string({ minLength: 1, maxLength: 50 })
+            .filter((value) => value.trim().length > 0),
+          { minLength: 1, maxLength: 10 },
+        ),
         (name, scopes) => {
           const record = manager.generate(name, scopes);
           expect(record.key).toMatch(/^oxs_/);
           expect(record.key.length).toBe(4 + 64); // prefix + 32 bytes hex
-          expect(record.name).toBe(name);
-          expect(record.scopes).toEqual(scopes);
+          expect(record.name).toBe(name.trim());
+          expect(record.scopes).toEqual(
+            Array.from(new Set(scopes.map((scope) => scope.trim()))),
+          );
 
           // Should be findable in the map
           const keys = manager.getKeysMap();
