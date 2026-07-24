@@ -28,8 +28,19 @@ jobs:
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_REF: ${{ github.head_ref }}
         run: |
           set -euo pipefail
+
+          # Automated repo-sync PRs carry already-integrated upstream work,
+          # not new contributions, and are exempt (see the sync-from-*.yml
+          # workflows). Exit 0 so this required check still reports success.
+          case "$HEAD_REF" in
+            sync/*)
+              echo "Sync PR ($HEAD_REF) — DCO check exempt (integration, not a new contribution)."
+              exit 0
+              ;;
+          esac
 
           # Non-merge commits introduced by this PR (merge commits are created
           # by GitHub, not the contributor, and are exempt).

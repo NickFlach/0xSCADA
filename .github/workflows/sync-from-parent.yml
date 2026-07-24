@@ -1,23 +1,26 @@
-name: Sync from flaukowski fork
+name: Sync from NickFlach parent
 
-# Bidirectional sync, parent side. Keeps NickFlach/0xSCADA level with
-# flaukowski/0xSCADA (where OpenClawCity agent contributions land). The
-# fork side is sync-from-parent.yml. Direct pushes to main are blocked by
-# repo rules, so this opens/refreshes a sync PR.
+# Bidirectional sync, fork side. Carries work merged on NickFlach/0xSCADA
+# (e.g. core-team feature PRs) into flaukowski/0xSCADA so the two stay
+# level. The parent side is sync-from-fork.yml. Direct pushes to main are
+# blocked by repo rules, so this opens/refreshes a sync PR on the fork.
 #
 # Loop-safe: "new work" is counted with `git rev-list --no-merges`, so the
 # merge commit each sync PR leaves behind is never mistaken for new
-# divergent work — the reverse workflow ignores it and the two converge.
+# divergent work — the two workflows converge instead of ping-ponging.
 #
-# Auto-merge is OFF by default. Set repo variable AUTO_MERGE_FORK_SYNC=true
-# to enable. (PRs created with GITHUB_TOKEN don't trigger other workflows,
-# so a required status check would hold auto-merge unless CI is dispatched
-# another way.) Merge sync PRs with a MERGE COMMIT, never squash/rebase —
-# squashing re-authors commits and forces a divergence reconciliation.
+# The fork's `Sign-off (DCO)` required check exempts `sync/*` branches
+# (see dco.yml), so upstream commits that predate the sign-off convention
+# don't block integration.
+#
+# Requires the fork setting: Settings → Actions → General → "Allow GitHub
+# Actions to create and approve pull requests". Auto-merge is OFF by
+# default — set repo variable AUTO_MERGE_PARENT_SYNC=true to enable. Merge
+# sync PRs with a MERGE COMMIT, never squash/rebase.
 
 on:
   schedule:
-    - cron: "23 */6 * * *"
+    - cron: "53 */6 * * *"   # offset from the parent side to avoid collisions
   workflow_dispatch: {}
 
 permissions:
@@ -26,13 +29,13 @@ permissions:
 
 jobs:
   sync:
-    if: github.repository == 'NickFlach/0xSCADA'
+    if: github.repository == 'flaukowski/0xSCADA'
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}
-      OTHER: https://github.com/flaukowski/0xSCADA.git
-      OTHER_NAME: flaukowski/0xSCADA
-      SYNC_BRANCH: sync/from-fork
+      OTHER: https://github.com/NickFlach/0xSCADA.git
+      OTHER_NAME: NickFlach/0xSCADA
+      SYNC_BRANCH: sync/from-parent
     steps:
       - uses: actions/checkout@v7
         with:
@@ -44,9 +47,6 @@ jobs:
       - name: Compare
         id: cmp
         run: |
-          # Non-merge commits each side has that the other lacks. Merge
-          # commits (incl. those left by prior syncs) are excluded, which is
-          # what makes the two-workflow loop converge instead of ping-pong.
           NEW=$(git rev-list --no-merges --count origin/main..other/main)
           REVERSE=$(git rev-list --no-merges --count other/main..origin/main)
           echo "new=$NEW" >> "$GITHUB_OUTPUT"
@@ -70,16 +70,16 @@ jobs:
 
           note=""
           if [ "$REVERSE" != "0" ]; then
-            note="Both mains have moved ($REVERSE commit(s) here the fork lacks); this PR merges — check it for conflicts."
+            note="Both mains have moved ($REVERSE commit(s) here the parent lacks); this PR merges — check it for conflicts."
           fi
-          body=$(printf 'Automated sync: %s new commit(s) from %s main. %s\n\nMerge with a **merge commit** (not squash/rebase) so commit SHAs stay convergent across the two repos.\n\nCity-Agent: sync-from-fork-workflow' "$NEW" "$OTHER_NAME" "$note")
+          body=$(printf 'Automated sync: %s new commit(s) from %s main. %s\n\nMerge with a **merge commit** (not squash/rebase) so commit SHAs stay convergent. The DCO check is exempt for this sync/* branch (already-integrated upstream commits, not new contributions).\n\nCity-Agent: sync-from-parent-workflow' "$NEW" "$OTHER_NAME" "$note")
 
           gh pr create --base main --head "$SYNC_BRANCH" \
             --title "Sync from $OTHER_NAME ($(git rev-parse --short other/main))" \
             --body "$body"
 
       - name: Enable auto-merge (opt-in)
-        if: steps.cmp.outputs.new != '0' && vars.AUTO_MERGE_FORK_SYNC == 'true'
+        if: steps.cmp.outputs.new != '0' && vars.AUTO_MERGE_PARENT_SYNC == 'true'
         run: |
           PR=$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number')
           [ -n "$PR" ] && gh pr merge "$PR" --auto --merge || true
