@@ -180,6 +180,15 @@ registerSwaggerRoutes(app, gatewayConfig);
       // Start Flux state engine integration (ADR-0015, Issue #260)
       startFluxIntegration();
 
+      // Start MQTT Sparkplug B bridge (Issue #463) — no-op unless
+      // SPARKPLUG_BROKER_URL is configured.
+      try {
+        const { startSparkplugBridge } = await import("./protocols/sparkplug-b");
+        startSparkplugBridge();
+      } catch (err) {
+        logError(err, "Sparkplug B bridge failed to start");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 
