@@ -74,6 +74,20 @@ function series(count: number, at = Date.now()): Array<{ timestamp: number; valu
   return Array.from({ length: count }, (_, i) => ({ timestamp: at - (count - i) * 1000, value: 10 + Math.sin(i) }));
 }
 
+// A near-flat baseline followed by a large terminal spike. The spike sits many
+// standard deviations off the baseline, so the ensemble (z-score/EWMA/IQR)
+// scores it anomalous and the engine generates at least one alert on ingest —
+// which is what lets the read-only test below actually exercise non-mutation
+// over a NON-EMPTY alert set (see issue #22).
+function spikeSeries(baselineCount = 20, at = Date.now()): Array<{ timestamp: number; value: number }> {
+  const total = baselineCount + 1;
+  const baseline = Array.from({ length: baselineCount }, (_, i) => ({
+    timestamp: at - (total - i) * 1000,
+    value: 10 + 0.05 * Math.sin(i),
+  }));
+  return [...baseline, { timestamp: at, value: 1000 }];
+}
+
 describe("POST /api/predictive/ingest", () => {
   it("ingests a series and returns the assessment envelope", async () => {
     const { status, json } = await api("POST", "/ingest", { tagId: nextTag(), points: series(5) });
@@ -109,12 +123,21 @@ describe("GET /api/predictive/analyze/:tagId", () => {
     expect(typeof json.available).toBe("number");
   });
 
-  it("is read-only: calling analyze never changes the alert count", async () => {
+  it("is read-only: analyze never changes a non-empty alert set", async () => {
     const tag = nextTag();
-    await api("POST", "/ingest", { tagId: tag, points: series(40) });
+    // Ingest a spike so the engine actually generates an alert. Without this,
+    // a smooth series yields zero alerts and the assertion below (before ==
+    // after == 0) passes even if analyze mutated state — the vacuous case in
+    // issue #22.
+    await api("POST", "/ingest", { tagId: tag, points: spikeSeries() });
     const before = (await api("GET", "/alerts")).json.alerts.length;
+    // Guard: the fixture must have produced at least one alert, otherwise this
+    // test would be vacuous again.
+    expect(before).toBeGreaterThan(0);
     for (let i = 0; i < 3; i++) await api("GET", `/analyze/${tag}`);
     const after = (await api("GET", "/alerts")).json.alerts.length;
+    // Non-mutation is now exercised over a real, non-empty alert set: three
+    // read-only GETs must leave the count unchanged (and still non-zero).
     expect(after).toBe(before);
   });
 });
