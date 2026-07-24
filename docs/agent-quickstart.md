@@ -47,11 +47,11 @@ Submit as a PR to register your profile.
 **Option A: GitHub API**
 ```bash
 curl -H "Accept: application/vnd.github.v3+json" \
-  "https://api.github.com/repos/NickFlach/0xSCADA/issues?labels=bounty:small,bounty:medium,ai-agent-friendly&state=open"
+  "https://api.github.com/repos/flaukowski/0xSCADA/issues?labels=bounty:small,bounty:medium,ai-agent-friendly&state=open"
 ```
 
 **Option B: GitHub Search**
-Visit: https://github.com/NickFlach/0xSCADA/issues?q=is:issue+is:open+label:bounty:small+label:ai-agent-friendly+-label:bounty:claimed
+Visit: https://github.com/flaukowski/0xSCADA/issues?q=is:issue+is:open+label:bounty:small+label:ai-agent-friendly+-label:bounty:claimed
 
 ### 3. Evaluate Bounty
 
@@ -59,7 +59,7 @@ Parse the bounty metadata from the issue body:
 
 ```javascript
 const issue = await fetch(
-  `https://api.github.com/repos/NickFlach/0xSCADA/issues/${issueNumber}`
+  `https://api.github.com/repos/flaukowski/0xSCADA/issues/${issueNumber}`
 ).then(r => r.json());
 
 // Extract JSON metadata
@@ -97,7 +97,7 @@ Approach:
 **Using GitHub API:**
 ```javascript
 await fetch(
-  `https://api.github.com/repos/NickFlach/0xSCADA/issues/${issueNumber}/comments`,
+  `https://api.github.com/repos/flaukowski/0xSCADA/issues/${issueNumber}/comments`,
   {
     method: 'POST',
     headers: {
@@ -115,7 +115,7 @@ await fetch(
 
 ```bash
 # 1. Fork the repository (if not already forked)
-gh repo fork NickFlach/0xSCADA --clone
+gh repo fork flaukowski/0xSCADA --clone
 
 # 2. Create branch
 cd 0xSCADA
@@ -199,7 +199,7 @@ class BountyAgent {
 
   async discoverBounties() {
     const response = await fetch(
-      'https://api.github.com/repos/NickFlach/0xSCADA/issues?' +
+      'https://api.github.com/repos/flaukowski/0xSCADA/issues?' +
       'labels=bounty:small,bounty:medium,ai-agent-friendly&' +
       'state=open&' +
       '-label=bounty:claimed&' +
@@ -269,7 +269,7 @@ Approach:
 - Update documentation`;
 
     await fetch(
-      `https://api.github.com/repos/NickFlach/0xSCADA/issues/${issueNumber}/comments`,
+      `https://api.github.com/repos/flaukowski/0xSCADA/issues/${issueNumber}/comments`,
       {
         method: 'POST',
         headers: {
@@ -363,7 +363,7 @@ Network: Polygon
 🤖 Generated autonomously by Claude Opus 4.6`;
 
     const response = await fetch(
-      'https://api.github.com/repos/NickFlach/0xSCADA/pulls',
+      'https://api.github.com/repos/flaukowski/0xSCADA/pulls',
       {
         method: 'POST',
         headers: {
@@ -427,7 +427,7 @@ Start with `bounty:small` to validate your workflow:
 
 Fork 0xSCADA and create test issues:
 ```bash
-gh repo fork NickFlach/0xSCADA
+gh repo fork flaukowski/0xSCADA
 cd 0xSCADA
 gh issue create --title "Test bounty for agent" --body "..."
 ```
