@@ -153,6 +153,50 @@ describe('alarm correlation local fanout', () => {
     });
   });
 
+  it('processes and broadcasts a same-id cleared lifecycle update once', async () => {
+    const { service, tagSink, unifiedSink, bridge } = setup();
+
+    await bridge.publishAlarm({
+      id: 'same-id',
+      tagId: 'SAME.ALARM',
+      state: 'active',
+      severity: 'high',
+      timestamp: 1000,
+    });
+    expect(latest(tagSink, 'same-id').state).toBe('active');
+
+    await bridge.publishAlarm({
+      id: 'same-id',
+      tagId: 'SAME.ALARM',
+      state: 'cleared',
+      severity: 'high',
+      timestamp: 1100,
+    });
+    expect(latest(tagSink, 'same-id')).toMatchObject({
+      state: 'cleared',
+      correlation: {
+        groupId: null,
+        suppressed: false,
+      },
+    });
+    expect(unifiedSink.snapshots).toEqual(tagSink.snapshots);
+
+    const snapshotCount = tagSink.snapshots.length;
+    await bridge.publishAlarm({
+      id: 'same-id',
+      tagId: 'SAME.ALARM',
+      state: 'cleared',
+      severity: 'high',
+      timestamp: 1200,
+    });
+    expect(tagSink.snapshots).toHaveLength(snapshotCount);
+    expect(latest(tagSink, 'same-id').clearedBy).toBeUndefined();
+    expect(service.engine.getMetrics()).toMatchObject({
+      alarmsIngested: 1,
+      trackedAlarms: 1,
+    });
+  });
+
   it('initializes idempotently and isolates sink failures', async () => {
     const service = new AlarmCorrelationService();
     const delivered = capturingSink();

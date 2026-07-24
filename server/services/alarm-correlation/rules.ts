@@ -175,6 +175,13 @@ export class CorrelationRulesEngine {
     group: AlarmGroup,
     topology: EquipmentTopology
   ): CorrelationRule | null {
+    if (
+      group.alarms.some(
+        (member) => !this.areSitesCompatible(alarm, member, topology),
+      )
+    ) {
+      return null;
+    }
     for (const rule of this.enabledRules()) {
       if (
         group.alarms.some((member) =>
@@ -208,7 +215,7 @@ export class CorrelationRulesEngine {
     other: CorrelatedAlarm,
     topology: EquipmentTopology,
   ): boolean {
-    if (!this.siteCompatible(alarm, other)) return false;
+    if (!this.areSitesCompatible(alarm, other, topology)) return false;
     const windowMs = (rule.config as { windowMs: number }).windowMs;
     if (Math.abs(alarm.timestamp - other.timestamp) > windowMs) return false;
 
@@ -254,12 +261,36 @@ export class CorrelationRulesEngine {
   }
 
   /**
-   * Never correlate across explicit site boundaries. Missing site metadata
-   * is compatible only with another unscoped alarm; it must not silently
-   * inherit a named site's topology or process-area namespace.
+   * Never correlate or suppress across effective site boundaries. An alarm
+   * inherits its equipment node's site when the alarm omits one. Explicit
+   * alarm and topology sites that disagree fail closed, while wholly
+   * unscoped alarms remain compatible only with other wholly unscoped alarms.
    */
-  private siteCompatible(a: CorrelatedAlarm, b: CorrelatedAlarm): boolean {
-    return a.siteId === b.siteId;
+  areSitesCompatible(
+    a: CorrelatedAlarm,
+    b: CorrelatedAlarm,
+    topology: EquipmentTopology,
+  ): boolean {
+    const siteA = this.effectiveSite(a, topology);
+    const siteB = this.effectiveSite(b, topology);
+    if (siteA.conflict || siteB.conflict) return false;
+    return siteA.siteId === siteB.siteId;
+  }
+
+  private effectiveSite(
+    alarm: CorrelatedAlarm,
+    topology: EquipmentTopology,
+  ): { siteId?: string; conflict: boolean } {
+    const alarmSite = alarm.siteId || undefined;
+    const topologySite =
+      (alarm.equipmentId && topology.get(alarm.equipmentId)?.siteId) || undefined;
+    if (alarmSite && topologySite && alarmSite !== topologySite) {
+      return { conflict: true };
+    }
+    return {
+      siteId: alarmSite ?? topologySite,
+      conflict: false,
+    };
   }
 
   private cloneRule(rule: CorrelationRule): CorrelationRule {

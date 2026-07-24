@@ -164,6 +164,7 @@ describe("alarm-correlation HTTP authorization", () => {
       "read-key:alarm-reader:alarms.read",
       "ingest-key:alarm-ingester:alarms.ingest",
       "acknowledge-key:alarm-acknowledger:alarms.acknowledge",
+      "acknowledge-key-b:alarm-acknowledger-b:alarms.acknowledge",
       "clear-key:alarm-clearer:alarms.clear",
       "configure-key:alarm-configurer:alarms.configure",
       "other-key:unrelated-client:other.read",
@@ -283,6 +284,21 @@ describe("alarm-correlation HTTP authorization", () => {
       acknowledgedBy: "alarm-acknowledger",
     });
 
+    const repeatAcknowledge = await request(
+      testServer,
+      {
+        method: "POST",
+        path: "/alarms/auth-member/acknowledge",
+        scope: "acknowledge",
+        authorizedStatus: 200,
+      },
+      "acknowledge-key-b",
+    );
+    expect(await repeatAcknowledge.json()).toEqual({
+      acknowledged: true,
+      acknowledgedBy: "alarm-acknowledger",
+    });
+
     const clear = await request(
       testServer,
       {
@@ -340,6 +356,7 @@ describe("alarm-correlation HTTP authorization", () => {
             id: "spoofed",
             tagId: "SPOOFED.TRIP",
             timestamp: Date.now(),
+            severity: "medium",
             source: "simulator",
             state: "suppressed",
           }],
@@ -361,6 +378,7 @@ describe("alarm-correlation HTTP authorization", () => {
             id: "future-not-mutated",
             tagId: "FUTURE.TRIP",
             timestamp: Date.now() + 2 * 60 * 60 * 1000,
+            severity: "medium",
           }],
         },
       },
@@ -385,6 +403,7 @@ describe("alarm-correlation HTTP authorization", () => {
             id: "future-not-mutated",
             tagId: "FUTURE.TRIP",
             timestamp: Date.now(),
+            severity: "medium",
           }],
         },
       },
@@ -404,6 +423,7 @@ describe("alarm-correlation HTTP authorization", () => {
         id: "duplicate-http",
         tagId: "DUPLICATE.ALARM",
         timestamp: Date.now(),
+        severity: "medium",
       }],
     };
     const route: RouteCase = {
@@ -423,6 +443,127 @@ describe("alarm-correlation HTTP authorization", () => {
         reason: expect.stringMatching(/duplicate alarm id/),
       })],
     });
+  });
+
+  it("requires a recognized REST severity before any alarm can be ingested", async () => {
+    for (const [id, severity] of [
+      ["missing-rest-severity", undefined],
+      ["blank-rest-severity", ""],
+      ["unknown-rest-severity", "catastrophic"],
+    ] as const) {
+      const invalid = await request(
+        testServer,
+        {
+          method: "POST",
+          path: "/alarms",
+          scope: "ingest",
+          authorizedStatus: 400,
+          body: {
+            alarms: [{
+              id,
+              tagId: "SEVERITY.ALARM",
+              timestamp: Date.now(),
+              ...(severity === undefined ? {} : { severity }),
+            }],
+          },
+        },
+        keys.ingest,
+      );
+      expect(invalid.status, id).toBe(400);
+
+      const validRetry = await request(
+        testServer,
+        {
+          method: "POST",
+          path: "/alarms",
+          scope: "ingest",
+          authorizedStatus: 200,
+          body: {
+            alarms: [{
+              id,
+              tagId: `SEVERITY.${id}`,
+              equipmentId: id,
+              timestamp: Date.now(),
+              severity: "critical",
+            }],
+          },
+        },
+        keys.ingest,
+      );
+      expect(validRetry.status, id).toBe(200);
+      expect(await validRetry.json(), id).toMatchObject({ ingested: 1 });
+    }
+  });
+
+  it("rejects Date-invalid timestamps before mutation and allows the same id retry", async () => {
+    const metricsRoute: RouteCase = {
+      method: "GET",
+      path: "/metrics",
+      scope: "read",
+      authorizedStatus: 200,
+    };
+    const before = await (
+      await request(testServer, metricsRoute, keys.read)
+    ).json() as {
+      alarmsIngested: number;
+      trackedAlarms: number;
+    };
+    const invalid = await request(
+      testServer,
+      {
+        method: "POST",
+        path: "/alarms",
+        scope: "ingest",
+        authorizedStatus: 400,
+        body: {
+          alarms: [{
+            id: "date-overflow-http",
+            tagId: "DATE.OVERFLOW",
+            timestamp: -1e300,
+            severity: "medium",
+          }],
+        },
+      },
+      keys.ingest,
+    );
+    expect(invalid.status).toBe(400);
+
+    const afterInvalid = await (
+      await request(testServer, metricsRoute, keys.read)
+    ).json() as {
+      alarmsIngested: number;
+      trackedAlarms: number;
+    };
+    expect(afterInvalid).toMatchObject({
+      alarmsIngested: before.alarmsIngested,
+      trackedAlarms: before.trackedAlarms,
+    });
+
+    const validRetry = await request(
+      testServer,
+      {
+        method: "POST",
+        path: "/alarms",
+        scope: "ingest",
+        authorizedStatus: 200,
+        body: {
+          alarms: [{
+            id: "date-overflow-http",
+            tagId: "DATE.OVERFLOW",
+            timestamp: Date.now(),
+            severity: "medium",
+          }],
+        },
+      },
+      keys.ingest,
+    );
+    expect(validRetry.status).toBe(200);
+    const validBody = await validRetry.json() as {
+      ingested: number;
+      results: Array<{ reason: string }>;
+    };
+    expect(validBody.ingested).toBe(1);
+    expect(validBody.results[0]?.reason).not.toMatch(/duplicate/);
   });
 
   it("keeps suppression fail-safe without explicit ephemeral opt-in", async () => {

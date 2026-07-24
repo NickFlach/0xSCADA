@@ -76,14 +76,23 @@ function normalizeState(raw: unknown): AlarmLifecycleState | null {
     case 'shelved':
       return 'shelved';
     case 'suppressed':
-      return 'suppressed';
+      // Suppression is a correlation-engine decision, never caller-owned
+      // state on a newly raised live alarm.
+      return 'active';
     default:
       return null;
   }
 }
 
-function normalizeTimestamp(raw: unknown): number | null {
-  if (typeof raw === 'number' && Number.isFinite(raw)) return raw;
+/** Normalize only timestamps that JavaScript Date can safely serialize. */
+export function normalizeAlarmTimestamp(raw: unknown): number | null {
+  if (
+    typeof raw === 'number'
+    && Number.isFinite(raw)
+    && Number.isFinite(new Date(raw).getTime())
+  ) {
+    return raw;
+  }
   if (typeof raw === 'string' && raw.trim() !== '') {
     const parsed = new Date(raw).getTime();
     if (Number.isFinite(parsed)) return parsed;
@@ -111,7 +120,7 @@ export function resolveEquipmentFromTag(tagId: string): string | undefined {
  * native CorrelatedAlarm. Returns null when no usable timestamp exists.
  */
 export function normalizeAlarm(raw: Record<string, unknown>): CorrelatedAlarm | null {
-  const timestamp = normalizeTimestamp(
+  const timestamp = normalizeAlarmTimestamp(
     raw.timestamp ?? raw.triggeredAt ?? raw.sourceTimestamp
   );
   if (timestamp === null) return null;
@@ -225,7 +234,17 @@ export class AlarmCorrelationService extends EventEmitter {
     const alarm = normalizeAlarm(raw);
     if (!alarm) return null;
     const result = this.engine.ingest(alarm);
-    return { alarm, result };
+    if (result.action === 'duplicate') {
+      if (alarm.state === 'acknowledged') {
+        this.engine.alarmAcknowledged(alarm.id);
+      } else if (alarm.state === 'cleared') {
+        this.engine.alarmCleared(alarm.id);
+      }
+    }
+    return {
+      alarm: this.engine.getAlarm(alarm.id) ?? alarm,
+      result,
+    };
   }
 
   async healthCheck(): Promise<{

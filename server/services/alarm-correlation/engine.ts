@@ -90,6 +90,8 @@ export class AlarmCorrelationEngine extends EventEmitter {
     alarmsSuppressed: 0,
     alarmsUnsuppressed: 0,
   };
+  /** Lifetime unique alarm ids that have entered engine-owned suppression. */
+  private everSuppressedAlarmIds = new Set<string>();
 
   constructor(options: CorrelationEngineOptions = {}) {
     super();
@@ -122,7 +124,13 @@ export class AlarmCorrelationEngine extends EventEmitter {
 
   // ── Ingestion & correlation ──────────────────────────────────────────
 
-  ingest(alarm: CorrelatedAlarm): IngestResult {
+  ingest(input: CorrelatedAlarm): IngestResult {
+    // Suppression is engine-owned state. A newly raised alarm cannot arrive
+    // already suppressed and escape the engine's tracking/restoration path.
+    const alarm: CorrelatedAlarm =
+      input.state === 'suppressed'
+        ? { ...input, state: 'active' }
+        : input;
     if (this.alarmIndex.has(alarm.id)) {
       const groupId = this.alarmIndex.get(alarm.id) ?? undefined;
       const group = groupId ? this.groups.get(groupId) : undefined;
@@ -215,8 +223,6 @@ export class AlarmCorrelationEngine extends EventEmitter {
       pendingAlarm.state = 'cleared';
       if (actor) pendingAlarm.clearedBy = actor;
       this.emit('alarm-updated', pendingAlarm);
-      this.removeFromPending(alarmId);
-      this.alarmIndex.delete(alarmId);
       return {
         cleared: true,
         clearedBy: pendingAlarm.clearedBy,
@@ -310,6 +316,18 @@ export class AlarmCorrelationEngine extends EventEmitter {
     return this.groups.get(groupId);
   }
 
+  /** Return the canonical stored alarm for lifecycle response/readback. */
+  getAlarm(alarmId: string): CorrelatedAlarm | undefined {
+    const groupId = this.alarmIndex.get(alarmId);
+    if (groupId === undefined) return undefined;
+    if (groupId === null) {
+      return this.pending.find((alarm) => alarm.id === alarmId);
+    }
+    return this.groups
+      .get(groupId)
+      ?.alarms.find((alarm) => alarm.id === alarmId);
+  }
+
   getRootCause(groupId: string): RootCauseResult | null {
     const group = this.groups.get(groupId);
     if (!group) return null;
@@ -357,7 +375,10 @@ export class AlarmCorrelationEngine extends EventEmitter {
       suppressionRate:
         this.metrics.alarmsIngested === 0
           ? 0
-          : this.metrics.alarmsSuppressed / this.metrics.alarmsIngested,
+          : Math.min(
+            1,
+            this.metrics.alarmsSuppressed / this.metrics.alarmsIngested,
+          ),
       openGroups,
       trackedAlarms: this.alarmIndex.size,
     };
@@ -496,16 +517,21 @@ export class AlarmCorrelationEngine extends EventEmitter {
       return;
     }
     const floor = SEVERITY_RANK[this.suppressionPolicy.neverSuppressAtOrAbove];
+    const root = group.alarms.find(
+      (alarm) => alarm.id === group.rootCauseAlarmId,
+    );
 
     for (const alarm of group.alarms) {
       const isRoot = alarm.id === group.rootCauseAlarmId;
       const alreadySuppressed = group.suppressedAlarmIds.includes(alarm.id);
       const shouldSuppress =
         !isRoot
+        && !!root
+        && this.rules.areSitesCompatible(root, alarm, this.topology)
         && (alarm.state === 'active' || alarm.state === 'suppressed')
         && SEVERITY_RANK[alarm.severity] < floor;
 
-      if (alreadySuppressed && !shouldSuppress) {
+      if (!shouldSuppress && alarm.state === 'suppressed') {
         this.restoreSuppressedAlarm(group, alarm);
         continue;
       }
@@ -513,7 +539,10 @@ export class AlarmCorrelationEngine extends EventEmitter {
       if (!alreadySuppressed && shouldSuppress) {
         group.suppressedAlarmIds.push(alarm.id);
         alarm.state = 'suppressed';
-        this.metrics.alarmsSuppressed++;
+        if (!this.everSuppressedAlarmIds.has(alarm.id)) {
+          this.everSuppressedAlarmIds.add(alarm.id);
+          this.metrics.alarmsSuppressed++;
+        }
         this.emit('alarm-suppressed', {
           groupId: group.id,
           alarmId: alarm.id,
@@ -525,11 +554,10 @@ export class AlarmCorrelationEngine extends EventEmitter {
 
   private unsuppressActiveMembers(group: AlarmGroup): string[] {
     const restored: string[] = [];
-    for (const alarmId of [...group.suppressedAlarmIds]) {
-      const alarm = group.alarms.find((a) => a.id === alarmId);
-      if (alarm && alarm.state === 'suppressed') {
+    for (const alarm of group.alarms) {
+      if (alarm.state === 'suppressed') {
         alarm.state = 'active';
-        restored.push(alarmId);
+        restored.push(alarm.id);
         this.metrics.alarmsUnsuppressed++;
       }
     }

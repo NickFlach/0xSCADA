@@ -409,6 +409,134 @@ describe('AlarmCorrelationEngine', () => {
     expect(engine.getGroups()).toHaveLength(0);
   });
 
+  it('derives site boundaries from topology and fails closed on conflicts', () => {
+    const crossSiteTopology = new EquipmentTopology();
+    crossSiteTopology.upsertMany([
+      {
+        equipmentId: 'A',
+        siteId: 'site-a',
+        causalDownstream: ['B'],
+      },
+      {
+        equipmentId: 'B',
+        siteId: 'site-b',
+        causalDownstream: [],
+      },
+    ]);
+
+    for (const [description, firstSite, secondSite] of [
+      ['omitted', undefined, undefined],
+      ['conflicting', 'site-a', 'site-a'],
+    ] as const) {
+      const engine = new AlarmCorrelationEngine({
+        topology: crossSiteTopology,
+        suppressionPolicy: { enabled: true },
+      });
+      engine.ingest(alarm({
+        id: `${description}-a`,
+        equipmentId: 'A',
+        tagId: 'A.TRIP',
+        siteId: firstSite,
+        timestamp: 1000,
+        severity: 'high',
+      }));
+      const second = engine.ingest(alarm({
+        id: `${description}-b`,
+        equipmentId: 'B',
+        tagId: 'B.TRIP',
+        siteId: secondSite,
+        timestamp: 1100,
+        severity: 'medium',
+      }));
+
+      expect(second.action, description).toBe('standalone');
+      expect(engine.getGroups(), description).toHaveLength(0);
+      expect(engine.getMetrics().alarmsSuppressed, description).toBe(0);
+    }
+
+    const sameSiteTopology = new EquipmentTopology();
+    sameSiteTopology.upsertMany([
+      {
+        equipmentId: 'A',
+        siteId: 'site-a',
+        causalDownstream: ['B'],
+      },
+      {
+        equipmentId: 'B',
+        siteId: 'site-a',
+        causalDownstream: [],
+      },
+    ]);
+    const sameSite = new AlarmCorrelationEngine({
+      topology: sameSiteTopology,
+      suppressionPolicy: { enabled: true },
+    });
+    sameSite.ingest(alarm({
+      id: 'same-a',
+      equipmentId: 'A',
+      tagId: 'A.TRIP',
+      timestamp: 1000,
+      severity: 'high',
+    }));
+    expect(sameSite.ingest(alarm({
+      id: 'same-b',
+      equipmentId: 'B',
+      tagId: 'B.TRIP',
+      timestamp: 1100,
+      severity: 'medium',
+    }))).toMatchObject({
+      action: 'formed-group',
+      suppressed: true,
+    });
+  });
+
+  it('restores suppression when topology later reveals a cross-site group', () => {
+    const topology = new EquipmentTopology();
+    topology.upsertMany([
+      { equipmentId: 'A', causalDownstream: ['B'] },
+      { equipmentId: 'B', causalDownstream: [] },
+    ]);
+    const engine = new AlarmCorrelationEngine({
+      topology,
+      suppressionPolicy: { enabled: true },
+    });
+    engine.ingest(alarm({
+      id: 'root',
+      equipmentId: 'A',
+      tagId: 'A.TRIP',
+      timestamp: 1000,
+      severity: 'high',
+    }));
+    engine.ingest(alarm({
+      id: 'member',
+      equipmentId: 'B',
+      tagId: 'B.TRIP',
+      timestamp: 1100,
+      severity: 'medium',
+    }));
+    const group = engine.getGroups()[0];
+    expect(group.suppressedAlarmIds).toEqual(['member']);
+
+    topology.upsertMany([
+      { equipmentId: 'A', siteId: 'site-a', causalDownstream: ['B'] },
+      { equipmentId: 'B', siteId: 'site-b', causalDownstream: ['C'] },
+      { equipmentId: 'C', siteId: 'site-b', causalDownstream: [] },
+    ]);
+    engine.setSuppressionPolicy({ enabled: true });
+
+    expect(group.suppressedAlarmIds).toEqual([]);
+    expect(group.alarms.find((candidate) => candidate.id === 'member')?.state)
+      .toBe('active');
+    expect(engine.ingest(alarm({
+      id: 'site-b-candidate',
+      equipmentId: 'C',
+      tagId: 'C.TRIP',
+      timestamp: 1200,
+      severity: 'medium',
+    })).action).toBe('standalone');
+    expect(group.alarmIds).toEqual(['root', 'member']);
+  });
+
   it('suppresses downstream alarms but never critical ones', () => {
     const engine = new AlarmCorrelationEngine({
       topology: plantTopology(),
@@ -599,6 +727,52 @@ describe('AlarmCorrelationEngine', () => {
     expect(group.suppressedAlarmIds).toEqual([]);
   });
 
+  it('canonicalizes caller-suppressed raises and defensively restores closed groups', () => {
+    const idle = new AlarmCorrelationEngine({
+      groupCloseAfterMs: 1000,
+      clock: () => 0,
+    });
+    idle.ingest(alarm({
+      id: 'caller-root',
+      tagId: 'CALLER.ALARM',
+      state: 'suppressed',
+      timestamp: 1000,
+    }));
+    idle.ingest(alarm({
+      id: 'caller-member',
+      tagId: 'CALLER.ALARM',
+      timestamp: 1100,
+    }));
+    const idleGroup = idle.getGroups()[0];
+    expect(idleGroup.alarms.find((candidate) => candidate.id === 'caller-root')?.state)
+      .toBe('active');
+    expect(idleGroup.suppressedAlarmIds).toEqual([]);
+
+    // Simulate legacy/untrusted state that predates canonical ingestion.
+    idleGroup.alarms[1].state = 'suppressed';
+    idleGroup.suppressedAlarmIds = [];
+    idle.sweep(10_000);
+    expect(idleGroup.state).toBe('closed');
+    expect(idleGroup.alarms[1].state).toBe('active');
+    expect(idleGroup.suppressedAlarmIds).toEqual([]);
+
+    const capped = new AlarmCorrelationEngine({
+      maxGroups: 1,
+      suppressionPolicy: { enabled: false },
+    });
+    capped.ingest(alarm({ id: 'old-a', tagId: 'OLD.ALARM', timestamp: 1000 }));
+    capped.ingest(alarm({ id: 'old-b', tagId: 'OLD.ALARM', timestamp: 1100 }));
+    const evictedGroup = capped.getGroups()[0];
+    evictedGroup.alarms[1].state = 'suppressed';
+    evictedGroup.suppressedAlarmIds = [];
+
+    capped.ingest(alarm({ id: 'new-a', tagId: 'NEW.ALARM', timestamp: 100_000 }));
+    capped.ingest(alarm({ id: 'new-b', tagId: 'NEW.ALARM', timestamp: 100_100 }));
+    expect(evictedGroup.closeReason).toBe('evicted');
+    expect(evictedGroup.alarms[1].state).toBe('active');
+    expect(evictedGroup.suppressedAlarmIds).toEqual([]);
+  });
+
   it('caps group membership to bound alarm-storm root-election work', () => {
     const engine = new AlarmCorrelationEngine({
       maxAlarmsPerGroup: 3,
@@ -714,6 +888,36 @@ describe('AlarmCorrelationEngine', () => {
     expect(metrics.alarmsSuppressed).toBe(2);
     expect(metrics.suppressionRate).toBeCloseTo(2 / 3);
   });
+
+  it('counts unique suppressed alarms so repeated policy toggles stay bounded', () => {
+    const engine = new AlarmCorrelationEngine({
+      suppressionPolicy: { enabled: true },
+    });
+    engine.ingest(alarm({
+      id: 'root',
+      tagId: 'BOUNDED.ALARM',
+      timestamp: 0,
+      severity: 'high',
+    }));
+    engine.ingest(alarm({
+      id: 'member',
+      tagId: 'BOUNDED.ALARM',
+      timestamp: 100,
+      severity: 'medium',
+    }));
+
+    for (let index = 0; index < 5; index++) {
+      engine.setSuppressionPolicy({ enabled: false });
+      engine.setSuppressionPolicy({ enabled: true });
+    }
+
+    const metrics = engine.getMetrics();
+    expect(metrics.alarmsIngested).toBe(2);
+    expect(metrics.alarmsSuppressed).toBe(1);
+    expect(metrics.suppressionRate).toBe(0.5);
+    expect(metrics.suppressionRate).toBeGreaterThanOrEqual(0);
+    expect(metrics.suppressionRate).toBeLessThanOrEqual(1);
+  });
 });
 
 // ── Normalization & service ───────────────────────────────────────────────
@@ -777,6 +981,20 @@ describe('normalizeAlarm', () => {
       timestamp: 1,
       state: 'mystery',
     })).toBeNull();
+    expect(normalizeAlarm({
+      id: 'date-overflow',
+      tagId: 'T.1',
+      timestamp: -1e300,
+    })).toBeNull();
+  });
+
+  it('normalizes caller-supplied suppression back to a new active raise', () => {
+    expect(normalizeAlarm({
+      id: 'caller-suppressed',
+      tagId: 'T.1',
+      timestamp: 1,
+      state: 'suppressed',
+    })?.state).toBe('active');
   });
 
   it('resolves equipment from the ASSET.EVENT tag convention', () => {
@@ -820,5 +1038,29 @@ describe('AlarmCorrelationService', () => {
     expect((await service.healthCheck()).healthy).toBe(true);
     await service.shutdown();
     expect((await service.healthCheck()).healthy).toBe(false);
+  });
+
+  it('rejects Date-invalid timestamps before mutation and permits a valid retry', () => {
+    const service = new AlarmCorrelationService();
+    expect(service.ingest({
+      id: 'retry-after-invalid-date',
+      tagId: 'DATE.ALARM',
+      timestamp: -1e300,
+    })).toBeNull();
+    expect(service.engine.getMetrics()).toMatchObject({
+      alarmsIngested: 0,
+      trackedAlarms: 0,
+    });
+
+    const retry = service.ingest({
+      id: 'retry-after-invalid-date',
+      tagId: 'DATE.ALARM',
+      timestamp: 1000,
+    });
+    expect(retry?.result.action).toBe('standalone');
+    expect(service.engine.getMetrics()).toMatchObject({
+      alarmsIngested: 1,
+      trackedAlarms: 1,
+    });
   });
 });

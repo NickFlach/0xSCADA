@@ -14,7 +14,10 @@ import {
   controlPlanePrincipal,
   requireControlPlaneAccess,
 } from "../middleware/control-plane-auth";
-import { alarmCorrelationService } from "../services/alarm-correlation";
+import {
+  alarmCorrelationService,
+  normalizeAlarmTimestamp,
+} from "../services/alarm-correlation";
 import { validateRule } from "../services/alarm-correlation/rules";
 import type { CorrelationRule } from "@shared/types/alarm-correlation";
 
@@ -56,13 +59,17 @@ const AlarmInputSchema = z
     equipmentId: z.string().max(256).optional(),
     siteId: z.string().max(64).optional(),
     processArea: z.string().max(256).optional(),
-    severity: SeveritySchema.optional(),
+    severity: SeveritySchema,
     state: z.literal("active").optional(),
     message: z.string().max(2048).optional(),
-    timestamp: z.union([
-      z.number().finite(),
-      z.string().min(1).max(64),
-    ]),
+    timestamp: z
+      .union([
+        z.number().finite(),
+        z.string().min(1).max(64),
+      ])
+      .refine((timestamp) => normalizeAlarmTimestamp(timestamp) !== null, {
+        message: "timestamp must be within the JavaScript Date range",
+      }),
     value: BoundedValueSchema.optional(),
     limit: BoundedValueSchema.optional(),
   })
@@ -144,9 +151,7 @@ const GroupQuerySchema = z.object({
 }).strict();
 
 function parseTimestamp(timestamp: string | number): number | null {
-  if (typeof timestamp === "number") return timestamp;
-  const parsed = Date.parse(timestamp);
-  return Number.isFinite(parsed) ? parsed : null;
+  return normalizeAlarmTimestamp(timestamp);
 }
 
 // ── Alarm ingestion & lifecycle ────────────────────────────────────────────
@@ -215,7 +220,10 @@ router.post(
     if (!ok) {
       return res.status(404).json({ error: `Alarm ${req.params.alarmId} not tracked` });
     }
-    res.json({ acknowledged: true, acknowledgedBy: principal.name });
+    res.json({
+      acknowledged: true,
+      acknowledgedBy: engine.getAlarm(req.params.alarmId)?.acknowledgedBy,
+    });
   },
 );
 
