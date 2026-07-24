@@ -39,3 +39,4 @@ coverage/
 
 # HSM software-signer key material (never commit)
 .keys/
+.secrets/

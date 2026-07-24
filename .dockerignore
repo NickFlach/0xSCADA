@@ -3,6 +3,7 @@ npm-debug.log
 .npm
 .env
 .env.local
+.secrets
 .git
 .gitignore
 README.md

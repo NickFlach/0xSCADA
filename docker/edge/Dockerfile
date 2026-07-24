@@ -57,6 +57,7 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 
 # Default environment
 ENV NODE_ENV=production \
+    ENABLE_API_KEYS=true \
     PORT=5000 \
     LOG_LEVEL=warn \
     GATEWAY_MODE=edge

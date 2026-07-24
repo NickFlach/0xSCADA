@@ -32,12 +32,20 @@ spec:
               value: "{{ .Values.server.replicaCount }}"
             - name: ENABLE_API_KEYS
               value: {{ .Values.server.apiKeys.enableGlobalAuth | quote }}
+            {{- if .Values.server.apiKeys.enableGlobalAuth }}
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "server.apiKeys.existingSecret is required when API-key authentication is enabled" .Values.server.apiKeys.existingSecret | quote }}
+                  key: {{ $.Values.server.apiKeys.secretKey | quote }}
+            {{- else }}
             {{- with .Values.server.apiKeys.existingSecret }}
             - name: API_KEYS
               valueFrom:
                 secretKeyRef:
                   name: {{ . | quote }}
                   key: {{ $.Values.server.apiKeys.secretKey | quote }}
+            {{- end }}
             {{- end }}
           resources:
             {{- toYaml .Values.server.resources | nindent 12 }}

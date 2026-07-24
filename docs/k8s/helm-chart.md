@@ -38,7 +38,7 @@ helm upgrade oxscada ./helm/oxscada -n oxscada
 | `server.replicaCount` | 2 | Server replicas |
 | `server.apiKeys.existingSecret` | `""` | Existing Secret containing `API_KEYS` |
 | `server.apiKeys.secretKey` | `API_KEYS` | Key within the existing Secret |
-| `server.apiKeys.enableGlobalAuth` | `false` | Require keys on all non-public API routes |
+| `server.apiKeys.enableGlobalAuth` | `true` | Require keys on all non-public API routes |
 | `ingress.enabled` | true | Enable ingress |
 | `ingress.host` | oxscada.example.com | Hostname |
 | `blockchain.enabled` | true | Deploy validators |

@@ -2,12 +2,23 @@ import express, { type Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "http";
-import { securityHeaders, rateLimit } from "./middleware/security";
+import { securityHeaders } from "./middleware/security";
 import { log, logError } from "./logger";
 import { healthRouter, healthManager } from "./health";
 import { registerSwaggerRoutes } from "./openapi";
-import { setupApiGateway } from "./middleware/api-gateway";
+import { apiKeyAuthEnabled, setupApiGateway } from "./middleware/api-gateway";
+import { requestLoggingMiddleware } from "./middleware/request-logging";
 import { initializeDatabase } from "./storage";
+// Stateful startup services must stay in the static graph. On Node 20, tsx can
+// give import() a separate module instance from static consumers (#541).
+import { fieldSimulator } from "./simulator";
+import { initializeDefaultAgents, startDefaultAgents } from "./agents";
+import { storeAndForwardService } from "./gateway/store-and-forward";
+import { initializeBridges } from "./bridge";
+import { gatewayManager } from "./gateway";
+import { startFluxIntegration } from "./services/flux";
+import { natsPublisher } from "./services/nats";
+import { logAnchorBackendBootState } from "./bridge/anchor-backend";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -15,14 +26,9 @@ export { log } from "./logger";
 const app = express();
 const httpServer = createServer(app);
 
-// Apply security headers and rate limiting
+// Apply security headers. API rate limiting is installed by setupApiGateway
+// after body parsing so one gateway owns authentication and quota state.
 app.use(securityHeaders);
-app.use("/api/", rateLimit({ windowMs: 60_000, maxRequests: 100 }));
-
-// Health/readiness probes — mounted before auth so k8s probes work
-// unauthenticated. Mounted under /api to match the public-route allowlist
-// (/api/health, /api/healthz, /api/readyz).
-app.use('/api', healthRouter);
 
 // API Gateway middleware (#256) — sets up rate limiting, API key auth, CORS, request IDs
 const gatewayRateLimit = {
@@ -31,13 +37,10 @@ const gatewayRateLimit = {
 };
 const gatewayConfig = {
   rateLimit: gatewayRateLimit,
-  enableApiKeyAuth: process.env.ENABLE_API_KEYS === 'true',
+  enableApiKeyAuth: apiKeyAuthEnabled(),
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz', '/api/docs'],
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(','),
 };
-
-// Wire OpenAPI docs to gateway config so Swagger UI reflects live settings
-registerSwaggerRoutes(app, gatewayConfig);
 
 declare module "http" {
   interface IncomingMessage {
@@ -55,31 +58,19 @@ app.use(
 
 app.use(express.urlencoded({ extended: false }));
 
-app.use((req, res, next) => {
-  const start = Date.now();
-  const path = req.path;
-  let capturedJsonResponse: Record<string, any> | undefined = undefined;
+// Install response capture before the gateway's own routes so one-time
+// credentials can be returned while being explicitly redacted from logs.
+app.use(requestLoggingMiddleware());
 
-  const originalResJson = res.json;
-  res.json = function (bodyJson, ...args) {
-    capturedJsonResponse = bodyJson;
-    return originalResJson.apply(res, [bodyJson, ...args]);
-  };
+// Activate the configured gateway after parsing so its payload guard can
+// inspect request bodies.
+const apiKeyManager = setupApiGateway(app, gatewayConfig);
 
-  res.on("finish", () => {
-    const duration = Date.now() - start;
-    if (path.startsWith("/api")) {
-      let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
-      log(logLine);
-    }
-  });
-
-  next();
-});
+// Register every /api route behind the gateway pipeline. The exact probe/docs
+// allowlist skips authentication only; those routes still receive request IDs,
+// CORS, logging, and rate limiting. /api/metrics is intentionally not public.
+app.use('/api', healthRouter);
+registerSwaggerRoutes(app, gatewayConfig);
 
 (async () => {
   // Initialize the database first — downstream services and health checks
@@ -87,27 +78,21 @@ app.use((req, res, next) => {
   await initializeDatabase();
   log("Database initialized");
 
-  const { fieldSimulator } = await import("./simulator");
   await fieldSimulator.initialize();
   
-  const { initializeDefaultAgents, startDefaultAgents } = await import("./agents");
   await initializeDefaultAgents();
   await startDefaultAgents();
   
   // Initialize edge store-and-forward service
-  const { storeAndForwardService } = await import("./gateway/store-and-forward");
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");
 
   // Initialize bridge modules (event-anchor, state-sync)
-  const { initializeBridges } = await import("./bridge");
   await initializeBridges();
   log("Bridge modules (event-anchor, state-sync) initialized");
 
   // Initialize demo gateway in development mode
   if (process.env.NODE_ENV === "development") {
-    const { gatewayManager } = await import("./gateway");
-    
     // Create demo DNP3 TCP driver
     gatewayManager.addDriver({
       id: "demo-dnp3-tcp",
@@ -150,7 +135,12 @@ app.use((req, res, next) => {
     log("Initialized demo gateway drivers for development mode");
   }
   
-  await registerRoutes(httpServer, app);
+  await registerRoutes(httpServer, app, {
+    websocketAuth: {
+      required: gatewayConfig.enableApiKeyAuth,
+      apiKeys: apiKeyManager.getKeysMap(),
+    },
+  });
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
@@ -185,11 +175,9 @@ app.use((req, res, next) => {
     async () => {
       log(`serving on port ${port}`);
       
-      const { fieldSimulator } = await import("./simulator");
       fieldSimulator.start();
 
       // Start Flux state engine integration (ADR-0015, Issue #260)
-      const { startFluxIntegration } = await import("./services/flux");
       startFluxIntegration();
 
       // Start MQTT Sparkplug B bridge (Issue #463) — no-op unless
@@ -202,12 +190,10 @@ app.use((req, res, next) => {
       }
 
       // Connect to NATS for SCADA event publishing
-      const { natsPublisher } = await import("./services/nats");
       await natsPublisher.connect();
 
       // Record the boot-resolved anchor routing: runtime switches (#455) are
       // process-local, so a restart reverts to env and this makes that visible.
-      const { logAnchorBackendBootState } = await import("./bridge/anchor-backend");
       logAnchorBackendBootState();
 
       // Start periodic health monitoring (every 30 s)
