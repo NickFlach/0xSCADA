@@ -60,6 +60,24 @@ export class TagStreamServer {
     socket: Duplex,
     head: Buffer,
   ) => void;
+  private updateListeners: Array<(update: TagUpdate) => void> = [];
+
+  /**
+   * Register a server-side listener for every tag update flowing through the
+   * stream (e.g. predictive maintenance ingestion). Listener errors are
+   * swallowed so a consumer can never break broadcasting.
+   */
+  onTagUpdate(listener: (update: TagUpdate) => void): void {
+    this.updateListeners.push(listener);
+  }
+
+  private notifyListeners(update: TagUpdate): void {
+    for (const listener of this.updateListeners) {
+      try {
+        listener(update);
+      } catch { /* consumer error — never disrupt broadcasting */ }
+    }
+  }
 
   initialize(
     httpServer: HttpServer,
@@ -144,6 +162,7 @@ export class TagStreamServer {
   broadcastTagUpdate(update: TagUpdate): void {
     this.latestValues.set(update.tagName, update);
     this.totalUpdates++;
+    this.notifyListeners(update);
 
     const message = JSON.stringify({ event: "tag:update", payload: update });
 
@@ -199,6 +218,7 @@ export class TagStreamServer {
   broadcastBatch(updates: TagUpdate[]): void {
     for (const u of updates) {
       this.latestValues.set(u.tagName, u);
+      this.notifyListeners(u);
     }
     this.totalUpdates += updates.length;
 

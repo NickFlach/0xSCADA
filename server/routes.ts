@@ -20,6 +20,8 @@ import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
 import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
 import { alarmCorrelationService } from "./services/alarm-correlation";
+import { predictiveRoutes } from "./routes/predictive";
+import { predictiveMaintenanceService } from "./services/predictive";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -63,6 +65,7 @@ export async function registerRoutes(
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
   app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
+  app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -98,6 +101,33 @@ export async function registerRoutes(
   tagStreamServer.initialize(httpServer, "/ws/tags", websocketAuth);
   unifiedStreamServer.initialize(httpServer, "/ws", websocketAuth); // unified endpoint (#255)
   cachedEventBridge.initializeLocalAlarmFanout();
+
+  // Feed live tag updates into the predictive maintenance engine (#212)
+  tagStreamServer.onTagUpdate((update) =>
+    predictiveMaintenanceService.ingestTagUpdate(update)
+  );
+
+  // Start the periodic predictive analysis sweep here —
+  // services/initializeServices() has no callers at startup.
+  void predictiveMaintenanceService.initialize();
+
+  // Surface predictive alerts on the alarm WebSocket channel so they reach
+  // operators, not just the REST API.
+  predictiveMaintenanceService.on("alert", (alert) => {
+    void cachedEventBridge.publishAlarm({
+      id: alert.id,
+      name: `Predictive: ${alert.tagId}`,
+      tagId: alert.tagId,
+      severity: alert.severity,
+      state: "active",
+      message: alert.message,
+      tagValue: undefined,
+      triggeredAt: new Date(alert.timestamp).toISOString(),
+      timestamp: new Date(alert.timestamp).toISOString(),
+      source: "predictive-maintenance",
+      recommendation: alert.recommendation,
+    }).catch(() => { /* alarm fan-out failure must not break alerting */ });
+  });
 
   // Start alarm-correlation idle-group sweeps (#213). Registered here rather
   // than in services/initializeServices(), which no startup path invokes.

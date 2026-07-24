@@ -68,6 +68,24 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
       + "Route-local guards enforce the exact per-action scope.",
   },
   {
+    id: "predictive-alert-acknowledgement",
+    pathPrefix: "/api/predictive/alerts",
+    scopes: Object.freeze(["predictive.acknowledge"]),
+    description: "Acknowledge a predictive-maintenance alert.",
+  },
+  {
+    id: "predictive-threshold-control",
+    pathPrefix: "/api/predictive/thresholds",
+    scopes: Object.freeze(["predictive.configure"]),
+    description: "Change predictive-maintenance detector thresholds.",
+  },
+  {
+    id: "predictive-ingestion",
+    pathPrefix: "/api/predictive/ingest",
+    scopes: Object.freeze(["predictive.ingest"]),
+    description: "Ingest predictive-maintenance telemetry.",
+  },
+  {
     id: "alarm-control",
     pathPrefix: "/api/alarms",
     scopes: Object.freeze(["alarms.write"]),
