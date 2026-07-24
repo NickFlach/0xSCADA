@@ -28,10 +28,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
@@ -111,7 +111,7 @@ jobs:
 
       - name: Assign issue and add labels
         if: steps.validate.outputs.valid == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Add claimed label
@@ -151,7 +151,7 @@ jobs:
 
       - name: Post error message
         if: steps.validate.outputs.valid == 'false'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             await github.rest.issues.createComment({
@@ -178,16 +178,16 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
       - name: Extract bounty issue from PR
         id: extract
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const prBody = context.payload.pull_request.body || '';
@@ -257,7 +257,7 @@ jobs:
 
       - name: Post payment confirmation
         if: steps.extract.outputs.has_bounty == 'true'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const issueNumber = ${{ steps.extract.outputs.issue_number }};
@@ -341,15 +341,15 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
 
       - name: Find expired claims
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             // Find all issues with bounty:claimed label
