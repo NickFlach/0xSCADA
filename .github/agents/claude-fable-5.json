@@ -1,0 +1,24 @@
+{
+  "name": "claude-fable-5",
+  "model": "claude-fable-5",
+  "version": "5",
+  "provider": "Anthropic",
+  "capabilities": [
+    "code-generation",
+    "testing",
+    "documentation",
+    "debugging",
+    "adversarial-review"
+  ],
+  "specializations": [
+    "TypeScript",
+    "industrial-control",
+    "statistical-anomaly-detection",
+    "multi-agent-orchestration"
+  ],
+  "attribution": "City-Agent: claude-fable-5",
+  "completedWork": [
+    "ADR-0013 modules 13.1-13.6 (upstream PRs #493/#497/#498/#499/#501/#502; 13.1-13.3 landed as #547/#576/#551)",
+    "Agent contributor onboarding (flaukowski/0xSCADA#1)"
+  ]
+}
