@@ -31,6 +31,24 @@ const records: ApiKeyRecord[] = [
     createdAt: new Date(),
   },
   {
+    key: "predictive-ingest-key",
+    name: "predictive-ingester",
+    scopes: ["predictive.ingest"],
+    createdAt: new Date(),
+  },
+  {
+    key: "predictive-configure-key",
+    name: "predictive-configurer",
+    scopes: ["predictive.configure"],
+    createdAt: new Date(),
+  },
+  {
+    key: "predictive-ack-key",
+    name: "predictive-operator",
+    scopes: ["predictive.acknowledge"],
+    createdAt: new Date(),
+  },
+  {
     key: "tuning-write-key",
     name: "tuning-writer",
     scopes: ["tuning.write"],
@@ -66,6 +84,15 @@ async function startApp(logs: string[] = []): Promise<string> {
   );
   app.post("/api/alarm-correlation/alarms", (_req, res) =>
     res.status(201).json({ ingested: true })
+  );
+  app.post("/api/predictive/ingest", (_req, res) =>
+    res.status(201).json({ ingested: true })
+  );
+  app.put("/api/predictive/thresholds/tag-1", (_req, res) =>
+    res.status(200).json({ configured: true })
+  );
+  app.post("/api/predictive/alerts/alert-1/acknowledge", (_req, res) =>
+    res.status(200).json({ acknowledged: true })
   );
   app.post("/api/tuning/loops/loop-1/tune/relay", (_req, res) =>
     res.status(201).json({ proposed: true })
@@ -120,6 +147,9 @@ describe("control route policy inventory", () => {
         "tuning-control",
         "alarm-control",
         "alarm-correlation-control",
+        "predictive-alert-acknowledgement",
+        "predictive-threshold-control",
+        "predictive-ingestion",
         "geometry-control",
       ]),
     );
@@ -140,6 +170,20 @@ describe("control route policy inventory", () => {
       "alarms.clear",
       "alarms.configure",
     ]);
+  });
+
+  it("maps predictive mutations to their exact action scopes", () => {
+    expect(mutationPolicyFor("POST", "/api/predictive/ingest")?.scopes)
+      .toEqual(["predictive.ingest"]);
+    expect(
+      mutationPolicyFor("PUT", "/api/predictive/thresholds/tag-1")?.scopes,
+    ).toEqual(["predictive.configure"]);
+    expect(
+      mutationPolicyFor(
+        "POST",
+        "/api/predictive/alerts/alert-1/acknowledge",
+      )?.scopes,
+    ).toEqual(["predictive.acknowledge"]);
   });
 });
 
@@ -208,6 +252,43 @@ describe("mutating REST authorization", () => {
     expect((await fetch(`${baseUrl}${path}`, {
       method: "POST",
       headers: { "X-API-Key": "write-key" },
+    })).status).toBe(403);
+  });
+
+  it("enforces exact predictive action scopes at the central gateway floor", async () => {
+    const baseUrl = await startApp();
+    const cases = [
+      {
+        method: "POST",
+        path: "/api/predictive/ingest",
+        key: "predictive-ingest-key",
+      },
+      {
+        method: "PUT",
+        path: "/api/predictive/thresholds/tag-1",
+        key: "predictive-configure-key",
+      },
+      {
+        method: "POST",
+        path: "/api/predictive/alerts/alert-1/acknowledge",
+        key: "predictive-ack-key",
+      },
+    ];
+
+    for (const testCase of cases) {
+      expect((await fetch(`${baseUrl}${testCase.path}`, {
+        method: testCase.method,
+        headers: { "X-API-Key": testCase.key },
+      })).status).toBeLessThan(300);
+      expect((await fetch(`${baseUrl}${testCase.path}`, {
+        method: testCase.method,
+        headers: { "X-API-Key": "write-key" },
+      })).status).toBe(403);
+    }
+
+    expect((await fetch(`${baseUrl}/api/predictive/thresholds/tag-1`, {
+      method: "PUT",
+      headers: { "X-API-Key": "predictive-ingest-key" },
     })).status).toBe(403);
   });
 

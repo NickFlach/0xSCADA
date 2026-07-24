@@ -114,7 +114,7 @@ export async function registerRoutes(
   // Surface predictive alerts on the alarm WebSocket channel so they reach
   // operators, not just the REST API.
   predictiveMaintenanceService.on("alert", (alert) => {
-    cachedEventBridge.publishAlarm({
+    void cachedEventBridge.publishAlarm({
       id: alert.id,
       name: `Predictive: ${alert.tagId}`,
       tagId: alert.tagId,
@@ -126,7 +126,7 @@ export async function registerRoutes(
       timestamp: new Date(alert.timestamp).toISOString(),
       source: "predictive-maintenance",
       recommendation: alert.recommendation,
-    });
+    }).catch(() => { /* alarm fan-out failure must not break alerting */ });
   });
 
   // Start alarm-correlation idle-group sweeps (#213). Registered here rather

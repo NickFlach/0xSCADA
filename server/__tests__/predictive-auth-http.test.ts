@@ -3,6 +3,10 @@ import express from "express";
 import { createServer, type Server } from "node:http";
 
 import { _resetControlPlaneAuthCache } from "../middleware/control-plane-auth";
+import {
+  setupApiGateway,
+  type ApiKeyRecord,
+} from "../middleware/api-gateway";
 import { predictiveRoutes } from "../routes/predictive";
 
 interface TestServer {
@@ -73,6 +77,51 @@ const mutationRoutes: RouteCase[] = [
 function startServer(): Promise<TestServer> {
   const app = express();
   app.use(express.json());
+  const records: ApiKeyRecord[] = [
+    {
+      key: "read-key",
+      name: "predictive-reader",
+      scopes: ["predictive.read"],
+      createdAt: new Date(),
+    },
+    {
+      key: "recommend-key",
+      name: "predictive-recommender",
+      scopes: ["predictive.recommend"],
+      createdAt: new Date(),
+    },
+    {
+      key: "ingest-key",
+      name: "predictive-ingester",
+      scopes: ["predictive.ingest"],
+      createdAt: new Date(),
+    },
+    {
+      key: "configure-key",
+      name: "predictive-configurer",
+      scopes: ["predictive.configure"],
+      createdAt: new Date(),
+    },
+    {
+      key: "acknowledge-key",
+      name: "predictive-operator",
+      scopes: ["predictive.acknowledge"],
+      createdAt: new Date(),
+    },
+    {
+      key: "other-key",
+      name: "under-scoped-client",
+      scopes: ["other.read"],
+      createdAt: new Date(),
+    },
+  ];
+  setupApiGateway(app, {
+    enableApiKeyAuth: true,
+    apiKeys: new Map(records.map((record) => [record.key, record])),
+    publicRoutes: [],
+    rateLimit: { windowMs: 60_000, maxRequests: 1_000 },
+    corsOrigins: [],
+  });
   app.use("/api/predictive", predictiveRoutes);
   return new Promise((resolve) => {
     const server = createServer(app);
