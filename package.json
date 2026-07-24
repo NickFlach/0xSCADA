@@ -6,6 +6,7 @@
   "scripts": {
     "build": "tsc",
     "build:gateway": "esbuild gateway/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/gateway/index.cjs",
+    "build:validator": "esbuild docker/validator/hardhat.config.ts --bundle --platform=node --target=node22 --format=esm --packages=external --outfile=dist/validator/hardhat.config.mjs",
     "dev": "NODE_ENV=development tsx server/index.ts",
     "dev:setup": "npm run dev:db && npm run dev",
     "dev:db": "echo 'Setting up development database...' && node -e \"console.log('Database will be created automatically on first run')\"",
