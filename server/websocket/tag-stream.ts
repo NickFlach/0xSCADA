@@ -54,7 +54,13 @@ export class TagStreamServer {
   private totalUpdates = 0;
   private startTime = Date.now();
   private pingInterval?: ReturnType<typeof setInterval>;
-  private updateListeners = new Set<(update: TagUpdate) => void>();
+  private httpServer?: HttpServer;
+  private upgradeHandler?: (
+    request: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ) => void;
+  private updateListeners: Array<(update: TagUpdate) => void> = [];
 
   /**
    * Register a server-side listener for every tag update flowing through the
@@ -62,8 +68,11 @@ export class TagStreamServer {
    * swallowed so a consumer can never break broadcasting.
    */
   onTagUpdate(listener: (update: TagUpdate) => void): () => void {
-    this.updateListeners.add(listener);
-    return () => this.updateListeners.delete(listener);
+    this.updateListeners.push(listener);
+    return () => {
+      const index = this.updateListeners.indexOf(listener);
+      if (index >= 0) this.updateListeners.splice(index, 1);
+    };
   }
 
   private notifyListeners(update: TagUpdate): void {
@@ -73,12 +82,6 @@ export class TagStreamServer {
       } catch { /* consumer error — never disrupt broadcasting */ }
     }
   }
-  private httpServer?: HttpServer;
-  private upgradeHandler?: (
-    request: IncomingMessage,
-    socket: Duplex,
-    head: Buffer,
-  ) => void;
 
   initialize(
     httpServer: HttpServer,
@@ -293,8 +296,8 @@ export class TagStreamServer {
       client.ws.close(1000);
     }
     this.clients.clear();
+    this.updateListeners.length = 0;
     this.wss?.close();
-    this.updateListeners.clear();
     this.httpServer = undefined;
     this.upgradeHandler = undefined;
   }
