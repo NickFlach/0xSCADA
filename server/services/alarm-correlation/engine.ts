@@ -7,13 +7,14 @@
  * cause per group, and suppresses downstream/consequential alarms with
  * severity guards and un-suppression when the root cause clears.
  *
- * All correlation logic is event-time driven — wall-clock never enters
- * grouping decisions, so replayed/backfilled alarm streams correlate
- * identically. Wall-clock is only supplied externally to sweep() for
- * idle-group housekeeping.
+ * Correlation decisions use event time, and pending connected components are
+ * reconciled deterministically when they fit one bounded group. Components
+ * split by safety caps or already-open groups may retain arrival-order
+ * partitions. Wall clock is supplied only to sweep() for housekeeping.
  */
 
 import { EventEmitter } from 'events';
+import { randomUUID } from 'node:crypto';
 import type {
   AlarmGroup,
   AlarmSeverity,
@@ -39,7 +40,7 @@ const SEVERITY_RANK: Record<AlarmSeverity, number> = {
 const ROOT_ELECTION_TIME_BUCKET_MS = 100;
 
 export const DEFAULT_SUPPRESSION_POLICY: SuppressionPolicy = {
-  enabled: true,
+  enabled: false,
   neverSuppressAtOrAbove: 'critical',
   unsuppressOnRootClear: true,
 };
@@ -56,6 +57,10 @@ export interface CorrelationEngineOptions {
   maxGroups?: number;
   /** Ungrouped alarms retained as candidate peers for future groups */
   maxPendingAlarms?: number;
+  /** Hard cap on members in one group to bound root-election work */
+  maxAlarmsPerGroup?: number;
+  /** Processing-time clock used only for lifecycle housekeeping */
+  clock?: () => number;
 }
 
 export class AlarmCorrelationEngine extends EventEmitter {
@@ -67,13 +72,16 @@ export class AlarmCorrelationEngine extends EventEmitter {
   private readonly maxGroupSpanMs: number;
   private readonly maxGroups: number;
   private readonly maxPendingAlarms: number;
+  private readonly maxAlarmsPerGroup: number;
+  private readonly clock: () => number;
 
   private groups: Map<string, AlarmGroup> = new Map();
+  private groupLastTouchedAt: Map<string, number> = new Map();
   /** Ungrouped recent alarms — candidate peers for group formation */
   private pending: CorrelatedAlarm[] = [];
+  private pendingLastTouchedAt: Map<string, number> = new Map();
   /** alarmId → groupId, or null while standalone/pending */
   private alarmIndex: Map<string, string | null> = new Map();
-  private groupCounter = 0;
 
   private metrics = {
     alarmsIngested: 0,
@@ -92,6 +100,24 @@ export class AlarmCorrelationEngine extends EventEmitter {
     this.maxGroupSpanMs = options.maxGroupSpanMs ?? 30 * 60 * 1000;
     this.maxGroups = options.maxGroups ?? 1000;
     this.maxPendingAlarms = options.maxPendingAlarms ?? 2000;
+    this.maxAlarmsPerGroup = options.maxAlarmsPerGroup ?? 128;
+    this.clock = options.clock ?? Date.now;
+    if (options.suppressionPolicy?.unsuppressOnRootClear === false) {
+      throw new Error('unsuppressOnRootClear must remain enabled for fail-safe closure');
+    }
+    for (const [name, value] of [
+      ['groupCloseAfterMs', this.groupCloseAfterMs],
+      ['maxGroupSpanMs', this.maxGroupSpanMs],
+      ['maxGroups', this.maxGroups],
+      ['maxPendingAlarms', this.maxPendingAlarms],
+    ] as const) {
+      if (!Number.isSafeInteger(value) || value < 1) {
+        throw new Error(`${name} must be a positive integer`);
+      }
+    }
+    if (!Number.isSafeInteger(this.maxAlarmsPerGroup) || this.maxAlarmsPerGroup < 2) {
+      throw new Error('maxAlarmsPerGroup must be an integer of at least 2');
+    }
   }
 
   // ── Ingestion & correlation ──────────────────────────────────────────
@@ -102,7 +128,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
       const group = groupId ? this.groups.get(groupId) : undefined;
       return {
         alarmId: alarm.id,
-        action: group ? 'joined-group' : 'standalone',
+        action: 'duplicate',
         groupId,
         suppressed: group ? group.suppressedAlarmIds.includes(alarm.id) : false,
         isRootCause: group ? group.rootCauseAlarmId === alarm.id : false,
@@ -118,27 +144,37 @@ export class AlarmCorrelationEngine extends EventEmitter {
       .sort((a, b) => b.lastAlarmAt - a.lastAlarmAt);
 
     for (const group of openGroups) {
-      const earliest = group.alarms[0]?.timestamp ?? group.createdAt;
-      if (alarm.timestamp - earliest > this.maxGroupSpanMs) continue;
+      if (group.alarmIds.length >= this.maxAlarmsPerGroup) continue;
+      if (!this.withinGroupSpan(group, alarm.timestamp)) continue;
       const rule = this.rules.evaluateJoin(alarm, group, this.topology);
       if (rule) {
-        return this.joinGroup(alarm, group, rule);
+        const result = this.joinGroup(alarm, group, rule);
+        this.reconcilePending(group);
+        return this.refreshIngestResult(result, alarm, group);
       }
     }
 
     // 2. Try to form a new group with a pending (ungrouped) alarm
     for (let i = this.pending.length - 1; i >= 0; i--) {
       const peer = this.pending[i];
+      if (peer.state === 'cleared' || peer.state === 'shelved') continue;
+      if (Math.abs(alarm.timestamp - peer.timestamp) > this.maxGroupSpanMs) continue;
       const rule = this.rules.evaluatePair(alarm, peer, this.topology);
       if (rule) {
-        return this.formGroup(alarm, peer, rule);
+        const result = this.formGroup(alarm, peer, rule);
+        const group = this.groups.get(result.groupId!);
+        if (!group) return result;
+        this.reconcilePending(group);
+        return this.refreshIngestResult(result, alarm, group);
       }
     }
 
     // 3. Standalone — buffer as a candidate peer for future alarms
     this.pending.push(alarm);
+    this.pendingLastTouchedAt.set(alarm.id, this.clock());
     this.alarmIndex.set(alarm.id, null);
     this.prunePending(alarm.timestamp);
+    this.emit('alarm-updated', alarm);
     return {
       alarmId: alarm.id,
       action: 'standalone',
@@ -154,45 +190,94 @@ export class AlarmCorrelationEngine extends EventEmitter {
    * Mark an alarm cleared. Clearing a group's root cause closes the group
    * and (per policy) un-suppresses its remaining active members.
    */
-  alarmCleared(alarmId: string): { groupClosed?: string; unsuppressed: string[] } {
+  alarmCleared(
+    alarmId: string,
+    actor?: string,
+  ): {
+    cleared: boolean;
+    clearedBy?: string;
+    groupClosed?: string;
+    unsuppressed: string[];
+  } {
     const groupId = this.alarmIndex.get(alarmId);
-    if (groupId === undefined) return { unsuppressed: [] };
+    if (groupId === undefined) return { cleared: false, unsuppressed: [] };
 
     if (groupId === null) {
       const pendingAlarm = this.pending.find((a) => a.id === alarmId);
-      if (pendingAlarm) pendingAlarm.state = 'cleared';
-      return { unsuppressed: [] };
+      if (!pendingAlarm) return { cleared: false, unsuppressed: [] };
+      if (pendingAlarm.state === 'cleared') {
+        return {
+          cleared: true,
+          clearedBy: pendingAlarm.clearedBy,
+          unsuppressed: [],
+        };
+      }
+      pendingAlarm.state = 'cleared';
+      if (actor) pendingAlarm.clearedBy = actor;
+      this.emit('alarm-updated', pendingAlarm);
+      this.removeFromPending(alarmId);
+      this.alarmIndex.delete(alarmId);
+      return {
+        cleared: true,
+        clearedBy: pendingAlarm.clearedBy,
+        unsuppressed: [],
+      };
     }
 
     const group = this.groups.get(groupId);
-    if (!group) return { unsuppressed: [] };
+    if (!group) return { cleared: false, unsuppressed: [] };
 
     const member = group.alarms.find((a) => a.id === alarmId);
-    if (member) member.state = 'cleared';
+    if (!member) return { cleared: false, unsuppressed: [] };
+    if (member.state === 'cleared') {
+      return {
+        cleared: true,
+        clearedBy: member.clearedBy,
+        groupClosed: group.state === 'closed' ? group.id : undefined,
+        unsuppressed: [],
+      };
+    }
+    this.removeSuppressionRecord(group, alarmId);
+    member.state = 'cleared';
+    if (actor) member.clearedBy = actor;
 
     if (group.state === 'open' && group.rootCauseAlarmId === alarmId) {
-      const unsuppressed = this.suppressionPolicy.unsuppressOnRootClear
-        ? this.unsuppressActiveMembers(group)
-        : [];
+      const unsuppressed = this.unsuppressActiveMembers(group);
       this.closeGroup(group, 'root-cause-cleared');
-      return { groupClosed: group.id, unsuppressed };
+      return {
+        cleared: true,
+        clearedBy: member.clearedBy,
+        groupClosed: group.id,
+        unsuppressed,
+      };
     }
 
     this.emit('group-updated', group);
-    return { unsuppressed: [] };
+    return {
+      cleared: true,
+      clearedBy: member.clearedBy,
+      unsuppressed: [],
+    };
   }
 
-  alarmAcknowledged(alarmId: string): boolean {
+  alarmAcknowledged(alarmId: string, actor?: string): boolean {
     const groupId = this.alarmIndex.get(alarmId);
     if (groupId === undefined) return false;
+    const group = groupId === null ? undefined : this.groups.get(groupId);
     const alarm =
       groupId === null
         ? this.pending.find((a) => a.id === alarmId)
-        : this.groups.get(groupId)?.alarms.find((a) => a.id === alarmId);
+        : group?.alarms.find((a) => a.id === alarmId);
     if (!alarm) return false;
-    if (alarm.state === 'active' || alarm.state === 'suppressed') {
-      alarm.state = 'acknowledged';
+    if (alarm.state === 'acknowledged') return true;
+    if (alarm.state !== 'active' && alarm.state !== 'suppressed') return false;
+    if (group) {
+      this.removeSuppressionRecord(group, alarmId);
     }
+    alarm.state = 'acknowledged';
+    if (actor) alarm.acknowledgedBy = actor;
+    if (group) this.emit('group-updated', group);
+    else this.emit('alarm-updated', alarm);
     return true;
   }
 
@@ -202,12 +287,13 @@ export class AlarmCorrelationEngine extends EventEmitter {
   sweep(nowMs: number): { closedGroups: string[] } {
     const closedGroups: string[] = [];
     for (const group of this.groups.values()) {
-      if (group.state === 'open' && nowMs - group.lastAlarmAt > this.groupCloseAfterMs) {
+      const lastTouchedAt = this.groupLastTouchedAt.get(group.id) ?? nowMs;
+      if (group.state === 'open' && nowMs - lastTouchedAt > this.groupCloseAfterMs) {
         this.closeGroup(group, 'idle-timeout');
         closedGroups.push(group.id);
       }
     }
-    this.prunePending(nowMs);
+    this.prunePendingByProcessingTime(nowMs);
     this.enforceGroupCap();
     return { closedGroups };
   }
@@ -245,8 +331,17 @@ export class AlarmCorrelationEngine extends EventEmitter {
   }
 
   setSuppressionPolicy(policy: Partial<SuppressionPolicy>): SuppressionPolicy {
+    if (policy.unsuppressOnRootClear === false) {
+      throw new Error('unsuppressOnRootClear must remain enabled for fail-safe closure');
+    }
     this.suppressionPolicy = { ...this.suppressionPolicy, ...policy };
-    return this.suppressionPolicy;
+    for (const group of this.groups.values()) {
+      if (group.state === 'open') {
+        this.applySuppression(group);
+        this.emit('group-updated', group);
+      }
+    }
+    return { ...this.suppressionPolicy };
   }
 
   getSuppressionPolicy(): SuppressionPolicy {
@@ -278,7 +373,9 @@ export class AlarmCorrelationEngine extends EventEmitter {
     group.alarms.push(alarm);
     group.alarmIds.push(alarm.id);
     group.joinedVia[alarm.id] = rule.id;
+    group.createdAt = Math.min(group.createdAt, alarm.timestamp);
     group.lastAlarmAt = Math.max(group.lastAlarmAt, alarm.timestamp);
+    this.groupLastTouchedAt.set(group.id, this.clock());
     if (SEVERITY_RANK[alarm.severity] > SEVERITY_RANK[group.maxSeverity]) {
       group.maxSeverity = alarm.severity;
     }
@@ -315,7 +412,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
   ): IngestResult {
     const members = [peer, alarm].sort((a, b) => a.timestamp - b.timestamp);
     const group: AlarmGroup = {
-      id: `ACG-${++this.groupCounter}`,
+      id: `ACG-${randomUUID()}`,
       state: 'open',
       alarms: members,
       alarmIds: members.map((a) => a.id),
@@ -332,6 +429,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
     };
 
     this.groups.set(group.id, group);
+    this.groupLastTouchedAt.set(group.id, this.clock());
     this.metrics.groupsCreated++;
     this.alarmIndex.set(alarm.id, group.id);
     this.alarmIndex.set(peer.id, group.id);
@@ -360,11 +458,15 @@ export class AlarmCorrelationEngine extends EventEmitter {
    * hierarchy depth → lexicographically smallest id.
    */
   private electRootCause(group: AlarmGroup): void {
-    const memberEquipment = group.alarms
+    const eligibleAlarms = group.alarms.filter(
+      (alarm) => alarm.state !== 'cleared' && alarm.state !== 'shelved',
+    );
+    if (eligibleAlarms.length === 0) return;
+    const memberEquipment = [...new Set(eligibleAlarms
       .map((a) => a.equipmentId)
-      .filter((id): id is string => !!id);
+      .filter((id): id is string => !!id))];
 
-    const scored = group.alarms.map((alarm) => ({
+    const scored = eligibleAlarms.map((alarm) => ({
       alarm,
       bucket: Math.floor(alarm.timestamp / ROOT_ELECTION_TIME_BUCKET_MS),
       dominance: alarm.equipmentId
@@ -389,28 +491,26 @@ export class AlarmCorrelationEngine extends EventEmitter {
    * cleared/acknowledged.
    */
   private applySuppression(group: AlarmGroup): void {
-    if (!this.suppressionPolicy.enabled) return;
+    if (!this.suppressionPolicy.enabled) {
+      this.unsuppressActiveMembers(group);
+      return;
+    }
     const floor = SEVERITY_RANK[this.suppressionPolicy.neverSuppressAtOrAbove];
 
     for (const alarm of group.alarms) {
       const isRoot = alarm.id === group.rootCauseAlarmId;
       const alreadySuppressed = group.suppressedAlarmIds.includes(alarm.id);
+      const shouldSuppress =
+        !isRoot
+        && (alarm.state === 'active' || alarm.state === 'suppressed')
+        && SEVERITY_RANK[alarm.severity] < floor;
 
-      if (isRoot && alreadySuppressed) {
-        // A re-election promoted a suppressed member to root — restore it
-        group.suppressedAlarmIds = group.suppressedAlarmIds.filter((id) => id !== alarm.id);
-        if (alarm.state === 'suppressed') alarm.state = 'active';
-        this.metrics.alarmsUnsuppressed++;
-        this.emit('alarms-unsuppressed', { groupId: group.id, alarmIds: [alarm.id] });
+      if (alreadySuppressed && !shouldSuppress) {
+        this.restoreSuppressedAlarm(group, alarm);
         continue;
       }
 
-      if (
-        !isRoot &&
-        !alreadySuppressed &&
-        alarm.state === 'active' &&
-        SEVERITY_RANK[alarm.severity] < floor
-      ) {
+      if (!alreadySuppressed && shouldSuppress) {
         group.suppressedAlarmIds.push(alarm.id);
         alarm.state = 'suppressed';
         this.metrics.alarmsSuppressed++;
@@ -425,7 +525,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
 
   private unsuppressActiveMembers(group: AlarmGroup): string[] {
     const restored: string[] = [];
-    for (const alarmId of group.suppressedAlarmIds) {
+    for (const alarmId of [...group.suppressedAlarmIds]) {
       const alarm = group.alarms.find((a) => a.id === alarmId);
       if (alarm && alarm.state === 'suppressed') {
         alarm.state = 'active';
@@ -433,9 +533,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
         this.metrics.alarmsUnsuppressed++;
       }
     }
-    group.suppressedAlarmIds = group.suppressedAlarmIds.filter(
-      (id) => !restored.includes(id)
-    );
+    group.suppressedAlarmIds = [];
     if (restored.length > 0) {
       this.emit('alarms-unsuppressed', { groupId: group.id, alarmIds: restored });
     }
@@ -444,9 +542,10 @@ export class AlarmCorrelationEngine extends EventEmitter {
 
   private closeGroup(group: AlarmGroup, reason: AlarmGroup['closeReason']): void {
     if (group.state === 'closed') return;
+    this.unsuppressActiveMembers(group);
     group.state = 'closed';
     group.closeReason = reason;
-    group.closedAt = group.lastAlarmAt;
+    group.closedAt = this.clock();
     this.metrics.groupsClosed++;
     this.emit('group-closed', group);
   }
@@ -472,41 +571,131 @@ export class AlarmCorrelationEngine extends EventEmitter {
   }
 
   private evictGroup(group: AlarmGroup): void {
+    this.unsuppressActiveMembers(group);
     for (const alarmId of group.alarmIds) {
       this.alarmIndex.delete(alarmId);
     }
+    this.groupLastTouchedAt.delete(group.id);
     this.groups.delete(group.id);
   }
 
   private removeFromPending(alarmId: string): void {
     const idx = this.pending.findIndex((a) => a.id === alarmId);
     if (idx >= 0) this.pending.splice(idx, 1);
+    this.pendingLastTouchedAt.delete(alarmId);
+  }
+
+  /**
+   * Admit pending alarms that are connected to any current member. Re-scan
+   * after each pass because a newly admitted bridge may connect an older
+   * candidate. Both the group and pending collections are hard-capped.
+   */
+  private reconcilePending(group: AlarmGroup): void {
+    let admitted = true;
+    while (
+      admitted
+      && group.state === 'open'
+      && group.alarmIds.length < this.maxAlarmsPerGroup
+    ) {
+      admitted = false;
+      const candidates = [...this.pending].sort(
+        (a, b) => a.timestamp - b.timestamp || a.id.localeCompare(b.id),
+      );
+      for (const candidate of candidates) {
+        if (group.alarmIds.length >= this.maxAlarmsPerGroup) return;
+        if (this.alarmIndex.get(candidate.id) !== null) continue;
+        if (candidate.state === 'cleared' || candidate.state === 'shelved') continue;
+        if (!this.withinGroupSpan(group, candidate.timestamp)) continue;
+        const rule = this.rules.evaluateJoin(candidate, group, this.topology);
+        if (!rule) continue;
+        this.joinGroup(candidate, group, rule);
+        admitted = true;
+      }
+    }
+  }
+
+  private refreshIngestResult(
+    result: IngestResult,
+    alarm: CorrelatedAlarm,
+    group: AlarmGroup,
+  ): IngestResult {
+    return {
+      ...result,
+      suppressed: group.suppressedAlarmIds.includes(alarm.id),
+      isRootCause: group.rootCauseAlarmId === alarm.id,
+    };
+  }
+
+  private withinGroupSpan(group: AlarmGroup, timestamp: number): boolean {
+    const earliest = Math.min(group.createdAt, timestamp);
+    const latest = Math.max(group.lastAlarmAt, timestamp);
+    return latest - earliest <= this.maxGroupSpanMs;
+  }
+
+  private removeSuppressionRecord(group: AlarmGroup, alarmId: string): void {
+    group.suppressedAlarmIds = group.suppressedAlarmIds.filter(
+      (suppressedId) => suppressedId !== alarmId,
+    );
+  }
+
+  private restoreSuppressedAlarm(group: AlarmGroup, alarm: CorrelatedAlarm): void {
+    this.removeSuppressionRecord(group, alarm.id);
+    if (alarm.state !== 'suppressed') return;
+    alarm.state = 'active';
+    this.metrics.alarmsUnsuppressed++;
+    this.emit('alarms-unsuppressed', {
+      groupId: group.id,
+      alarmIds: [alarm.id],
+    });
   }
 
   /** Drop pending alarms too old to pair under the widest enabled rule window */
   private prunePending(referenceMs: number): void {
-    const maxWindow = Math.max(
-      1000,
-      ...this.rules
-        .list()
-        .filter((r) => r.enabled)
-        .map((r) => (r.config as { windowMs: number }).windowMs)
-    );
+    const maxWindow = this.maxEnabledRuleWindowMs();
     const cutoff = referenceMs - maxWindow * 2;
     let removed = 0;
     this.pending = this.pending.filter((alarm) => {
       const keep = alarm.timestamp >= cutoff;
       if (!keep) {
         this.alarmIndex.delete(alarm.id);
+        this.pendingLastTouchedAt.delete(alarm.id);
         removed++;
       }
       return keep;
     });
     if (this.pending.length > this.maxPendingAlarms) {
       const excess = this.pending.splice(0, this.pending.length - this.maxPendingAlarms);
-      for (const alarm of excess) this.alarmIndex.delete(alarm.id);
+      for (const alarm of excess) {
+        this.alarmIndex.delete(alarm.id);
+        this.pendingLastTouchedAt.delete(alarm.id);
+      }
       removed += excess.length;
     }
     if (removed > 0) this.emit('pending-pruned', { removed });
+  }
+
+  private prunePendingByProcessingTime(nowMs: number): void {
+    const cutoff = nowMs - this.maxEnabledRuleWindowMs() * 2;
+    let removed = 0;
+    this.pending = this.pending.filter((alarm) => {
+      const keep = (this.pendingLastTouchedAt.get(alarm.id) ?? nowMs) >= cutoff;
+      if (!keep) {
+        this.alarmIndex.delete(alarm.id);
+        this.pendingLastTouchedAt.delete(alarm.id);
+        removed++;
+      }
+      return keep;
+    });
+    if (removed > 0) this.emit('pending-pruned', { removed });
+  }
+
+  private maxEnabledRuleWindowMs(): number {
+    return Math.max(
+      1000,
+      ...this.rules
+        .list()
+        .filter((rule) => rule.enabled)
+        .map((rule) => (rule.config as { windowMs: number }).windowMs),
+    );
   }
 }

@@ -16,9 +16,11 @@ export * from './rules';
 export * from './engine';
 
 import type {
+  AlarmGroup,
   AlarmSeverity,
   AlarmLifecycleState,
   CorrelatedAlarm,
+  AlarmWireSnapshot,
   IngestResult,
 } from '@shared/types/alarm-correlation';
 import { AlarmCorrelationEngine } from './engine';
@@ -47,9 +49,26 @@ export function normalizeSeverity(raw: unknown): AlarmSeverity {
   }
 }
 
-function normalizeState(raw: unknown): AlarmLifecycleState {
+function isRecognizedSeverity(raw: unknown): boolean {
+  if (raw === undefined || raw === null || raw === '') return true;
+  return [
+    'critical',
+    'emergency',
+    'high',
+    'alarm',
+    'medium',
+    'warning',
+    'low',
+    'info',
+  ].includes(String(raw).toLowerCase());
+}
+
+function normalizeState(raw: unknown): AlarmLifecycleState | null {
   const value = String(raw ?? '').toLowerCase();
   switch (value) {
+    case '':
+    case 'active':
+      return 'active';
     case 'acknowledged':
       return 'acknowledged';
     case 'cleared':
@@ -59,7 +78,7 @@ function normalizeState(raw: unknown): AlarmLifecycleState {
     case 'suppressed':
       return 'suppressed';
     default:
-      return 'active';
+      return null;
   }
 }
 
@@ -96,6 +115,10 @@ export function normalizeAlarm(raw: Record<string, unknown>): CorrelatedAlarm | 
     raw.timestamp ?? raw.triggeredAt ?? raw.sourceTimestamp
   );
   if (timestamp === null) return null;
+  const rawSeverity = raw.severity ?? raw.priority;
+  if (!isRecognizedSeverity(rawSeverity)) return null;
+  const state = normalizeState(raw.state);
+  if (!state) return null;
 
   const tagId = String(raw.tagId ?? raw.sourceTagId ?? raw.tagName ?? '');
   const id = String(raw.id ?? raw.alarmId ?? `${tagId || 'alarm'}:${timestamp}`);
@@ -111,13 +134,34 @@ export function normalizeAlarm(raw: Record<string, unknown>): CorrelatedAlarm | 
     equipmentId,
     siteId: typeof raw.siteId === 'string' ? raw.siteId : undefined,
     processArea: typeof raw.processArea === 'string' ? raw.processArea : undefined,
-    severity: normalizeSeverity(raw.severity ?? raw.priority),
-    state: normalizeState(raw.state),
+    severity: normalizeSeverity(rawSeverity),
+    state,
     message: String(raw.message ?? raw.name ?? raw.alarmName ?? ''),
     timestamp,
     value: raw.value as number | string | undefined ?? (raw.tagValue as number | undefined) ?? (raw.triggerValue as number | string | undefined),
     limit: (raw.limit as number | string | undefined) ?? (raw.limitValue as number | string | undefined),
     source: typeof raw.source === 'string' ? raw.source : undefined,
+  };
+}
+
+export function toAlarmWireSnapshot(
+  alarm: CorrelatedAlarm,
+  group?: AlarmGroup,
+): AlarmWireSnapshot {
+  return {
+    ...alarm,
+    triggeredAt: new Date(alarm.timestamp).toISOString(),
+    tagValue: alarm.value,
+    correlation: {
+      groupId: group?.id ?? null,
+      groupState: group?.state ?? null,
+      rootCauseAlarmId: group?.rootCauseAlarmId ?? null,
+      suppressed:
+        group?.suppressedAlarmIds.includes(alarm.id)
+        ?? alarm.state === 'suppressed',
+      isRootCause: group?.rootCauseAlarmId === alarm.id,
+      coordinationMode: 'process-local',
+    },
   };
 }
 
@@ -131,16 +175,25 @@ export class AlarmCorrelationService extends EventEmitter {
   constructor(sweepIntervalMs = 30_000) {
     super();
     this.sweepIntervalMs = sweepIntervalMs;
+    for (const event of ['group-created', 'group-updated', 'group-closed']) {
+      this.engine.on(event, (group: AlarmGroup) => {
+        this.emit(event, group);
+        for (const alarm of group.alarms) {
+          this.emit('alarm-snapshot', toAlarmWireSnapshot(alarm, group));
+        }
+      });
+    }
     for (const event of [
-      'group-created',
-      'group-updated',
-      'group-closed',
       'root-cause-changed',
       'alarm-suppressed',
       'alarms-unsuppressed',
     ]) {
       this.engine.on(event, (payload) => this.emit(event, payload));
     }
+    this.engine.on('alarm-updated', (alarm: CorrelatedAlarm) => {
+      this.emit('alarm-updated', alarm);
+      this.emit('alarm-snapshot', toAlarmWireSnapshot(alarm));
+    });
   }
 
   async initialize(): Promise<void> {
@@ -175,7 +228,13 @@ export class AlarmCorrelationService extends EventEmitter {
     return { alarm, result };
   }
 
-  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
+  async healthCheck(): Promise<{
+    healthy: boolean;
+    message: string;
+    coordinationMode: 'process-local';
+    suppressionEnabled: boolean;
+    ephemeralSuppressionAllowed: boolean;
+  }> {
     const metrics = this.engine.getMetrics();
     return {
       healthy: this.initialized,
@@ -183,6 +242,10 @@ export class AlarmCorrelationService extends EventEmitter {
         ? `Alarm correlation running: ${metrics.openGroups} open groups, ` +
           `${(metrics.suppressionRate * 100).toFixed(1)}% suppression rate`
         : 'Alarm correlation service not initialized',
+      coordinationMode: 'process-local',
+      suppressionEnabled: this.engine.getSuppressionPolicy().enabled,
+      ephemeralSuppressionAllowed:
+        process.env.ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION === 'true',
     };
   }
 }

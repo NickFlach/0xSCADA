@@ -55,6 +55,31 @@ describe('EquipmentTopology', () => {
     expect(t.get('b')).toBeUndefined();
   });
 
+  it('rolls back an entire topology batch when a later node is invalid', () => {
+    const t = new EquipmentTopology();
+    t.upsert({ equipmentId: 'existing', name: 'before', causalDownstream: [] });
+
+    expect(() =>
+      t.upsertMany([
+        {
+          equipmentId: 'existing',
+          name: 'mutated-before-failure',
+          causalDownstream: ['new-a'],
+        },
+        { equipmentId: 'new-a', parentId: 'new-b', causalDownstream: [] },
+        { equipmentId: 'new-b', parentId: 'new-a', causalDownstream: [] },
+      ])
+    ).toThrow(/cycle/);
+
+    expect(t.get('existing')).toEqual({
+      equipmentId: 'existing',
+      name: 'before',
+      causalDownstream: [],
+    });
+    expect(t.get('new-a')).toBeUndefined();
+    expect(t.get('new-b')).toBeUndefined();
+  });
+
   it('computes hierarchy distance: parent-child 1, siblings 1, unrelated null', () => {
     const t = plantTopology();
     expect(t.hierarchyDistance('FDR-1', 'SUB-1')).toBe(1);
@@ -111,6 +136,36 @@ describe('CorrelationRulesEngine', () => {
         config: { windowMs: 1000, scope: 'everything' } as never,
       })
     ).toMatch(/scope/);
+    expect(
+      validateRule({
+        id: 'r',
+        name: 'r',
+        type: 'causal',
+        enabled: true,
+        priority: 1,
+        config: { windowMs: Number.POSITIVE_INFINITY, maxHops: 1 },
+      })
+    ).toMatch(/windowMs/);
+    expect(
+      validateRule({
+        id: 'r',
+        name: 'r',
+        type: 'causal',
+        enabled: true,
+        priority: 1,
+        config: { windowMs: 1000, maxHops: 65 },
+      })
+    ).toMatch(/maxHops/);
+    expect(
+      validateRule({
+        id: 'r',
+        name: 'r',
+        type: 'hierarchy',
+        enabled: true,
+        priority: 1,
+        config: { windowMs: 1000, maxDistance: 65 },
+      })
+    ).toMatch(/maxDistance/);
   });
 
   it('evaluates rules in priority order and skips disabled ones', () => {
@@ -203,6 +258,129 @@ describe('AlarmCorrelationEngine', () => {
     expect(rootChanges.length).toBeGreaterThan(0);
   });
 
+  it('reconciles a bounded pending component across every arrival permutation', () => {
+    const permutations = [
+      ['t0', 't4', 't8'],
+      ['t0', 't8', 't4'],
+      ['t4', 't0', 't8'],
+      ['t4', 't8', 't0'],
+      ['t8', 't0', 't4'],
+      ['t8', 't4', 't0'],
+    ];
+    const timestamps: Record<string, number> = {
+      t0: 0,
+      t4: 4000,
+      t8: 8000,
+    };
+
+    for (const order of permutations) {
+      const engine = new AlarmCorrelationEngine({
+        maxGroupSpanMs: 10_000,
+        maxAlarmsPerGroup: 3,
+        suppressionPolicy: { enabled: true },
+      });
+      let finalResult;
+      for (const id of order) {
+        finalResult = engine.ingest(alarm({
+          id,
+          tagId: 'VALVE-1.CHATTER',
+          timestamp: timestamps[id],
+        }));
+      }
+
+      const groups = engine.getGroups();
+      expect(groups, order.join(',')).toHaveLength(1);
+      expect([...groups[0].alarmIds].sort(), order.join(',')).toEqual(['t0', 't4', 't8']);
+      expect(groups[0].rootCauseAlarmId, order.join(',')).toBe('t0');
+      expect(groups[0].createdAt, order.join(',')).toBe(0);
+      expect(groups[0].lastAlarmAt, order.join(',')).toBe(8000);
+      expect([...groups[0].suppressedAlarmIds].sort(), order.join(',')).toEqual(['t4', 't8']);
+
+      if (order.join(',') === 't0,t8,t4') {
+        expect(finalResult).toMatchObject({
+          alarmId: 't4',
+          isRootCause: false,
+          suppressed: true,
+        });
+      }
+    }
+  });
+
+  it('reconciles pending bridge alarms to a bounded fixpoint', () => {
+    const engine = new AlarmCorrelationEngine({
+      maxGroupSpanMs: 20_000,
+      maxAlarmsPerGroup: 5,
+    });
+    const timestamps: Record<string, number> = {
+      t0: 0,
+      t4: 4000,
+      t8: 8000,
+      t12: 12_000,
+      t16: 16_000,
+    };
+
+    for (const id of ['t0', 't8', 't16', 't4', 't12']) {
+      engine.ingest(alarm({
+        id,
+        tagId: 'VALVE-1.CHATTER',
+        timestamp: timestamps[id],
+      }));
+    }
+
+    expect(engine.getGroups()).toHaveLength(1);
+    expect([...engine.getGroups()[0].alarmIds].sort()).toEqual([
+      't0',
+      't12',
+      't16',
+      't4',
+      't8',
+    ]);
+  });
+
+  it('keeps reconciliation within group span and member caps', () => {
+    const permutations = [
+      ['t0', 't4', 't8'],
+      ['t0', 't8', 't4'],
+      ['t4', 't0', 't8'],
+      ['t4', 't8', 't0'],
+      ['t8', 't0', 't4'],
+      ['t8', 't4', 't0'],
+    ];
+    const timestamps: Record<string, number> = {
+      t0: 0,
+      t4: 4000,
+      t8: 8000,
+    };
+
+    for (const order of permutations) {
+      const spanEngine = new AlarmCorrelationEngine({
+        maxGroupSpanMs: 7000,
+        maxAlarmsPerGroup: 3,
+      });
+      const memberEngine = new AlarmCorrelationEngine({
+        maxGroupSpanMs: 10_000,
+        maxAlarmsPerGroup: 2,
+      });
+      for (const id of order) {
+        const input = alarm({
+          id,
+          tagId: 'VALVE-1.CHATTER',
+          timestamp: timestamps[id],
+        });
+        spanEngine.ingest({ ...input });
+        memberEngine.ingest({ ...input });
+      }
+
+      for (const group of spanEngine.getGroups()) {
+        expect(group.lastAlarmAt - group.createdAt, order.join(',')).toBeLessThanOrEqual(7000);
+        expect(group.alarmIds, order.join(',')).toHaveLength(2);
+      }
+      for (const group of memberEngine.getGroups()) {
+        expect(group.alarmIds.length, order.join(',')).toBeLessThanOrEqual(2);
+      }
+    }
+  });
+
   it('keeps unrelated concurrent alarms in separate groups', () => {
     const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
     engine.ingest(alarm({ id: 'a1', equipmentId: 'FDR-1', tagId: 'FDR-1.TRIP', timestamp: 1000 }));
@@ -210,8 +388,32 @@ describe('AlarmCorrelationEngine', () => {
     expect(engine.getGroups()).toHaveLength(0); // both standalone — never merged
   });
 
+  it('never correlates alarms across site boundaries', () => {
+    const engine = new AlarmCorrelationEngine();
+    engine.ingest(alarm({
+      id: 'site-a',
+      tagId: 'SHARED.TAG',
+      equipmentId: 'SHARED',
+      siteId: 'site-a',
+      timestamp: 1000,
+    }));
+    const second = engine.ingest(alarm({
+      id: 'site-b',
+      tagId: 'SHARED.TAG',
+      equipmentId: 'SHARED',
+      siteId: 'site-b',
+      timestamp: 1001,
+    }));
+
+    expect(second.action).toBe('standalone');
+    expect(engine.getGroups()).toHaveLength(0);
+  });
+
   it('suppresses downstream alarms but never critical ones', () => {
-    const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      suppressionPolicy: { enabled: true },
+    });
     const suppressed: unknown[] = [];
     engine.on('alarm-suppressed', (e) => suppressed.push(e));
 
@@ -227,8 +429,27 @@ describe('AlarmCorrelationEngine', () => {
     expect(suppressed).toHaveLength(1);
   });
 
+  it('defaults suppression off and refuses unsafe closed-group suppression', () => {
+    const engine = new AlarmCorrelationEngine();
+    expect(engine.getSuppressionPolicy()).toMatchObject({
+      enabled: false,
+      unsuppressOnRootClear: true,
+    });
+    expect(() =>
+      engine.setSuppressionPolicy({ unsuppressOnRootClear: false })
+    ).toThrow(/fail-safe closure/);
+    expect(() =>
+      new AlarmCorrelationEngine({
+        suppressionPolicy: { unsuppressOnRootClear: false },
+      })
+    ).toThrow(/fail-safe closure/);
+  });
+
   it('closes the group and un-suppresses members when the root cause clears', () => {
-    const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      suppressionPolicy: { enabled: true },
+    });
     const unsuppressed: unknown[] = [];
     engine.on('alarms-unsuppressed', (e) => unsuppressed.push(e));
 
@@ -245,10 +466,162 @@ describe('AlarmCorrelationEngine', () => {
     expect(unsuppressed).toHaveLength(1);
   });
 
-  it('ignores duplicate alarm ids', () => {
+  it('removes stale suppression records on acknowledge and clear', () => {
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      suppressionPolicy: { enabled: true },
+    });
+    engine.ingest(alarm({
+      id: 'feeder',
+      equipmentId: 'FDR-1',
+      tagId: 'FDR-1.TRIP',
+      timestamp: 1000,
+    }));
+    engine.ingest(alarm({
+      id: 'breaker',
+      equipmentId: 'BK-1',
+      tagId: 'BK-1.TRIP',
+      timestamp: 1500,
+    }));
+    engine.ingest(alarm({
+      id: 'motor',
+      equipmentId: 'MTR-1',
+      tagId: 'MTR-1.STALL',
+      timestamp: 2000,
+    }));
+
+    const group = engine.getGroups()[0];
+    expect(group.suppressedAlarmIds).toEqual(['breaker', 'motor']);
+
+    expect(engine.alarmAcknowledged('breaker', 'operator-alice')).toBe(true);
+    const clear = engine.alarmCleared('motor', 'operator-bob');
+    expect(clear.cleared).toBe(true);
+    expect(group.suppressedAlarmIds).toEqual([]);
+    expect(group.alarms.find((a) => a.id === 'breaker')).toMatchObject({
+      state: 'acknowledged',
+      acknowledgedBy: 'operator-alice',
+    });
+    expect(group.alarms.find((a) => a.id === 'motor')).toMatchObject({
+      state: 'cleared',
+      clearedBy: 'operator-bob',
+    });
+  });
+
+  it('does not correlate a standalone alarm after it has cleared', () => {
+    const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
+    engine.ingest(alarm({
+      id: 'cleared-feeder',
+      equipmentId: 'FDR-1',
+      tagId: 'FDR-1.TRIP',
+      timestamp: 1000,
+    }));
+    expect(engine.alarmCleared('cleared-feeder', 'operator-alice')).toMatchObject({
+      cleared: true,
+      clearedBy: 'operator-alice',
+    });
+
+    const next = engine.ingest(alarm({
+      id: 'breaker',
+      equipmentId: 'BK-1',
+      tagId: 'BK-1.TRIP',
+      timestamp: 1500,
+    }));
+    expect(next.action).toBe('standalone');
+    expect(engine.getGroups()).toHaveLength(0);
+  });
+
+  it('reconciles existing suppression when policy is disabled or its floor changes', () => {
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      suppressionPolicy: { enabled: true },
+    });
+    engine.ingest(alarm({
+      id: 'feeder',
+      equipmentId: 'FDR-1',
+      tagId: 'FDR-1.TRIP',
+      timestamp: 1000,
+      severity: 'high',
+    }));
+    engine.ingest(alarm({
+      id: 'breaker',
+      equipmentId: 'BK-1',
+      tagId: 'BK-1.TRIP',
+      timestamp: 1500,
+      severity: 'medium',
+    }));
+    const group = engine.getGroups()[0];
+    const breaker = group.alarms.find((a) => a.id === 'breaker')!;
+    expect(breaker.state).toBe('suppressed');
+
+    engine.setSuppressionPolicy({ enabled: false });
+    expect(group.suppressedAlarmIds).toEqual([]);
+    expect(breaker.state).toBe('active');
+
+    engine.setSuppressionPolicy({ enabled: true });
+    expect(group.suppressedAlarmIds).toEqual(['breaker']);
+    expect(breaker.state).toBe('suppressed');
+
+    engine.setSuppressionPolicy({ neverSuppressAtOrAbove: 'medium' });
+    expect(group.suppressedAlarmIds).toEqual([]);
+    expect(breaker.state).toBe('active');
+  });
+
+  it('releases suppressed members when an idle group closes', () => {
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      groupCloseAfterMs: 1000,
+      suppressionPolicy: { enabled: true },
+      clock: () => 0,
+    });
+    engine.ingest(alarm({
+      id: 'feeder',
+      equipmentId: 'FDR-1',
+      tagId: 'FDR-1.TRIP',
+      timestamp: 1000,
+    }));
+    engine.ingest(alarm({
+      id: 'breaker',
+      equipmentId: 'BK-1',
+      tagId: 'BK-1.TRIP',
+      timestamp: 1500,
+    }));
+    const group = engine.getGroups()[0];
+    expect(group.suppressedAlarmIds).toEqual(['breaker']);
+
+    engine.sweep(10_000);
+    expect(group.state).toBe('closed');
+    expect(group.closeReason).toBe('idle-timeout');
+    expect(group.suppressedAlarmIds).toEqual([]);
+    expect(group.alarms.find((a) => a.id === 'breaker')?.state).toBe('active');
+
+    const clear = engine.alarmCleared('feeder', 'operator-alice');
+    expect(clear.cleared).toBe(true);
+    expect(group.suppressedAlarmIds).toEqual([]);
+  });
+
+  it('caps group membership to bound alarm-storm root-election work', () => {
+    const engine = new AlarmCorrelationEngine({
+      maxAlarmsPerGroup: 3,
+    });
+
+    for (let index = 0; index < 5; index++) {
+      engine.ingest(alarm({
+        id: `chatter-${index}`,
+        tagId: 'VALVE-1.CHATTER',
+        timestamp: index * 100,
+      }));
+    }
+
+    const sizes = engine.getGroups().map((group) => group.alarmIds.length).sort();
+    expect(sizes).toEqual([2, 3]);
+    expect(Math.max(...sizes)).toBe(3);
+  });
+
+  it('reports duplicate alarm ids without mutating metrics', () => {
     const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
     engine.ingest(alarm({ id: 'dup', equipmentId: 'FDR-1', tagId: 'FDR-1.TRIP', timestamp: 1000 }));
     const again = engine.ingest(alarm({ id: 'dup', equipmentId: 'FDR-1', tagId: 'FDR-1.TRIP', timestamp: 9999 }));
+    expect(again.action).toBe('duplicate');
     expect(again.reason).toMatch(/duplicate/);
     expect(engine.getMetrics().alarmsIngested).toBe(1);
   });
@@ -258,6 +631,7 @@ describe('AlarmCorrelationEngine', () => {
       topology: plantTopology(),
       groupCloseAfterMs: 1000,
       maxGroups: 1,
+      clock: () => 0,
     });
     engine.ingest(alarm({ id: 'f1', equipmentId: 'FDR-1', tagId: 'FDR-1.TRIP', timestamp: 1000 }));
     engine.ingest(alarm({ id: 'b1', equipmentId: 'BK-1', tagId: 'BK-1.TRIP', timestamp: 1500 }));
@@ -273,12 +647,12 @@ describe('AlarmCorrelationEngine', () => {
     expect(engine.getGroups()[0].alarmIds).toEqual(['f2', 'b2']);
   });
 
-  it('does not admit alarms beyond the group span cap', () => {
-    const engine = new AlarmCorrelationEngine({
+  it('enforces the group span cap during formation and backward joins', () => {
+    const formationEngine = new AlarmCorrelationEngine({
       topology: plantTopology(),
       maxGroupSpanMs: 10_000,
     });
-    engine.rules.upsert({
+    formationEngine.rules.upsert({
       id: 'wide',
       name: 'wide causal',
       type: 'causal',
@@ -286,16 +660,51 @@ describe('AlarmCorrelationEngine', () => {
       priority: 1,
       config: { windowMs: 1_000_000, maxHops: 5 },
     });
-    engine.ingest(alarm({ id: 'f', equipmentId: 'FDR-1', tagId: 'FDR-1.T', timestamp: 0 }));
-    engine.ingest(alarm({ id: 'b', equipmentId: 'BK-1', tagId: 'BK-1.T', timestamp: 100 }));
-    const late = engine.ingest(
-      alarm({ id: 'm', equipmentId: 'MTR-1', tagId: 'MTR-1.T', timestamp: 50_000 })
+    formationEngine.ingest(
+      alarm({ id: 'formation-f', equipmentId: 'FDR-1', tagId: 'FDR-1.T', timestamp: 0 })
     );
-    expect(late.action).not.toBe('joined-group');
+    const beyondFormationSpan = formationEngine.ingest(
+      alarm({
+        id: 'formation-b',
+        equipmentId: 'BK-1',
+        tagId: 'BK-1.T',
+        timestamp: 50_000,
+      })
+    );
+    expect(beyondFormationSpan.action).toBe('standalone');
+    expect(formationEngine.getGroups()).toHaveLength(0);
+
+    const joinEngine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      maxGroupSpanMs: 10_000,
+    });
+    joinEngine.rules.upsert({
+      id: 'wide',
+      name: 'wide causal',
+      type: 'causal',
+      enabled: true,
+      priority: 1,
+      config: { windowMs: 1_000_000, maxHops: 5 },
+    });
+    joinEngine.ingest(
+      alarm({ id: 'join-f', equipmentId: 'FDR-1', tagId: 'FDR-1.T', timestamp: 100_000 })
+    );
+    joinEngine.ingest(
+      alarm({ id: 'join-b', equipmentId: 'BK-1', tagId: 'BK-1.T', timestamp: 100_100 })
+    );
+    const backward = joinEngine.ingest(
+      alarm({ id: 'join-m', equipmentId: 'MTR-1', tagId: 'MTR-1.T', timestamp: 0 })
+    );
+
+    expect(backward.action).not.toBe('joined-group');
+    expect(joinEngine.getGroups()[0].alarmIds).toEqual(['join-f', 'join-b']);
   });
 
   it('tracks suppression rate as the fatigue KPI', () => {
-    const engine = new AlarmCorrelationEngine({ topology: plantTopology() });
+    const engine = new AlarmCorrelationEngine({
+      topology: plantTopology(),
+      suppressionPolicy: { enabled: true },
+    });
     engine.ingest(alarm({ id: 'f', equipmentId: 'FDR-1', tagId: 'FDR-1.T', timestamp: 0 }));
     engine.ingest(alarm({ id: 'b', equipmentId: 'BK-1', tagId: 'BK-1.T', timestamp: 100 }));
     engine.ingest(alarm({ id: 'm', equipmentId: 'MTR-1', tagId: 'MTR-1.T', timestamp: 200 }));
@@ -356,6 +765,18 @@ describe('normalizeAlarm', () => {
   it('rejects alarms without a usable timestamp', () => {
     expect(normalizeAlarm({ id: 'x', tagId: 'T.1' })).toBeNull();
     expect(normalizeAlarm({ id: 'x', tagId: 'T.1', timestamp: 'garbage' })).toBeNull();
+    expect(normalizeAlarm({
+      id: 'x',
+      tagId: 'T.1',
+      timestamp: 1,
+      severity: 'catastrophic',
+    })).toBeNull();
+    expect(normalizeAlarm({
+      id: 'x',
+      tagId: 'T.1',
+      timestamp: 1,
+      state: 'mystery',
+    })).toBeNull();
   });
 
   it('resolves equipment from the ASSET.EVENT tag convention', () => {
@@ -387,7 +808,8 @@ describe('AlarmCorrelationService', () => {
       timestamp: 1800, message: 'stall',
     })!;
     expect(second.result.action).toBe('formed-group');
-    expect(second.result.suppressed).toBe(true);
+    expect(second.result.suppressed).toBe(false);
+    expect(service.engine.getSuppressionPolicy().enabled).toBe(false);
     expect(created).toHaveBeenCalledTimes(1);
   });
 

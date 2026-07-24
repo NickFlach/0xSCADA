@@ -40,6 +40,10 @@ export interface CorrelatedAlarm {
   limit?: number | string;
   /** Where the alarm came from (simulator, phi, spc, api, ...) */
   source?: string;
+  /** Server-owned control-plane principal that acknowledged this alarm. */
+  acknowledgedBy?: string;
+  /** Server-owned control-plane principal that cleared this alarm. */
+  clearedBy?: string;
 }
 
 // ── Equipment topology ────────────────────────────────────────────────────
@@ -64,7 +68,7 @@ export interface EquipmentNode {
 export type CorrelationRuleType = 'causal' | 'hierarchy' | 'temporal';
 
 export interface CausalRuleConfig {
-  /** Max event-time gap between an alarm and the group's latest alarm */
+  /** Max event-time gap between a candidate alarm and a connected member */
   windowMs: number;
   /** Max causal-edge hops for reachability */
   maxHops: number;
@@ -131,7 +135,7 @@ export interface AlarmGroup {
   closeReason?: 'root-cause-cleared' | 'idle-timeout' | 'evicted';
 }
 
-export type IngestAction = 'joined-group' | 'formed-group' | 'standalone';
+export type IngestAction = 'joined-group' | 'formed-group' | 'standalone' | 'duplicate';
 
 export interface IngestResult {
   alarmId: string;
@@ -162,4 +166,22 @@ export interface CorrelationMetrics {
   suppressionRate: number;
   openGroups: number;
   trackedAlarms: number;
+}
+
+/** Stable correlation metadata attached to each live alarm snapshot. */
+export interface AlarmCorrelationSnapshot {
+  groupId: string | null;
+  groupState: AlarmGroupState | null;
+  rootCauseAlarmId: string | null;
+  suppressed: boolean;
+  isRootCause: boolean;
+  /** Correlation state is process-local until the durable coordination issue lands. */
+  coordinationMode: 'process-local';
+}
+
+/** Canonical alarm payload emitted to live WebSocket consumers. */
+export interface AlarmWireSnapshot extends CorrelatedAlarm {
+  triggeredAt: string;
+  tagValue?: number | string;
+  correlation: AlarmCorrelationSnapshot;
 }

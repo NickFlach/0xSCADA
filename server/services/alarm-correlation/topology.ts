@@ -11,9 +11,25 @@
 import type { EquipmentNode } from '@shared/types/alarm-correlation';
 
 const MAX_TRAVERSAL_DEPTH = 64;
+const DEFAULT_MAX_NODES = 5000;
 
 export class EquipmentTopology {
   private nodes: Map<string, EquipmentNode> = new Map();
+  private readonly maxNodes: number;
+
+  constructor(maxNodes = DEFAULT_MAX_NODES) {
+    if (!Number.isSafeInteger(maxNodes) || maxNodes < 1) {
+      throw new Error('maxNodes must be a positive integer');
+    }
+    this.maxNodes = maxNodes;
+  }
+
+  private cloneNode(node: EquipmentNode): EquipmentNode {
+    return {
+      ...node,
+      causalDownstream: [...node.causalDownstream],
+    };
+  }
 
   /**
    * Insert or replace a node. Throws if the parent chain would form a
@@ -22,6 +38,9 @@ export class EquipmentTopology {
    */
   upsert(node: EquipmentNode): EquipmentNode {
     const previous = this.nodes.get(node.equipmentId);
+    if (!previous && this.nodes.size >= this.maxNodes) {
+      throw new Error(`Equipment topology limit of ${this.maxNodes} nodes reached`);
+    }
     const stored: EquipmentNode = {
       ...node,
       causalDownstream: [...new Set(node.causalDownstream)].filter(
@@ -40,19 +59,28 @@ export class EquipmentTopology {
         `Equipment "${node.equipmentId}": parentId "${node.parentId}" would create a hierarchy cycle`
       );
     }
-    return stored;
+    return this.cloneNode(stored);
   }
 
   upsertMany(nodes: EquipmentNode[]): EquipmentNode[] {
-    return nodes.map((n) => this.upsert(n));
+    const before = new Map(
+      Array.from(this.nodes, ([id, node]) => [id, this.cloneNode(node)]),
+    );
+    try {
+      return nodes.map((node) => this.upsert(node));
+    } catch (error) {
+      this.nodes = before;
+      throw error;
+    }
   }
 
   get(equipmentId: string): EquipmentNode | undefined {
-    return this.nodes.get(equipmentId);
+    const node = this.nodes.get(equipmentId);
+    return node ? this.cloneNode(node) : undefined;
   }
 
   list(): EquipmentNode[] {
-    return Array.from(this.nodes.values());
+    return Array.from(this.nodes.values(), (node) => this.cloneNode(node));
   }
 
   remove(equipmentId: string): boolean {
