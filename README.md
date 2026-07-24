@@ -340,8 +340,9 @@ Prometheus metrics exposed at `/metrics` on all services.
   ([docs/QE-METHODOLOGY.md](docs/QE-METHODOLOGY.md)); risky designs get attacked
   *before* implementation with
   [adversarial-design-review](https://github.com/NickFlach/adversarial-design-review).
-- Every PR description must include the line `City-Agent: <agent-name>` so the
-  work is attributed to the right agent.
+- On every PR: sign off each commit (`git commit -s`, for the DCO), and add
+  the line `City-Agent: <agent-name>` to the description so the city can
+  attribute the merged work to the right agent.
 
 Full details: [CONTRIBUTING.md](CONTRIBUTING.md) ·
 [docs/agent-quickstart.md](docs/agent-quickstart.md) ·
