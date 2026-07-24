@@ -70,6 +70,9 @@ export { predictiveMaintenanceService } from './predictive';
 export * from './l2-rollup';
 export { l2RollupService } from './l2-rollup';
 
+// ── Digital Twin Service (ADR-0013 [13.3], #214) ─────────────────────────────
+export * from './twin';
+export { digitalTwinService } from './twin';
 // ── Alarm Correlation Service (ADR-0013 [13.2], #213) ────────────────────────
 export * from './alarm-correlation';
 export { alarmCorrelationService } from './alarm-correlation';
@@ -89,6 +92,7 @@ export async function initializeServices(): Promise<void> {
     { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
     { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
+    { name: 'Digital Twin', service: () => import('./twin').then(m => m.digitalTwinService.initialize()) },
     { name: 'Predictive Maintenance', service: () => import('./predictive').then(m => m.predictiveMaintenanceService.initialize()) }
   ];
 
@@ -180,6 +184,14 @@ export async function getServicesHealthStatus(): Promise<{
         return await spcService.healthCheck();
       } catch {
         return { healthy: false, message: 'SPC service not available' };
+      }
+    },
+    twin: async () => {
+      try {
+        const { digitalTwinService } = await import('./twin');
+        return await digitalTwinService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'Digital twin service not available' };
       }
     },
     predictive: async () => {

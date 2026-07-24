@@ -18,6 +18,8 @@ import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
+import { twinRoutes } from "./routes/twin";
+import { digitalTwinService } from "./services/twin";
 import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
 import { alarmCorrelationService } from "./services/alarm-correlation";
 import { predictiveRoutes } from "./routes/predictive";
@@ -64,6 +66,7 @@ export async function registerRoutes(
 
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/twin", twinRoutes);  // ADR-0013 [13.3] (#214)
   app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
   app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
   app.use("/api/governance", governanceRoutes);
@@ -132,6 +135,17 @@ export async function registerRoutes(
   // Start alarm-correlation idle-group sweeps (#213). Registered here rather
   // than in services/initializeServices(), which no startup path invokes.
   void alarmCorrelationService.initialize();
+
+  // Feed live tag updates into the digital twin and start its step timer
+  // here — services/initializeServices() has no callers at startup (#214).
+  const unsubscribeTwin = tagStreamServer.onTagUpdate(
+    (update) => digitalTwinService.ingestTagUpdate(update)
+  );
+  void digitalTwinService.initialize();
+  httpServer.once("close", () => {
+    unsubscribeTwin();
+    void digitalTwinService.shutdown();
+  });
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).

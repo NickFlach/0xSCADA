@@ -67,8 +67,12 @@ export class TagStreamServer {
    * stream (e.g. predictive maintenance ingestion). Listener errors are
    * swallowed so a consumer can never break broadcasting.
    */
-  onTagUpdate(listener: (update: TagUpdate) => void): void {
+  onTagUpdate(listener: (update: TagUpdate) => void): () => void {
     this.updateListeners.push(listener);
+    return () => {
+      const index = this.updateListeners.indexOf(listener);
+      if (index >= 0) this.updateListeners.splice(index, 1);
+    };
   }
 
   private notifyListeners(update: TagUpdate): void {
@@ -292,6 +296,7 @@ export class TagStreamServer {
       client.ws.close(1000);
     }
     this.clients.clear();
+    this.updateListeners.length = 0;
     this.wss?.close();
     this.httpServer = undefined;
     this.upgradeHandler = undefined;
