@@ -434,6 +434,74 @@ describe("oxscada-full Helm packaging", () => {
         absent(disabled, `minimal-${component}`);
       }
 
+      expect(() => render(
+        "missing-server",
+        chartPath,
+        [
+          "--set",
+          "server.enabled=false",
+          "--set",
+          "observability.enabled=false",
+        ],
+      )).toThrow(/gateway\.serverUrl is required/);
+
+      const externalGateway = render(
+        "external",
+        chartPath,
+        [
+          "--set",
+          "server.enabled=false",
+          "--set",
+          "observability.enabled=false",
+          "--set-string",
+          "gateway.serverUrl=https://scada.example.test",
+        ],
+      );
+      absent(externalGateway, "external-server");
+      expect(env(
+        workloadContainer(
+          externalGateway,
+          "Deployment",
+          "external-gateway",
+          "gateway",
+        ).container,
+        "SERVER_URL",
+      )?.value).toBe("https://scada.example.test");
+
+      expect(() => render(
+        "missing-scrape-target",
+        chartPath,
+        [
+          "--set",
+          "server.enabled=false",
+          "--set",
+          "gateway.enabled=false",
+          "--set",
+          "observability.grafana.enabled=false",
+        ],
+      )).toThrow(/server\.enabled must be true/);
+
+      expect(() => render(
+        "missing-datasource",
+        chartPath,
+        [
+          ...authSecretArgs,
+          "--set",
+          "observability.prometheus.enabled=false",
+        ],
+      )).toThrow(/observability\.prometheus\.enabled must be true/);
+
+      expect(() => render(
+        "disabled-ingress-backend",
+        chartPath,
+        [
+          "--values",
+          productionValues,
+          "--set",
+          "client.enabled=false",
+        ],
+      )).toThrow(/ingress service "client" is disabled/);
+
       const packageDirectory = join(scratchRoot, "packages");
       mkdirSync(packageDirectory);
       execFileSync(

@@ -7,6 +7,14 @@
   "prometheus" .Values.observability.prometheus.port
   "grafana" .Values.observability.grafana.port
 -}}
+{{- $serviceEnabled := dict
+  "server" .Values.server.enabled
+  "client" .Values.client.enabled
+  "gateway" .Values.gateway.enabled
+  "blockchain" .Values.blockchain.enabled
+  "prometheus" (and .Values.observability.enabled .Values.observability.prometheus.enabled)
+  "grafana" (and .Values.observability.enabled .Values.observability.grafana.enabled)
+-}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -34,6 +42,9 @@ spec:
           {{- $port := index $servicePorts .service }}
           {{- if not $port }}
           {{- fail (printf "ingress service %q is not a chart component" .service) }}
+          {{- end }}
+          {{- if not (index $serviceEnabled .service) }}
+          {{- fail (printf "ingress service %q is disabled; remove its path or enable the component" .service) }}
           {{- end }}
           - path: {{ .path }}
             pathType: Prefix
