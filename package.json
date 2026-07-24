@@ -2,14 +2,15 @@
   "name": "0xscada",
   "version": "1.0.0",
   "description": "Industrial SCADA system with blockchain-backed audit trails",
-  "main": "dist/server/index.js",
+  "main": "dist/server/index.cjs",
   "scripts": {
     "build": "tsc",
     "build:gateway": "esbuild gateway/index.ts --bundle --platform=node --target=node20 --format=cjs --outfile=dist/gateway/index.cjs",
+    "build:server": "esbuild server/index.ts --bundle --platform=node --target=node20 --format=cjs --packages=external --outfile=dist/server/index.cjs",
     "dev": "NODE_ENV=development tsx server/index.ts",
     "dev:setup": "npm run dev:db && npm run dev",
     "dev:db": "echo 'Setting up development database...' && node -e \"console.log('Database will be created automatically on first run')\"",
-    "start": "node dist/server/index.js",
+    "start": "node dist/server/index.cjs",
     "test": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
     "typecheck": "tsc --noEmit"
