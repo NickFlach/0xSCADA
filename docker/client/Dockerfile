@@ -3,14 +3,14 @@ FROM node:20-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY tsconfig.json vite.config.ts postcss.config.js ./
+COPY tsconfig.json vite.config.ts ./
 COPY client/ ./client/
 COPY shared/ ./shared/
 RUN npm run build --workspace=client 2>/dev/null || npx vite build
 
 FROM nginx:1.25-alpine AS production
 RUN apk add --no-cache curl
-COPY --from=build /app/dist/client /usr/share/nginx/html
+COPY --from=build /app/client/dist /usr/share/nginx/html
 COPY docker/client/nginx.conf /etc/nginx/conf.d/default.conf
 
 EXPOSE 80
