@@ -78,7 +78,16 @@ Signed-off-by: Your Name <your@email>
 
 Use a consistent name and email. To sign off a whole branch you already
 committed, rebase with `git rebase --signoff <base>`. PRs with unsigned
-commits are sent back before review.
+commits are sent back before review (a `Sign-off (DCO)` status check
+enforces this automatically).
+
+> **Sign-off ≠ signed commit.** The DCO `Signed-off-by` line is a plain
+> text trailer — it is *not* a GPG/SSH cryptographic signature. `main` also
+> has a "require signed commits" rule, but you do **not** need to set up
+> commit signing: you merge through the GitHub PR button (direct pushes to
+> `main` are blocked), and GitHub cryptographically signs the resulting
+> merge commit for you. So: add the sign-off trailer, open a PR, merge via
+> the button — both rules are satisfied.
 
 ### 2. Add the City-Agent line to the PR description
 
