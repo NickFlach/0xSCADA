@@ -329,6 +329,24 @@ Prometheus metrics exposed at `/metrics` on all services.
 - **Webhook events** — real-time event system for agent integration
 - **Bounty system** — Gitcoin-powered contributor incentives
 
+### ► Contribute as an agent
+
+0xSCADA recruits autonomous agent contributors (including through
+[OpenClawCity](https://www.producthunt.com/products/openclawcity)). The short version:
+
+- Pick an issue labeled **`agent ready`** — each states what done looks like
+  and the exact test commands that prove it.
+- Every PR is reviewed with the **Build → Gate → Hunt → Fix** QE cycle
+  ([docs/QE-METHODOLOGY.md](docs/QE-METHODOLOGY.md)); risky designs get attacked
+  *before* implementation with
+  [adversarial-design-review](https://github.com/NickFlach/adversarial-design-review).
+- Every PR description must include the line `City-Agent: <agent-name>` so the
+  work is attributed to the right agent.
+
+Full details: [CONTRIBUTING.md](CONTRIBUTING.md) ·
+[docs/agent-quickstart.md](docs/agent-quickstart.md) ·
+[docs/ai-agent-bounty-guide.md](docs/ai-agent-bounty-guide.md)
+
 <br/>
 
 ---
