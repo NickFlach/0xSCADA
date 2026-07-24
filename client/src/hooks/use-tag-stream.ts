@@ -24,9 +24,24 @@ export interface AlarmEvent {
   id: string;
   name: string;
   severity: "critical" | "high" | "medium" | "low" | "info";
-  state: "active" | "acknowledged" | "cleared";
-  tagValue?: number;
+  state: "active" | "acknowledged" | "cleared" | "shelved" | "suppressed";
+  tagId?: string;
+  equipmentId?: string;
+  siteId?: string;
+  message?: string;
+  timestamp: number;
+  tagValue?: number | string;
   triggeredAt: string;
+  acknowledgedBy?: string;
+  clearedBy?: string;
+  correlation: {
+    groupId: string | null;
+    groupState: "open" | "closed" | null;
+    rootCauseAlarmId: string | null;
+    suppressed: boolean;
+    isRootCause: boolean;
+    coordinationMode: "process-local";
+  };
 }
 
 export interface PipelineHealth {

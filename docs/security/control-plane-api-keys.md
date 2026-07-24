@@ -31,6 +31,32 @@ curl -H "X-API-Key: ${OPERATOR_KEY}" \
   https://oxscada.example.com/api/admin/anchor-backend
 ```
 
+## Alarm-correlation grants
+
+Alarm correlation uses separate grants so an observer, producer, operator, or
+configuration client receives only the capability it needs:
+
+| Grant | Capability |
+| --- | --- |
+| `alarms.read` | Read groups, root cause, rules, topology, policy, metrics, and status |
+| `alarms.ingest` | Ingest raw active alarms |
+| `alarms.acknowledge` | Acknowledge a tracked alarm |
+| `alarms.clear` | Clear a tracked alarm |
+| `alarms.configure` | Change rules, topology, or suppression policy |
+
+For example, a dedicated ingest key can be configured without any lifecycle or
+configuration authority:
+
+```text
+<generated-ingest-key>:alarm-ingester:alarms.ingest
+```
+
+Correlation state is process-local until
+[#573](https://github.com/NickFlach/0xSCADA/issues/573) lands, so suppression
+defaults off. Enabling it also requires the explicit
+`ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION=true` startup flag; use that
+escape hatch only for a single-process evaluation.
+
 ## Docker Compose
 
 The production root `docker-compose.yml` enables global authentication and

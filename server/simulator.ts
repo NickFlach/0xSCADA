@@ -1,5 +1,6 @@
 import { log, logError, logWarn } from "./logger";
 import { tagStreamServer } from "./websocket/tag-stream";
+import { cachedEventBridge } from "./websocket/cached-event-bridge";
 import { getFluxPublisher } from "./services/flux";
 import { natsPublisher } from "./services/nats";
 import { getAnchorPipeline } from "./bridge";
@@ -115,6 +116,27 @@ class FieldSimulator {
           timestamp: new Date().toISOString(),
         });
       } catch { /* WebSocket not connected — that's fine */ }
+
+      // Raise a real alarm for trip events — feeds the correlation engine
+      // and the alarm WebSocket channel, which had no producer (#213)
+      if (eventType === "BREAKER_TRIP") {
+        try {
+          void cachedEventBridge.publishAlarm({
+            id: `ALM-${asset.nameOrTag}-${Date.now()}`,
+            name: `${asset.nameOrTag} ${eventType}`,
+            tagId: `${asset.nameOrTag}.${eventType}`,
+            equipmentId: asset.nameOrTag,
+            siteId: asset.siteId,
+            severity: asset.critical ? "critical" : "high",
+            state: "active",
+            message: details,
+            timestamp: new Date().toISOString(),
+            triggeredAt: new Date().toISOString(),
+            value: (payload as any).current,
+            source: "simulator",
+          });
+        } catch { /* alarm fan-out failure must not break event generation */ }
+      }
 
       // Publish to NATS for blockchain anchoring (canonical wire schema, #440)
       try {
