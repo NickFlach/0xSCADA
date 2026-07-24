@@ -1,0 +1,73 @@
+name: Sync from flaukowski fork
+
+# Keeps this repo level with flaukowski/0xSCADA (the community/agent-facing
+# repo where OpenClawCity contributions land). Direct pushes to main are
+# blocked by repo rules, so this opens/refreshes a sync PR instead.
+#
+# Auto-merge is OFF by default. To enable: set the repository variable
+# AUTO_MERGE_FORK_SYNC to "true" (Settings -> Secrets and variables ->
+# Actions -> Variables). Note: PRs created with GITHUB_TOKEN do not trigger
+# other workflows, so if main gains required status checks, auto-merge will
+# wait forever unless CI is dispatched another way (or a PAT/GitHub App
+# token is used instead).
+
+on:
+  schedule:
+    - cron: "23 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  sync:
+    # Inert if this file ever syncs down into the fork itself
+    if: github.repository == 'NickFlach/0xSCADA'
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      FORK: https://github.com/flaukowski/0xSCADA.git
+      SYNC_BRANCH: sync/from-fork
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Fetch fork main
+        run: git fetch "$FORK" main:refs/remotes/fork/main
+
+      - name: Compare histories
+        id: compare
+        run: |
+          AHEAD=$(git rev-list --count origin/main..fork/main)
+          BEHIND=$(git rev-list --count fork/main..origin/main)
+          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
+          echo "behind=$BEHIND" >> "$GITHUB_OUTPUT"
+          echo "Fork is $AHEAD ahead, $BEHIND behind"
+
+      - name: Open/refresh sync PR (fast-forwardable)
+        if: steps.compare.outputs.ahead != '0' && steps.compare.outputs.behind == '0'
+        run: |
+          git push --force origin fork/main:refs/heads/$SYNC_BRANCH
+          if ! gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number' | grep -q .; then
+            gh pr create --base main --head "$SYNC_BRANCH" \
+              --title "Sync from flaukowski/0xSCADA ($(git rev-parse --short fork/main))" \
+              --body "$(printf 'Automated fork sync: %s commit(s) from flaukowski/0xSCADA main.\n\nFast-forward — no divergence. Merge with a merge commit (not squash/rebase) so commit SHAs stay convergent across the two repos.\n\nCity-Agent: sync-from-fork-workflow' "$(git rev-list --count origin/main..fork/main)")"
+          fi
+
+      - name: Enable auto-merge (opt-in)
+        if: steps.compare.outputs.ahead != '0' && steps.compare.outputs.behind == '0' && vars.AUTO_MERGE_FORK_SYNC == 'true'
+        run: |
+          PR=$(gh pr list --head "$SYNC_BRANCH" --state open --json number --jq '.[0].number')
+          [ -n "$PR" ] && gh pr merge "$PR" --auto --merge
+
+      - name: Alert on divergence
+        if: steps.compare.outputs.ahead != '0' && steps.compare.outputs.behind != '0'
+        run: |
+          TITLE="Fork sync blocked: histories diverged"
+          if ! gh issue list --state open --search "$TITLE in:title" --json number --jq '.[0].number' | grep -q .; then
+            gh issue create --title "$TITLE" \
+              --body "flaukowski/0xSCADA main and this repo's main have both moved independently (fork ahead ${{ steps.compare.outputs.ahead }}, parent ahead ${{ steps.compare.outputs.behind }}). Automated fast-forward sync is not possible — reconcile manually, then close this issue."
+          fi
