@@ -118,6 +118,8 @@ observability:
 networkPolicies:
   enabled: true
 
+# Shared pod defaults for server, client, and gateway. Keep these aligned with
+# helm/oxscada-full's gateway.podSecurityContext.
 securityContext:
   runAsNonRoot: true
   runAsUser: 1000
@@ -125,6 +127,8 @@ securityContext:
   seccompProfile:
     type: RuntimeDefault
 
+# Shared container defaults for server, client, and gateway. Keep these aligned
+# with helm/oxscada-full's gateway.securityContext.
 containerSecurityContext:
   allowPrivilegeEscalation: false
   readOnlyRootFilesystem: true

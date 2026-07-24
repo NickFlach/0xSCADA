@@ -223,9 +223,18 @@ describe("HTTP proxy", () => {
         authorization: "Bearer operator-secret",
         "x-api-key": "api-secret",
         cookie: "session=operator",
+        host: "gateway.operator.example:8443",
         origin: "https://operator.example",
         "x-request-id": "request-123",
-        connection: "keep-alive, x-remove-request",
+        forwarded: "for=198.51.100.9;proto=https;host=spoofed.example",
+        "x-forwarded-for": "198.51.100.9, 203.0.113.7",
+        "x-forwarded-client-cert": "By=spiffe://spoofed.example",
+        "x-forwarded-host": "spoofed.example",
+        "x-forwarded-port": "443",
+        "x-forwarded-prefix": "/trusted",
+        "x-forwarded-proto": "https",
+        connection:
+          "keep-alive, x-remove-request, x-forwarded-for, x-forwarded-host, x-forwarded-proto",
         "x-remove-request": "must-not-pass",
         "content-type": "text/plain",
       },
@@ -243,6 +252,14 @@ describe("HTTP proxy", () => {
     expect(captured?.headers.origin).toBe("https://operator.example");
     expect(captured?.headers["x-request-id"]).toBe("request-123");
     expect(captured?.headers["x-remove-request"]).toBeUndefined();
+    expect(captured?.headers.forwarded).toBeUndefined();
+    expect(captured?.headers.host).toBe(new URL(upstreamOrigin).host);
+    expect(captured?.headers["x-forwarded-for"]).toBe("127.0.0.1");
+    expect(captured?.headers["x-forwarded-proto"]).toBe("http");
+    expect(captured?.headers["x-forwarded-host"]).toBe("gateway.operator.example:8443");
+    expect(captured?.headers["x-forwarded-client-cert"]).toBeUndefined();
+    expect(captured?.headers["x-forwarded-port"]).toBeUndefined();
+    expect(captured?.headers["x-forwarded-prefix"]).toBeUndefined();
 
     expect(result.statusCode).toBe(201);
     expect(result.body).toBe("first-second");
@@ -497,8 +514,16 @@ describe("WebSocket proxy", () => {
             authorization: "Bearer websocket-secret",
             "x-api-key": "websocket-api-key",
             cookie: "session=websocket",
+            host: "gateway.operator.example:9443",
             origin: "https://operator.example",
             "x-request-id": "websocket-request-123",
+            forwarded: "for=198.51.100.9;proto=https;host=spoofed.example",
+            "x-forwarded-for": "198.51.100.9",
+            "x-forwarded-client-cert": "By=spiffe://spoofed.example",
+            "x-forwarded-host": "spoofed.example",
+            "x-forwarded-port": "443",
+            "x-forwarded-prefix": "/trusted",
+            "x-forwarded-proto": "https",
           },
         },
       );
@@ -521,6 +546,14 @@ describe("WebSocket proxy", () => {
       expect(capturedHeaders?.origin).toBe("https://operator.example");
       expect(capturedHeaders?.["x-request-id"]).toBe("websocket-request-123");
       expect(capturedHeaders?.["sec-websocket-protocol"]).toBe("scada.v1,fallback");
+      expect(capturedHeaders?.forwarded).toBeUndefined();
+      expect(capturedHeaders?.host).toBe(new URL(upstreamOrigin).host);
+      expect(capturedHeaders?.["x-forwarded-for"]).toBe("127.0.0.1");
+      expect(capturedHeaders?.["x-forwarded-proto"]).toBe("http");
+      expect(capturedHeaders?.["x-forwarded-host"]).toBe("gateway.operator.example:9443");
+      expect(capturedHeaders?.["x-forwarded-client-cert"]).toBeUndefined();
+      expect(capturedHeaders?.["x-forwarded-port"]).toBeUndefined();
+      expect(capturedHeaders?.["x-forwarded-prefix"]).toBeUndefined();
     },
   );
 

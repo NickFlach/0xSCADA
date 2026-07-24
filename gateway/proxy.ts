@@ -37,6 +37,11 @@ const HOP_BY_HOP_HEADERS = new Set([
   "upgrade",
 ]);
 
+function isForwardingHeader(name: string): boolean {
+  const normalized = name.toLowerCase();
+  return normalized === "forwarded" || normalized.startsWith("x-forwarded-");
+}
+
 const WEBSOCKET_PATHS = new Set(["/ws", "/ws/tags"]);
 
 export interface GatewayTimeouts {
@@ -181,7 +186,10 @@ function connectionTokens(headers: IncomingHttpHeaders): Set<string> {
   return tokens;
 }
 
-function filterHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
+function filterHeaders(
+  headers: IncomingHttpHeaders,
+  stripForwardingHeaders = false,
+): OutgoingHttpHeaders {
   const nominatedHeaders = connectionTokens(headers);
   const filtered: OutgoingHttpHeaders = {};
 
@@ -191,6 +199,7 @@ function filterHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
       value === undefined
       || HOP_BY_HOP_HEADERS.has(normalized)
       || nominatedHeaders.has(normalized)
+      || (stripForwardingHeaders && isForwardingHeader(normalized))
     ) {
       continue;
     }
@@ -198,6 +207,23 @@ function filterHeaders(headers: IncomingHttpHeaders): OutgoingHttpHeaders {
   }
 
   return filtered;
+}
+
+/**
+ * Replace, rather than append to, caller-controlled forwarding metadata.
+ * Deployments that intentionally trust a load balancer must add that trust
+ * boundary explicitly instead of allowing an arbitrary client to create it.
+ */
+function forwardRequestHeaders(request: IncomingMessage): OutgoingHttpHeaders {
+  const headers = filterHeaders(request.headers, true);
+  const inboundSocket = request.socket as Socket & { encrypted?: boolean };
+  const remoteAddress = request.socket.remoteAddress;
+  const requestedHost = request.headers.host;
+
+  if (remoteAddress) headers["x-forwarded-for"] = remoteAddress;
+  headers["x-forwarded-proto"] = inboundSocket.encrypted === true ? "https" : "http";
+  if (requestedHost) headers["x-forwarded-host"] = requestedHost;
+  return headers;
 }
 
 function filterRawHeaders(rawHeaders: string[]): string[] {
@@ -501,7 +527,7 @@ function proxyHttpRequest(
         target,
         request.method,
         path,
-        filterHeaders(request.headers),
+        forwardRequestHeaders(request),
         agent,
       ),
       (incoming) => {
@@ -702,7 +728,7 @@ function proxyWebSocket(
   let state: "pending" | "upgraded" | "ordinary-response" | "terminal" = "pending";
   let timedOut = false;
   let ordinaryResponse: IncomingMessage | undefined;
-  const headers = filterHeaders(request.headers);
+  const headers = forwardRequestHeaders(request);
   headers.connection = "Upgrade";
   headers.upgrade = "websocket";
 
