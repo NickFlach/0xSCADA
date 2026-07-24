@@ -30,11 +30,6 @@ const httpServer = createServer(app);
 // after body parsing so one gateway owns authentication and quota state.
 app.use(securityHeaders);
 
-// Health/readiness probes — mounted before auth so k8s probes work
-// unauthenticated. Mounted under /api to match the public-route allowlist
-// (/api/health, /api/healthz, /api/readyz).
-app.use('/api', healthRouter);
-
 // API Gateway middleware (#256) — sets up rate limiting, API key auth, CORS, request IDs
 const gatewayRateLimit = {
   windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS || '60000', 10),
@@ -46,9 +41,6 @@ const gatewayConfig = {
   publicRoutes: ['/api/health', '/api/healthz', '/api/readyz', '/api/docs'],
   corsOrigins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173').split(','),
 };
-
-// Wire OpenAPI docs to gateway config so Swagger UI reflects live settings
-registerSwaggerRoutes(app, gatewayConfig);
 
 declare module "http" {
   interface IncomingMessage {
@@ -71,8 +63,14 @@ app.use(express.urlencoded({ extended: false }));
 app.use(requestLoggingMiddleware());
 
 // Activate the configured gateway after parsing so its payload guard can
-// inspect request bodies. Health probes were mounted above and remain public.
+// inspect request bodies.
 const apiKeyManager = setupApiGateway(app, gatewayConfig);
+
+// Register every /api route behind the gateway pipeline. The exact probe/docs
+// allowlist skips authentication only; those routes still receive request IDs,
+// CORS, logging, and rate limiting. /api/metrics is intentionally not public.
+app.use('/api', healthRouter);
+registerSwaggerRoutes(app, gatewayConfig);
 
 (async () => {
   // Initialize the database first — downstream services and health checks

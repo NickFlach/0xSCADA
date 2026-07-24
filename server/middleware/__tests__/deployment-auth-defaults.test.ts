@@ -7,6 +7,22 @@ function repositoryFile(path: string): string {
 }
 
 describe("production deployment API-key defaults", () => {
+  it("registers all API routes behind the gateway pipeline", () => {
+    const startup = repositoryFile("server/index.ts");
+    const gatewayIndex = startup.indexOf(
+      "const apiKeyManager = setupApiGateway(app, gatewayConfig);",
+    );
+    const healthIndex = startup.indexOf("app.use('/api', healthRouter);");
+    const swaggerIndex = startup.indexOf(
+      "registerSwaggerRoutes(app, gatewayConfig);",
+    );
+
+    expect(gatewayIndex).toBeGreaterThanOrEqual(0);
+    expect(healthIndex).toBeGreaterThan(gatewayIndex);
+    expect(swaggerIndex).toBeGreaterThan(gatewayIndex);
+    expect(startup).not.toContain("'/api/metrics'");
+  });
+
   it("enables authentication in each production Docker image", () => {
     for (const dockerfile of [
       "Dockerfile",
