@@ -34,7 +34,7 @@
     "commander": "^13.1.0",
     "dotenv": "^17.2.3",
     "js-yaml": "^4.1.0",
-    "ora": "^8.1.1"
+    "ora": "^9.4.1"
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
