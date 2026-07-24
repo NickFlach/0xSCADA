@@ -13,6 +13,13 @@ name: Sync from NickFlach parent
 # (see dco.yml), so upstream commits that predate the sign-off convention
 # don't block integration.
 #
+# Token: set repo secret SYNC_PAT to a PAT with `repo` + `workflow` scope
+# (classic) or Contents+Pull-requests+Workflows: write (fine-grained) —
+# required to sync commits that touch `.github/workflows/*`, which the
+# default GITHUB_TOKEN cannot push. Falls back to GITHUB_TOKEN (syncs
+# everything except workflow-file changes). A PAT also lets sync PRs
+# trigger CI, which auto-merge needs.
+#
 # Requires the fork setting: Settings → Actions → General → "Allow GitHub
 # Actions to create and approve pull requests". Auto-merge is OFF by
 # default — set repo variable AUTO_MERGE_PARENT_SYNC=true to enable. Merge
@@ -32,7 +39,7 @@ jobs:
     if: github.repository == 'flaukowski/0xSCADA'
     runs-on: ubuntu-latest
     env:
-      GH_TOKEN: ${{ github.token }}
+      GH_TOKEN: ${{ secrets.SYNC_PAT || github.token }}
       OTHER: https://github.com/NickFlach/0xSCADA.git
       OTHER_NAME: NickFlach/0xSCADA
       SYNC_BRANCH: sync/from-parent
@@ -40,6 +47,9 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+          # Persisted git credential for `git push` — the PAT (or the
+          # default token as a fallback that can't push workflow files).
+          token: ${{ secrets.SYNC_PAT || github.token }}
 
       - name: Fetch the other repo's main
         run: git fetch "$OTHER" main:refs/remotes/other/main
