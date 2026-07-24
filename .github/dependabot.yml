@@ -1,11 +1,12 @@
 # Dependabot configuration.
 #
-# Rationale: the default (ungrouped, majors-included) config repeatedly produced
-# a single npm group PR that could not merge because it bundled breaking major
-# upgrades (e.g. vite 8, tailwindcss 4, js-yaml 5) alongside safe minor/patch
-# bumps. This config groups the safe updates so they flow and merge on their
-# own, and suppresses the specific majors that require a coordinated migration
-# until a maintainer takes them on individually.
+# Rationale: this repo has a tightly-pinned, interlocking dependency tree
+# (zod 3, react 18, vite 7, tailwind 3, typescript 5, a v3/v4/v5 zod-validation
+# split, etc.), so arbitrary major bumps break the build and cannot merge
+# unattended. Policy: group minor + patch updates so the safe bumps flow and
+# merge on their own, and DEFER all majors — dependabot will not open them.
+# To take on a specific major, do it as a dedicated migration PR (or briefly
+# remove/narrow the ignore below for that package).
 version: 2
 updates:
   # Root application (server + React frontend + contracts tooling)
@@ -20,17 +21,10 @@ updates:
           - "minor"
           - "patch"
     ignore:
-      # vite 8 is blocked until @vitejs/plugin-react ships a vite-8 peer range;
-      # bump both together in a dedicated PR, then remove this ignore.
-      - dependency-name: "vite"
-        update-types: ["version-update:semver-major"]
-      # tailwindcss 4 is a CSS-first rewrite (config + stylesheet migration);
-      # handle as a dedicated migration PR, then remove this ignore.
-      - dependency-name: "tailwindcss"
-        update-types: ["version-update:semver-major"]
-      # js-yaml 5 changes default schema/API; review every load/dump call site
-      # in a dedicated PR, then remove this ignore.
-      - dependency-name: "js-yaml"
+      # Defer every major bump; take majors on deliberately, one migration PR
+      # at a time (vite↔@vitejs/plugin-react, tailwind 4, zod 4, react 19,
+      # typescript, js-yaml 5, etc. all have coordination/migration cost).
+      - dependency-name: "*"
         update-types: ["version-update:semver-major"]
 
   # CLI package
@@ -44,6 +38,9 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    ignore:
+      - dependency-name: "*"
+        update-types: ["version-update:semver-major"]
 
   # GitHub Actions workflows
   - package-ecosystem: "github-actions"

@@ -6,6 +6,10 @@
 
 import React, { createContext, useContext, useEffect, useRef, useState, useCallback } from 'react';
 import type { PIDTagValue, PIDDataSnapshot, AlarmState } from '@shared/types/pid';
+import {
+  buildWebSocketProtocols,
+  useApiCredential,
+} from '../../lib/api-credential';
 
 // =============================================================================
 // TYPES
@@ -71,6 +75,7 @@ export const PIDDataProvider: React.FC<PIDDataProviderProps> = ({
   diagramId,
   children,
 }) => {
+  const { apiKey } = useApiCredential();
   const [values, setValues] = useState<Record<string, PIDTagValue>>({});
   const [connected, setConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<string | null>(null);
@@ -84,7 +89,11 @@ export const PIDDataProvider: React.FC<PIDDataProviderProps> = ({
   }, [wsUrl]);
 
   useEffect(() => {
-    const ws = new WebSocket(getWsUrl());
+    const protocols = buildWebSocketProtocols(apiKey);
+    const ws = new WebSocket(
+      getWsUrl(),
+      protocols.length > 0 ? protocols : undefined,
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -119,7 +128,7 @@ export const PIDDataProvider: React.FC<PIDDataProviderProps> = ({
       ws.close();
       wsRef.current = null;
     };
-  }, [getWsUrl, diagramId]);
+  }, [getWsUrl, diagramId, apiKey]);
 
   const subscribe = useCallback((tagIds: string[]) => {
     tagIds.forEach(t => subscribedTags.current.add(t));

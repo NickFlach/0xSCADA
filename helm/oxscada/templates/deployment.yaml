@@ -35,12 +35,20 @@ spec:
               value: "{{ $component.replicaCount }}"
             - name: ENABLE_API_KEYS
               value: {{ $component.apiKeys.enableGlobalAuth | quote }}
+            {{- if $component.apiKeys.enableGlobalAuth }}
+            - name: API_KEYS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ required "server.apiKeys.existingSecret is required when API-key authentication is enabled" $component.apiKeys.existingSecret | quote }}
+                  key: {{ $component.apiKeys.secretKey | quote }}
+            {{- else }}
             {{- with $component.apiKeys.existingSecret }}
             - name: API_KEYS
               valueFrom:
                 secretKeyRef:
                   name: {{ . | quote }}
                   key: {{ $component.apiKeys.secretKey | quote }}
+            {{- end }}
             {{- end }}
           {{ else if eq $name "gateway" }}
           env:

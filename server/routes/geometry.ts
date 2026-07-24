@@ -11,32 +11,19 @@
  * POST /api/geometry/recalibrate      — re-classify all entities (#336)
  */
 
-import { Router, type Request, type Response, type NextFunction } from "express";
+import { Router, type Request, type Response } from "express";
 import { FluxPublisher } from "../services/flux/index.js";
 import { FANO_LINES, isFanoRelated, geometricSimilarity } from "../services/geometry/fano.js";
 import { decodeClassIndex, Quadrant, Triality, type ClassComponents } from "../services/geometry/types.js";
 import { classify, classifyEntity } from "../services/geometry/classifier.js";
+import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
 
 /** Max allowed regex pattern length to mitigate ReDoS */
 const MAX_REGEX_PATTERN_LENGTH = 200;
 
-/** Simple auth middleware — checks for Bearer token or session */
-function requireAuth(req: Request, res: Response, next: NextFunction): void {
-  const authHeader = req.headers.authorization;
-  if (authHeader && authHeader.startsWith("Bearer ")) {
-    // Token-based auth — delegate to existing auth infrastructure
-    next();
-    return;
-  }
-  // Session-based auth
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any -- session types vary by auth middleware
-  const r = req as Request & { session?: { userId?: string }; user?: unknown };
-  if (r.session?.userId || r.user) {
-    next();
-    return;
-  }
-  res.status(401).json({ error: "Authentication required" });
-}
+const requireGeometryWrite = requireControlPlaneAccess({
+  scopes: ["geometry.write"],
+});
 
 /** Validate and sanitize a regex pattern string */
 function validateRegexPattern(pattern: string): { valid: boolean; error?: string } {
@@ -285,7 +272,7 @@ export function geometryRoutes(fluxPublisher: FluxPublisher | null): Router {
   });
 
   // ── Custom classification rules (#336) ─────────────────────────────────────
-  router.post("/rules", requireAuth, (req: Request, res: Response) => {
+  router.post("/rules", requireGeometryWrite, (req: Request, res: Response) => {
     const { pattern, quadrant, triality, slot } = req.body || {};
     if (!pattern || typeof pattern !== "string") {
       return res.status(400).json({ error: "pattern (string) is required" });
@@ -319,7 +306,7 @@ export function geometryRoutes(fluxPublisher: FluxPublisher | null): Router {
   });
 
   // ── Recalibrate all entities (#336) ────────────────────────────────────────
-  router.post("/recalibrate", requireAuth, (_req: Request, res: Response) => {
+  router.post("/recalibrate", requireGeometryWrite, (_req: Request, res: Response) => {
     if (!fluxPublisher) {
       return res.status(503).json({ error: "Flux publisher not configured" });
     }

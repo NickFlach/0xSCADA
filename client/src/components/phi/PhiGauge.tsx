@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useState } from "react";
+import { apiFetch } from "../../lib/api-credential";
 
 interface PhiData {
   phi: number;
@@ -158,7 +159,7 @@ export function PhiGauge({ refreshMs = 10000 }: { refreshMs?: number }) {
     let active = true;
     const fetchPhi = async () => {
       try {
-        const res = await fetch("/api/geometry/phi");
+        const res = await apiFetch("/api/geometry/phi");
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const json = await res.json();
         if (active) { setData(json); setError(null); }
