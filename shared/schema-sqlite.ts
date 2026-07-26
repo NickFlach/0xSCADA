@@ -252,6 +252,44 @@ export const controllers = sqliteTable("controllers", {
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ─── Alarms ──────────────────────────────────────────────────────────────────
+// Dev-mode parity with the Postgres schema (`shared/schema.ts`). Postgres enums
+// (alarm_severity: INFO|WARNING|CRITICAL|EMERGENCY, alarm_state:
+// ACTIVE|ACKNOWLEDGED|CLEARED|SHELVED) become plain text columns here — SQLite
+// has no native enum type. jsonb → text(mode json), timestamptz → integer
+// timestamp, following this file's existing conventions. Table names, column
+// names, and column intent match schema.ts so code that touches alarms behaves
+// the same in dev SQLite as in production Postgres. Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+export const alarms = sqliteTable("alarms", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  siteId: text("site_id"),
+  assetId: text("asset_id"),
+  tagId: text("tag_id"),
+  severity: text("severity").notNull(), // alarm_severity enum in Postgres
+  condition: text("condition", { mode: "json" }).notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+  deadband: real("deadband"),
+  delay: integer("delay_ms"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const alarmHistory = sqliteTable("alarm_history", {
+  id: text("id").primaryKey(),
+  alarmId: text("alarm_id").notNull(),
+  state: text("state").notNull(), // alarm_state enum in Postgres
+  value: real("trigger_value"),
+  message: text("message"),
+  acknowledgedBy: text("acknowledged_by"),
+  acknowledgedAt: integer("acknowledged_at", { mode: "timestamp" }),
+  clearedAt: integer("cleared_at", { mode: "timestamp" }),
+  metadata: text("metadata", { mode: "json" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Basic exports for compatibility
 export const insertSiteSchema = {
   parse: (data: any) => data // Simple pass-through for development
@@ -267,6 +305,14 @@ export const insertEventAnchorSchema = {
 
 export const insertMaintenanceRecordSchema = {
   parse: (data: any) => data
+};
+
+export const insertAlarmSchema = {
+  parse: (data: InsertAlarm): InsertAlarm => data // Simple pass-through for development
+};
+
+export const insertAlarmHistorySchema = {
+  parse: (data: InsertAlarmHistory): InsertAlarmHistory => data
 };
 
 // Type exports
@@ -302,3 +348,7 @@ export type DataTypeMapping = typeof dataTypeMappings.$inferSelect;
 export type InsertDataTypeMapping = typeof dataTypeMappings.$inferInsert;
 export type Controller = typeof controllers.$inferSelect;
 export type InsertController = typeof controllers.$inferInsert;
+export type Alarm = typeof alarms.$inferSelect;
+export type InsertAlarm = typeof alarms.$inferInsert;
+export type AlarmHistory = typeof alarmHistory.$inferSelect;
+export type InsertAlarmHistory = typeof alarmHistory.$inferInsert;
