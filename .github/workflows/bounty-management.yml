@@ -189,7 +189,7 @@ jobs:
         if: steps.validate.outputs.valid == 'true'
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install transaction runtime
         if: steps.validate.outputs.valid == 'true'
@@ -501,7 +501,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install transaction runtime
         run: npm ci --ignore-scripts
@@ -654,7 +654,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Install transaction runtime
         run: npm ci --ignore-scripts
