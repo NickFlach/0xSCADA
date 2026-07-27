@@ -19,6 +19,7 @@ import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
+import { startBlueprintControlLoop } from "./blueprint/control-loop";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -195,6 +196,14 @@ registerSwaggerRoutes(app, gatewayConfig);
       // Record the boot-resolved anchor routing: runtime switches (#455) are
       // process-local, so a restart reverts to env and this makes that visible.
       logAnchorBackendBootState();
+
+      // Deterministic blueprint control loop (#457). OFF unless
+      // BLUEPRINT_CONTROL_LOOP_ENABLED === "true" and a blueprint file is
+      // configured. It executes compiled control logic on a fixed cadence and
+      // publishes scheduling telemetry; it has NO field write path, so enabling
+      // it cannot actuate a plant. Fails closed: a bad blueprint is logged and
+      // the loop stays off rather than taking the server down.
+      startBlueprintControlLoop();
 
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);

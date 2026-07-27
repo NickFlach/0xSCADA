@@ -15,6 +15,7 @@ import { registry, metricsHandler } from '../metrics';
 import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
 import { getBridgeHealthStatus } from '../bridge';
+import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -129,6 +130,26 @@ healthManager.registerSimple(
   },
   false, // Optional, depends on configuration
 );
+
+// 9. Deterministic blueprint control loop (#457).
+//    Optional and OFF by default. "Disabled" is reported as healthy — an
+//    intentionally-off subsystem is not a fault — while a fail-closed load error
+//    is reported as unhealthy with the reason attached.
+healthManager.register({
+  name: 'blueprint-control-loop',
+  required: false,
+  check: async () => {
+    const status = getBlueprintControlLoop().status();
+    const health = describeBlueprintControlLoopHealth(status);
+    return {
+      name: 'blueprint-control-loop',
+      status: health.status,
+      lastCheck: new Date(),
+      message: health.message,
+      details: status,
+    };
+  },
+});
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
