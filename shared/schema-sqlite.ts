@@ -290,6 +290,47 @@ export const alarmHistory = sqliteTable("alarm_history", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ─── Validator Registry (#454) ───────────────────────────────────────────────
+// Dev-mode parity with the Postgres schema (`shared/schema.ts`) for the
+// cross-node `/state/:key` proxy. timestamptz → integer timestamp, boolean →
+// integer(mode boolean), bigint → integer, following this file's conventions.
+// The development database is created from the matching DDL in
+// `server/storage.ts` (`validatorRegistrySqliteSchema`); these declarations pin
+// the column contract against Postgres via
+// `shared/__tests__/schema-parity.test.ts`, and every column is exercised
+// against the live dev database by `server/__tests__/validator-registry.test.ts`.
+
+export const validatorNodes = sqliteTable("validator_nodes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  rpcUrl: text("rpc_url").notNull(),
+  operatorId: text("operator_id"),
+  region: text("region"),
+  enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const validatorPubkeys = sqliteTable("validator_pubkeys", {
+  id: text("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  algorithm: text("algorithm").default("ed25519").notNull(),
+  publicKeyPem: text("public_key_pem").notNull(),
+  keyId: text("key_id").notNull(),
+  active: integer("active", { mode: "boolean" }).default(true).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  retiredAt: integer("retired_at", { mode: "timestamp" }),
+});
+
+export const validatorStateWatermarks = sqliteTable("validator_state_watermarks", {
+  id: text("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  stateKey: text("state_key").notNull(),
+  blockHeight: integer("block_height").notNull(),
+  observedAt: integer("observed_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Basic exports for compatibility
 export const insertSiteSchema = {
   parse: (data: any) => data // Simple pass-through for development

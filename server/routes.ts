@@ -27,6 +27,7 @@ import { predictiveMaintenanceService } from "./services/predictive";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
+import { nodeRoutes } from "./routes/nodes"; // #454: cross-node state queries
 import { blueprintRoutes } from "./routes/blueprints";
 import { vendorRoutes } from "./routes/vendors";
 import { codegenRoutes } from "./routes/codegen";
@@ -72,6 +73,7 @@ export async function registerRoutes(
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
+  app.use("/api/nodes", nodeRoutes); // #454: GET /api/nodes/:id/state/:key
 
   // Blueprint / vendor / codegen surfaces (extracted from this file, #446).
   // vendorRoutes and codegenRoutes span several top-level prefixes

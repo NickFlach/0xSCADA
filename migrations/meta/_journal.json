@@ -29,6 +29,13 @@
       "when": 1784780403000,
       "tag": "0006_blueprint_instance_identity",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1784780404000,
+      "tag": "0007_validator_registry",
+      "breakpoints": true
     }
   ]
 }
