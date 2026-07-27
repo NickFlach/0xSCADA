@@ -1,0 +1,254 @@
+{
+  "dashboard": {
+    "id": null,
+    "uid": "0xscada-control-loop-latency",
+    "title": "0xSCADA Control-Loop Latency (SLO)",
+    "description": "Per-stage latency of the real integrity/anchor pipeline (batch -> sign -> anchor -> confirm), measured by server/integrity/anchor-pipeline.ts on every batch it anchors (#460). Every panel here is backed by a series that is genuinely produced. The issue also described a `tick` stage; no control loop feeds the anchor pipeline on this branch, so it is not measured and is deliberately absent rather than shown empty — see UNMEASURED_STAGES in server/integrity/stage-timestamps.ts. NOTE: this JSON is a committed artifact, not an auto-provisioned dashboard; import it into Grafana (or add it to your dashboard provisioning) yourself. It requires ANCHOR_BACKEND=l2 or both — the default `node` backend anchors out-of-process via NATS and produces none of these series.",
+    "tags": [
+      "0xscada",
+      "control-loop",
+      "latency",
+      "slo",
+      "integrity"
+    ],
+    "timezone": "browser",
+    "refresh": "30s",
+    "time": {
+      "from": "now-1h",
+      "to": "now"
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "source",
+          "label": "Pipeline",
+          "type": "query",
+          "datasource": "Prometheus",
+          "query": "label_values(scada_control_loop_stage_slo_ok, source)",
+          "includeAll": true,
+          "multi": true,
+          "refresh": 2
+        }
+      ]
+    },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Round-Trip P95 (batch -> confirmed)",
+        "type": "stat",
+        "description": "End-to-end scada_control_loop_roundtrip_latency_seconds. Only confirmed batches contribute; a batch that never confirms is counted in the outcome panel instead.",
+        "gridPos": { "h": 4, "w": 6, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(scada_control_loop_roundtrip_latency_seconds_bucket{source=~\"$source\"}[5m])))",
+            "legendFormat": "P95 round-trip"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "thresholds": {
+              "steps": [
+                { "color": "green", "value": null },
+                { "color": "yellow", "value": 15 },
+                { "color": "red", "value": 30.5 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 2,
+        "title": "Stages In SLO",
+        "type": "stat",
+        "description": "min of scada_control_loop_stage_slo_ok — 0 means at least one stage's last measurement breached its budget.",
+        "gridPos": { "h": 4, "w": 6, "x": 6, "y": 0 },
+        "targets": [
+          {
+            "expr": "min(scada_control_loop_stage_slo_ok{source=~\"$source\"})",
+            "legendFormat": "All stages OK"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bool_on_off",
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 3,
+        "title": "Confirmed Anchors / s",
+        "type": "stat",
+        "description": "Rate of batches whose trace closed as confirmed (scada_control_loop_cycles_total).",
+        "gridPos": { "h": 4, "w": 6, "x": 12, "y": 0 },
+        "targets": [
+          {
+            "expr": "sum(rate(scada_control_loop_cycles_total{source=~\"$source\",outcome=\"confirmed\"}[5m]))",
+            "legendFormat": "confirmed/s"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "ops" } }
+      },
+      {
+        "id": 4,
+        "title": "Sentinel Probe Up",
+        "type": "stat",
+        "description": "scada_control_loop_probe_up. Published as 0 whenever the opt-in sentinel probe (CONTROL_LOOP_LATENCY_PROBE=true) is not running, so 'no probe' is visible rather than absent. This is the series the ControlLoopProbeDown alert fires on.",
+        "gridPos": { "h": 4, "w": 6, "x": 18, "y": 0 },
+        "targets": [
+          {
+            "expr": "scada_control_loop_probe_up",
+            "legendFormat": "probe up"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bool_on_off",
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 5,
+        "title": "Per-Stage Latency P95 (batch / sign / anchor-enqueue / confirm)",
+        "type": "timeseries",
+        "gridPos": { "h": 9, "w": 12, "x": 0, "y": 4 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{source=~\"$source\"}[5m])))",
+            "legendFormat": "{{stage}} P95"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": { "lineWidth": 2, "fillOpacity": 10 }
+          }
+        }
+      },
+      {
+        "id": 6,
+        "title": "Per-Stage Latency P50 vs P99",
+        "type": "timeseries",
+        "gridPos": { "h": 9, "w": 12, "x": 12, "y": 4 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.50, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{source=~\"$source\"}[5m])))",
+            "legendFormat": "{{stage}} P50"
+          },
+          {
+            "expr": "histogram_quantile(0.99, sum by (le, stage) (rate(scada_control_loop_stage_latency_seconds_bucket{source=~\"$source\"}[5m])))",
+            "legendFormat": "{{stage}} P99"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": { "lineWidth": 1, "fillOpacity": 5 }
+          }
+        }
+      },
+      {
+        "id": 7,
+        "title": "Stage SLO Compliance (1=ok, 0=breach)",
+        "type": "state-timeline",
+        "description": "Drives the ControlLoopStageBudgetBreached alert (== 0 for 5m).",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 13 },
+        "targets": [
+          {
+            "expr": "scada_control_loop_stage_slo_ok{source=~\"$source\"}",
+            "legendFormat": "{{stage}} ({{source}})"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "bool_on_off",
+            "thresholds": {
+              "steps": [
+                { "color": "red", "value": null },
+                { "color": "green", "value": 1 }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "id": 8,
+        "title": "Round-Trip Latency Heatmap",
+        "type": "heatmap",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 13 },
+        "targets": [
+          {
+            "expr": "sum by (le) (rate(scada_control_loop_roundtrip_latency_seconds_bucket{source=~\"$source\"}[5m]))",
+            "legendFormat": "{{le}}",
+            "format": "heatmap"
+          }
+        ],
+        "fieldConfig": { "defaults": { "unit": "s" } }
+      },
+      {
+        "id": 9,
+        "title": "Trace Outcomes / s",
+        "type": "timeseries",
+        "description": "confirmed / failed / unconfirmed. A batch that fails or is never confirmed has no round-trip measurement at all, so this panel is the only place it is visible.",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 21 },
+        "targets": [
+          {
+            "expr": "sum by (outcome) (rate(scada_control_loop_cycles_total{source=~\"$source\"}[5m]))",
+            "legendFormat": "{{outcome}}"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "custom": { "lineWidth": 2, "fillOpacity": 10 }
+          }
+        }
+      },
+      {
+        "id": 10,
+        "title": "Sentinel Round-Trip P95 — requires the opt-in probe",
+        "type": "timeseries",
+        "description": "EMPTY UNLESS THE SENTINEL PROBE IS ENABLED (CONTROL_LOOP_LATENCY_PROBE=true). Flip-to-confirmation of the batch carrying a sentinel tag flip. Includes the pipeline's batching window, which normally dominates it. Check the 'Sentinel Probe Up' panel before reading this one.",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 21 },
+        "targets": [
+          {
+            "expr": "histogram_quantile(0.95, sum by (le) (rate(scada_control_loop_sentinel_roundtrip_seconds_bucket[15m])))",
+            "legendFormat": "sentinel P95"
+          },
+          {
+            "expr": "sum by (outcome) (rate(scada_control_loop_probe_flips_total[15m]))",
+            "legendFormat": "flips {{outcome}}/s"
+          }
+        ],
+        "fieldConfig": {
+          "defaults": {
+            "unit": "s",
+            "custom": { "lineWidth": 1, "fillOpacity": 5 }
+          }
+        }
+      },
+      {
+        "id": 11,
+        "title": "Coverage & caveats",
+        "type": "text",
+        "gridPos": { "h": 6, "w": 24, "x": 0, "y": 29 },
+        "options": {
+          "mode": "markdown",
+          "content": "**What produces these numbers.** `AnchorPipeline` (server/integrity/anchor-pipeline.ts) times its own seams on every batch it anchors: Merkle build (`batch`), HSM/software signature (`sign`), the hand-off into the relayer's submission queue (`anchor`), and the wait for the relayer's per-batch confirmation event (`confirm`). Nothing here is synthesised.\n\n**`anchor` is the enqueue, not the transaction.** `submitAnchor` coalesces the request and kicks the relayer's queue without awaiting it, so signature verification, gas estimation and the transaction itself are asynchronous and are accounted to `confirm` (~1ms vs seconds). A breach of the `anchor` budget means the server's event loop is stalled, not that the chain is slow.\n\n**Not measured: `tick`.** The original issue described a field-I/O -> control-loop `tick` stage ahead of `batch`. No control loop feeds the anchor pipeline on this branch, so there is nothing to time and no panel claims to show it. Add the stage to `STAGE_SLO_MS`/`PIPELINE_STAGES`, this dashboard, and the alert rules together once a real loop exists.\n\n**Sentinel panels need the opt-in probe.** `scada_control_loop_sentinel_roundtrip_seconds` and `scada_control_loop_probe_flips_total` only exist when `CONTROL_LOOP_LATENCY_PROBE=true` on an `ANCHOR_BACKEND=l2`/`both` node. `scada_control_loop_probe_up` always exists and reads 0 when the probe is off.\n\n**Unconfirmed batches have no round-trip.** They appear only in *Trace Outcomes*, never as a latency value."
+        }
+      }
+    ]
+  }
+}
