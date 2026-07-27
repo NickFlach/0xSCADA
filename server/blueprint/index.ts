@@ -27,4 +27,25 @@ export { compileBlueprint, BlueprintCompileError } from "./compiler.js";
 
 export { BlueprintRuntime, type TickResult } from "./runtime.js";
 
+export {
+  BlueprintDefinitionSchema,
+  BlueprintDefinitionError,
+  parseBlueprintDefinition,
+  type BlueprintDefinitionLimits,
+} from "./definition-schema.js";
+
+export {
+  BlueprintControlLoop,
+  BlueprintControlLoopError,
+  BlueprintControlLoopConfigSchema,
+  describeBlueprintControlLoopHealth,
+  getBlueprintControlLoop,
+  loadBlueprintControlLoopConfig,
+  startBlueprintControlLoop,
+  type BlueprintControlLoopConfig,
+  type BlueprintControlLoopHealth,
+  type BlueprintControlLoopState,
+  type BlueprintControlLoopStatus,
+} from "./control-loop.js";
+
 export { makeControlFarmBlueprint, makeInputVector } from "./fixtures.js";

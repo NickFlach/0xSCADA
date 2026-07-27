@@ -142,6 +142,105 @@ or scheduler jitter under a single OCPU), the contingency is:
   smallest samples; percentiles remain meaningful because they aggregate 10⁵
   samples.
 
+## Amendment (2026-07): production control-loop host
+
+**Problem.** The decision above shipped a well-tested interpreter that nothing in
+production ever constructed — `new BlueprintRuntime(...)` appeared only in the
+unit tests and the benchmark. As deployed, the deterministic runtime executed
+nothing, so none of the guarantees above were observable on a running system.
+
+**Decision.** Add `server/blueprint/control-loop.ts`: a host that loads a
+blueprint definition from disk, validates it, compiles it once, and drives
+`tickFast()` from a single `setInterval` at the compiled scan period.
+
+- **Gated OFF by default.** The loop starts only when
+  `BLUEPRINT_CONTROL_LOOP_ENABLED` is exactly the string `"true"` *and*
+  `BLUEPRINT_CONTROL_LOOP_DEFINITION` names a readable definition file. There is
+  no truthy coercion, so `1`/`yes`/`on`/`TRUE` leave it off. This follows the
+  existing opt-in convention (`ENABLE_BLOCKCHAIN`, `SPARKPLUG_BROKER_URL`,
+  `FLUX_URL`) rather than introducing a new one.
+- **Execution, not actuation.** The host contains no field-bus, gateway,
+  OPC-UA/Modbus/DNP3 or storage write. Enabling it creates no plant-output path
+  that did not already exist; computed outputs stay in the runtime's own
+  `Float64Array`. Until a field-IO binding lands (with the safety review such a
+  write path requires), input tags hold their load-time initial values unless an
+  in-process caller uses `writeInputs()`. `status().actuatesOutputs` is a
+  hard-coded `false` so operators can confirm the boundary from `/health`.
+- **Fail closed at load.** The definition is size-checked before it is read,
+  parsed as JSON, validated by a `.strict()` Zod schema derived from the runtime
+  opcode table (`server/blueprint/definition-schema.ts`), bounded by configurable
+  tag/node ceilings, and only then compiled. Every failure raises a
+  `BlueprintControlLoopError` naming the file and the reason; `tryStart()` logs
+  it and leaves the loop off, so a bad blueprint cannot take down server startup.
+- **Hot-path contract preserved.** The measured scan is allocation-free: the
+  timer callback does only numeric work around `tickFast()` — two
+  `performance.now()` reads, counter updates and one store into a pre-allocated
+  `Float64Array` ring buffer. No closure is allocated per arm (the callback is
+  bound once), and there is no `await`/Promise, so the scan still cannot be
+  preempted mid-tick. **One honest exception:** at most once per
+  `BLUEPRINT_CONTROL_LOOP_METRICS_INTERVAL_MS` (default 1 s) the same callback
+  also publishes metrics, and that path *does* allocate — two `subarray` views
+  plus the registry's per-call label key (`labelNames.map(...).join()`). It runs
+  strictly after the scan duration has been recorded, so it cannot inflate a
+  measured tick, but it is real work on the scan timer; any resulting lateness
+  is not hidden, it surfaces as a missed deadline. Moving publication to its own
+  timer would remove even that; it is kept on one timer deliberately.
+
+**Telemetry shape (and why it is not a histogram).** Scan durations go into a
+pre-allocated ring buffer; p50/p99/max over that window are mirrored onto the
+existing `server/metrics` registry on a slow cadence (default 1 s) as gauges
+under `scada_blueprint_control_loop_*`, alongside counters for ticks, missed
+deadlines, overruns and load failures. A histogram would be the idiomatic shape,
+but this registry's `Histogram.observe()` builds a label key per call — i.e. it
+allocates — and calling it once per scan would put an allocation on the control
+loop and undermine the property this ADR exists to protect. The cost of the
+chosen shape is that the exported quantiles are per-window and per-instance, and
+therefore not aggregatable across replicas the way buckets would be.
+
+**Health.** `blueprint-control-loop` is registered as an optional check.
+Disabled reports *healthy* (an intentionally-off subsystem is not a fault);
+a load failure reports *unhealthy* with the reason; enabled-but-not-running and
+a recently-missed deadline report *degraded* (the latter self-clears after
+`BLUEPRINT_CONTROL_LOOP_DEGRADED_WINDOW_MS`).
+
+**Definition format.** No blueprint definition ships with the repository — a
+production loop must be pointed at an operator-authored file, deliberately, so
+that nothing here can be mistaken for a plant-ready program. The authoring shape
+is `BlueprintDefinition` in `server/blueprint/types.ts`, validated by
+`server/blueprint/definition-schema.ts`. A minimal, complete example of the JSON
+that schema accepts:
+
+```json
+{
+  "id": "pump-interlock",
+  "name": "Pump start interlock",
+  "tags": [
+    { "name": "LEVEL",      "direction": "input",    "dataType": "float", "initial": 0 },
+    { "name": "ESTOP",      "direction": "input",    "dataType": "bool",  "initial": 0 },
+    { "name": "PERMIT",     "direction": "internal", "dataType": "bool" },
+    { "name": "RUN_CMD",    "direction": "output",   "dataType": "bool" },
+    { "name": "HIGH_LEVEL", "direction": "output",   "dataType": "bool" }
+  ],
+  "nodes": [
+    { "id": "hi",  "op": "GT",  "inputs": [{ "tag": "LEVEL" }, { "const": 80 }], "output": "HIGH_LEVEL" },
+    { "id": "ok",  "op": "NOT", "inputs": [{ "tag": "ESTOP" }],                  "output": "PERMIT" },
+    { "id": "run", "op": "AND", "inputs": [{ "tag": "PERMIT" }, { "tag": "HIGH_LEVEL" }], "output": "RUN_CMD" }
+  ],
+  "scanPeriodMs": 100
+}
+```
+
+The schema is `.strict()`: an unrecognised field is a rejection, not something
+ignored. `op` must be one of the names in `OP_TO_OPCODE`, and per-op arity is
+enforced by the compiler. Note that `RUN_CMD` above is computed and readable and
+nothing more — per the actuation boundary, no output reaches a field device.
+
+**Known gap.** The repository has no SIGTERM/shutdown orchestration, so
+`stop()` — which clears the timer and needs no draining, the scan being fully
+synchronous — is exercised by the test suite and available to callers, but is
+not yet wired to a process shutdown hook. That wiring belongs with a
+server-wide graceful-shutdown change, not with this one.
+
 ## Verification procedure (reference hardware)
 
 ```bash
