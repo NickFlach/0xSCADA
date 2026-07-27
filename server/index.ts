@@ -20,6 +20,9 @@ import { startFluxIntegration } from "./services/flux";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
 import { startBlueprintControlLoop } from "./blueprint/control-loop";
+// Blueprint watchdog / safe-state composition root (#459). Off unless the
+// deployment supplies BLUEPRINT_SAFETY_BINDINGS[_FILE].
+import { blueprintSafetyHost } from "./blueprint/safety-host";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -242,6 +245,11 @@ registerSwaggerRoutes(app, gatewayConfig);
       // it cannot actuate a plant. Fails closed: a bad blueprint is logged and
       // the loop stays off rather than taking the server down.
       startBlueprintControlLoop();
+      // Arm the blueprint watchdogs (#459). No-op unless this deployment
+      // supplies BLUEPRINT_SAFETY_BINDINGS / BLUEPRINT_SAFETY_BINDINGS_FILE;
+      // the resulting state is always reported by /api/blueprint-safe-state.
+      const safetyStatus = blueprintSafetyHost.start();
+      log(`Blueprint safety host: ${safetyStatus.state} — ${safetyStatus.reason}`);
 
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);

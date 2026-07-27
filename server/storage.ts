@@ -176,10 +176,25 @@ CREATE TABLE IF NOT EXISTS controllers (
   configuration TEXT NOT NULL DEFAULT '{}', status TEXT NOT NULL DEFAULT 'offline',
   created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS blueprint_safe_state_log (
+  id TEXT PRIMARY KEY, blueprint_id TEXT NOT NULL, site_id TEXT,
+  transition TEXT NOT NULL, safe_state TEXT NOT NULL,
+  tick_budget_ms INTEGER NOT NULL, consecutive_misses INTEGER,
+  operator TEXT, reason TEXT NOT NULL, anchor_hash TEXT NOT NULL,
+  anchor_tx_hash TEXT, metadata TEXT, created_at INTEGER NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_instances_type_name
   ON unit_instances(unit_type_id, name);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_instances_type_name
   ON control_module_instances(control_module_type_id, name);
+CREATE INDEX IF NOT EXISTS idx_safe_state_log_blueprint_id
+  ON blueprint_safe_state_log(blueprint_id);
+CREATE INDEX IF NOT EXISTS idx_safe_state_log_transition
+  ON blueprint_safe_state_log(transition);
+CREATE INDEX IF NOT EXISTS idx_safe_state_log_created_at
+  ON blueprint_safe_state_log(created_at);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_safe_state_log_anchor_hash
+  ON blueprint_safe_state_log(anchor_hash);
 `;
 
 /**
@@ -996,6 +1011,147 @@ export const recordValidatorStateWatermark = async (
   }
   return current;
 };
+// ─── Blueprint safe-state audit trail (#459) ────────────────────────────────
+// The watchdog's safe-state transitions must be durable on BOTH dialects. The
+// generic CRUD facade above cannot be reused here: `safe_state` may serialise
+// to a bare JSON string ("hold-last"), which the shared SQLite JSON decoder
+// (which only parses values starting with `[` or `{`) would hand back
+// double-encoded. These two functions therefore own their own encoding.
+//
+// Postgres schema: migrations/0009_blueprint_safe_state_log.sql
+// SQLite schema:   `blueprintSqliteSchema` above, applied on every open.
+
+/** A safe-state transition as written to `blueprint_safe_state_log`. */
+export interface SafeStateLogInsert {
+  blueprintId: string;
+  siteId?: string;
+  transition: string;
+  /** Serialised SafeStateAction. */
+  safeState: unknown;
+  tickBudgetMs: number;
+  consecutiveMisses?: number;
+  operator?: string;
+  reason: string;
+  anchorHash: string;
+  anchorTxHash?: string;
+  createdAt: Date;
+}
+
+/** A safe-state transition as read back from `blueprint_safe_state_log`. */
+export interface SafeStateLogRecord extends SafeStateLogInsert {
+  id: string;
+}
+
+function toSafeStateLogRecord(row: Record<string, unknown>): SafeStateLogRecord {
+  const rawSafeState = row.safe_state ?? row.safeState;
+  const safeState = typeof rawSafeState === 'string'
+    ? JSON.parse(rawSafeState) as unknown
+    : rawSafeState;
+  const rawCreatedAt = row.created_at ?? row.createdAt;
+  const createdAt = rawCreatedAt instanceof Date
+    ? rawCreatedAt
+    : new Date(Number(rawCreatedAt));
+  const optional = (value: unknown): string | undefined =>
+    value === null || value === undefined ? undefined : String(value);
+  const optionalNumber = (value: unknown): number | undefined =>
+    value === null || value === undefined ? undefined : Number(value);
+
+  return {
+    id: String(row.id),
+    blueprintId: String(row.blueprint_id ?? row.blueprintId),
+    siteId: optional(row.site_id ?? row.siteId),
+    transition: String(row.transition),
+    safeState,
+    tickBudgetMs: Number(row.tick_budget_ms ?? row.tickBudgetMs),
+    consecutiveMisses: optionalNumber(row.consecutive_misses ?? row.consecutiveMisses),
+    operator: optional(row.operator),
+    reason: String(row.reason),
+    anchorHash: String(row.anchor_hash ?? row.anchorHash),
+    anchorTxHash: optional(row.anchor_tx_hash ?? row.anchorTxHash),
+    createdAt,
+  };
+}
+
+/**
+ * Durably record one safe-state transition. Idempotent on `anchor_hash` so a
+ * retried write (the controller retries an entry whose durability was
+ * ambiguous) cannot duplicate the audit row.
+ *
+ * Throws if the write did not land — callers must never treat a discarded
+ * audit as a successful one.
+ */
+export async function insertBlueprintSafeStateLog(
+  entry: SafeStateLogInsert,
+): Promise<void> {
+  await withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      await sqliteRun(
+        `INSERT OR IGNORE INTO blueprint_safe_state_log
+           (id, blueprint_id, site_id, transition, safe_state, tick_budget_ms,
+            consecutive_misses, operator, reason, anchor_hash, anchor_tx_hash,
+            created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          randomUUID(),
+          entry.blueprintId,
+          entry.siteId ?? null,
+          entry.transition,
+          JSON.stringify(entry.safeState),
+          entry.tickBudgetMs,
+          entry.consecutiveMisses ?? null,
+          entry.operator ?? null,
+          entry.reason,
+          entry.anchorHash,
+          entry.anchorTxHash ?? null,
+          entry.createdAt.getTime(),
+        ],
+      );
+      return;
+    }
+
+    await requireDatabase()
+      .insert(schema.blueprintSafeStateLog)
+      .values({
+        blueprintId: entry.blueprintId,
+        siteId: entry.siteId,
+        transition: entry.transition,
+        safeState: entry.safeState as Record<string, unknown>,
+        tickBudgetMs: entry.tickBudgetMs,
+        consecutiveMisses: entry.consecutiveMisses,
+        operator: entry.operator,
+        reason: entry.reason,
+        anchorHash: entry.anchorHash,
+        anchorTxHash: entry.anchorTxHash,
+        createdAt: entry.createdAt,
+      })
+      .onConflictDoNothing({ target: schema.blueprintSafeStateLog.anchorHash });
+  });
+}
+
+/** Read back safe-state transitions, newest first. */
+export async function listBlueprintSafeStateLog(
+  blueprintId?: string,
+): Promise<SafeStateLogRecord[]> {
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      const rows = blueprintId
+        ? await sqliteAll(
+          'SELECT * FROM blueprint_safe_state_log WHERE blueprint_id = ? ORDER BY created_at DESC',
+          [blueprintId],
+        )
+        : await sqliteAll(
+          'SELECT * FROM blueprint_safe_state_log ORDER BY created_at DESC',
+        );
+      return rows.map(toSafeStateLogRecord);
+    }
+
+    const table = schema.blueprintSafeStateLog;
+    let query = requireDatabase().select().from(table);
+    if (blueprintId) query = query.where(eq(table.blueprintId, blueprintId));
+    const rows = await query.orderBy(desc(table.createdAt)) as Record<string, unknown>[];
+    return rows.map(toSafeStateLogRecord);
+  });
+}
 
 // Export storage object as expected by health/index.ts
 export const storage = {

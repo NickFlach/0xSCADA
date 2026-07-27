@@ -331,6 +331,30 @@ export const validatorStateWatermarks = sqliteTable("validator_state_watermarks"
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ─── Blueprint Safe-State audit trail (#459) ─────────────────────────────────
+// Dev-mode parity with the Postgres table in `shared/schema.ts`, which is
+// created in production by migrations/0009_blueprint_safe_state_log.sql. The
+// safe-state audit must be durable on BOTH dialects — a swallowed audit write
+// would let the controller report a safe-state transition that was discarded.
+// jsonb → text(mode json), timestamptz → integer timestamp, per this file's
+// conventions. Kept in sync by `shared/__tests__/schema-parity.test.ts`; the
+// physical SQLite DDL lives in `blueprintSqliteSchema` (server/storage.ts).
+export const blueprintSafeStateLog = sqliteTable("blueprint_safe_state_log", {
+  id: text("id").primaryKey(),
+  blueprintId: text("blueprint_id").notNull(),
+  siteId: text("site_id"),
+  transition: text("transition").notNull(),
+  safeState: text("safe_state", { mode: "json" }).notNull(),
+  tickBudgetMs: integer("tick_budget_ms").notNull(),
+  consecutiveMisses: integer("consecutive_misses"),
+  operator: text("operator"),
+  reason: text("reason").notNull(),
+  anchorHash: text("anchor_hash").notNull(),
+  anchorTxHash: text("anchor_tx_hash"),
+  metadata: text("metadata", { mode: "json" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // Basic exports for compatibility
 export const insertSiteSchema = {
   parse: (data: any) => data // Simple pass-through for development

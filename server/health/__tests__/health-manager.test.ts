@@ -35,6 +35,29 @@ describe('HealthManager', () => {
     expect(h.status).toBe('degraded');
   });
 
+  it('propagates a component-reported degraded state to top-level health', async () => {
+    hm.register({
+      name: 'blueprint-safety-runtime',
+      required: false,
+      check: async () => ({
+        name: 'blueprint-safety-runtime',
+        status: 'degraded',
+        lastCheck: new Date(),
+        message: 'control path held',
+      }),
+    });
+
+    const h = await hm.checkAll();
+
+    expect(h.status).toBe('degraded');
+    expect(h.healthy).toBe(true);
+    expect(h.components['blueprint-safety-runtime']).toMatchObject({
+      status: 'down',
+      healthy: false,
+    });
+    expect(await hm.isReady()).toBe(true);
+  });
+
   it('respects dependency ordering', async () => {
     const order: string[] = [];
     hm.register({

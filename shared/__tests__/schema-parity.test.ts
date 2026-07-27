@@ -7,6 +7,7 @@ import {
   validatorNodes as pgValidatorNodes,
   validatorPubkeys as pgValidatorPubkeys,
   validatorStateWatermarks as pgValidatorStateWatermarks,
+  blueprintSafeStateLog as pgBlueprintSafeStateLog,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -14,6 +15,7 @@ import {
   validatorNodes as sqliteValidatorNodes,
   validatorPubkeys as sqliteValidatorPubkeys,
   validatorStateWatermarks as sqliteValidatorStateWatermarks,
+  blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
 } from '../schema-sqlite';
 
 /**
@@ -28,6 +30,10 @@ import {
  *
  * Covers the alarm tables (#7) and the validator registry backing the
  * cross-node state proxy (#454).
+ *
+ * `blueprint_safe_state_log` (#459) is covered here because a safe-state audit
+ * that silently vanishes on one dialect is a safety defect, not a dev-mode
+ * inconvenience.
  */
 
 const sqlColumnNames = (table: Table): string[] =>
@@ -47,6 +53,11 @@ const cases = [
     name: 'validator_state_watermarks',
     pg: pgValidatorStateWatermarks,
     sqlite: sqliteValidatorStateWatermarks,
+  },
+  {
+    name: 'blueprint_safe_state_log',
+    pg: pgBlueprintSafeStateLog,
+    sqlite: sqliteBlueprintSafeStateLog,
   },
 ] as const;
 
