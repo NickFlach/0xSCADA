@@ -43,6 +43,13 @@
       "when": 1784780405000,
       "tag": "0008_modbus_register_map",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1784780406000,
+      "tag": "0009_blueprint_safe_state_log",
+      "breakpoints": true
     }
   ]
 }

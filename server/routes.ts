@@ -28,6 +28,7 @@ import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
 import { nodeRoutes } from "./routes/nodes"; // #454: cross-node state queries
+import { blueprintSafeStateRoutes } from "./routes/blueprint-safe-state"; // #459
 import { blueprintRoutes } from "./routes/blueprints";
 import { vendorRoutes } from "./routes/vendors";
 import { codegenRoutes } from "./routes/codegen";
@@ -75,6 +76,7 @@ export async function registerRoutes(
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
   app.use("/api/nodes", nodeRoutes); // #454: GET /api/nodes/:id/state/:key
+  app.use("/api/blueprint-safe-state", blueprintSafeStateRoutes); // #459 watchdog & safe-state
 
   // Blueprint / vendor / codegen surfaces (extracted from this file, #446).
   // vendorRoutes and codegenRoutes span several top-level prefixes

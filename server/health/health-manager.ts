@@ -220,10 +220,11 @@ export class HealthManager {
     const requiredNames = new Set(this.checks.filter(c => c.required !== false).map(c => c.name));
     const requiredUnhealthy = services.some(s => requiredNames.has(s.name) && s.status === 'unhealthy');
     const anyUnhealthy = services.some(s => s.status === 'unhealthy');
+    const anyDegraded = services.some(s => s.status === 'degraded');
 
     let status: 'healthy' | 'unhealthy' | 'degraded';
     if (requiredUnhealthy) status = 'unhealthy';
-    else if (anyUnhealthy) status = 'degraded';
+    else if (anyUnhealthy || anyDegraded) status = 'degraded';
     else status = 'healthy';
 
     const components: Record<string, { status: string; healthy: boolean; latencyMs?: number }> = {};

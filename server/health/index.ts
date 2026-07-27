@@ -17,6 +17,7 @@ import { storeAndForwardService } from '../gateway/store-and-forward';
 import { getBridgeHealthStatus } from '../bridge';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
+import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
 
 // Control-loop latency telemetry (#460): publish the sentinel probe's liveness
 // gauge as part of normal server composition so `scada_control_loop_probe_up`
@@ -156,6 +157,32 @@ healthManager.register({
       lastCheck: new Date(),
       message: health.message,
       details: status,
+    };
+  },
+});
+
+// 10. Blueprint safe-state binding (#459). Optional for general API readiness.
+// Reports the real binding state: `healthy` when nothing is configured (nothing
+// is loaded, so nothing is being guarded and nothing is being claimed),
+// `healthy` when every armed blueprint is running, and `degraded` when a binding
+// was refused or an armed blueprint is not RUNNING. The `message`/`details`
+// always say which of those it is.
+healthManager.register({
+  name: 'blueprint-safety-runtime',
+  required: false,
+  check: async () => {
+    const status = getBlueprintProductionSafetyStatus();
+    return {
+      name: 'blueprint-safety-runtime',
+      status: status.state === 'DEGRADED' ? 'degraded' : 'healthy',
+      lastCheck: new Date(),
+      message: status.reason,
+      details: {
+        state: status.state,
+        capabilities: status.capabilities,
+        registeredBlueprintIds: status.registeredBlueprintIds,
+        rejected: status.rejected,
+      },
     };
   },
 });
