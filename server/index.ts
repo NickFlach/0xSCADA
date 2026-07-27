@@ -194,9 +194,10 @@ registerSwaggerRoutes(app, gatewayConfig);
       }
 
       // Start the IEC 61850 GOOSE subscriber (Issue #465) — no-op unless
-      // GOOSE_SUBSCRIPTIONS_FILE is configured. Live Layer-2 capture is NOT
-      // provided (it needs a native addon); with GOOSE_PCAP_FILE set it
-      // replays a capture, otherwise it starts "unavailable" and logs why.
+      // GOOSE_SUBSCRIPTIONS_FILE is configured. Capture is opt-in: with
+      // GOOSE_PCAP_FILE it replays a capture, with GOOSE_CAPTURE=live it
+      // captures EtherType 0x88B8 off GOOSE_IFACE through a libpcap tool
+      // (needs CAP_NET_RAW), otherwise it starts "unavailable" and logs why.
       try {
         const { startGooseSubscriber } = await import("./protocols/iec61850-goose");
         await startGooseSubscriber();

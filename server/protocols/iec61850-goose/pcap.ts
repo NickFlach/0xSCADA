@@ -104,6 +104,20 @@ export interface PcapFile {
   packets: PcapPacket[];
 }
 
+/** The four fixed-width fields of a per-packet record header. */
+export interface PcapRecordHeader {
+  /** Absolute capture time in ms since the Unix epoch, fractional. */
+  timestampMs: number;
+  /** Exact `ts_sec` field. */
+  seconds: number;
+  /** Exact `ts_subsec` field (µs or ns per the global header's magic). */
+  subSeconds: number;
+  /** `incl_len` — bytes of packet data stored after this header. */
+  capturedLength: number;
+  /** `orig_len` — length of the packet on the wire. */
+  originalLength: number;
+}
+
 function readU32(buf: Buffer, offset: number, order: PcapByteOrder): number {
   return order === "big" ? buf.readUInt32BE(offset) : buf.readUInt32LE(offset);
 }
@@ -168,6 +182,48 @@ export function readPcapGlobalHeader(buf: Buffer): PcapGlobalHeader {
   };
 }
 
+/** Sub-second units per second implied by the global header's magic number. */
+export function subSecondsPerSecond(header: PcapGlobalHeader): number {
+  return header.nanosecondPrecision ? 1_000_000_000 : 1_000_000;
+}
+
+/**
+ * Decode one 16-byte packet record header at `offset`.
+ *
+ * Shared by {@link parsePcap} and the incremental {@link
+ * ./pcap-stream.js#PcapStreamDecoder}, so a whole-buffer parse and a streaming
+ * parse can never disagree about the record layout or the byte order handling.
+ * The caller is responsible for having {@link PCAP_RECORD_HEADER_LENGTH} bytes
+ * available; `packetIndex` only appears in error messages.
+ */
+export function decodePcapRecordHeader(
+  buf: Buffer,
+  offset: number,
+  header: PcapGlobalHeader,
+  packetIndex: number,
+): PcapRecordHeader {
+  const perSecond = subSecondsPerSecond(header);
+  const seconds = readU32(buf, offset, header.byteOrder);
+  const subSeconds = readU32(buf, offset + 4, header.byteOrder);
+  const capturedLength = readU32(buf, offset + 8, header.byteOrder);
+  const originalLength = readU32(buf, offset + 12, header.byteOrder);
+
+  if (subSeconds >= perSecond) {
+    throw new PcapParseError(
+      `packet ${packetIndex}: sub-second field ${subSeconds} exceeds ` +
+        `${perSecond} — byte order or magic is wrong`,
+    );
+  }
+
+  return {
+    timestampMs: seconds * 1000 + (subSeconds / perSecond) * 1000,
+    seconds,
+    subSeconds,
+    capturedLength,
+    originalLength,
+  };
+}
+
 /**
  * Parse a complete classic-pcap buffer into its header and packet records.
  *
@@ -178,7 +234,6 @@ export function readPcapGlobalHeader(buf: Buffer): PcapGlobalHeader {
 export function parsePcap(buf: Buffer): PcapFile {
   const header = readPcapGlobalHeader(buf);
   const packets: PcapPacket[] = [];
-  const subSecondsPerSecond = header.nanosecondPrecision ? 1_000_000_000 : 1_000_000;
 
   let offset = PCAP_GLOBAL_HEADER_LENGTH;
   while (offset < buf.length) {
@@ -188,34 +243,25 @@ export function parsePcap(buf: Buffer): PcapFile {
           `(${buf.length - offset} of ${PCAP_RECORD_HEADER_LENGTH} bytes)`,
       );
     }
-    const seconds = readU32(buf, offset, header.byteOrder);
-    const subSeconds = readU32(buf, offset + 4, header.byteOrder);
-    const capturedLength = readU32(buf, offset + 8, header.byteOrder);
-    const originalLength = readU32(buf, offset + 12, header.byteOrder);
+    const record = decodePcapRecordHeader(buf, offset, header, packets.length);
     offset += PCAP_RECORD_HEADER_LENGTH;
 
-    if (subSeconds >= subSecondsPerSecond) {
+    if (offset + record.capturedLength > buf.length) {
       throw new PcapParseError(
-        `packet ${packets.length}: sub-second field ${subSeconds} exceeds ` +
-          `${subSecondsPerSecond} — byte order or magic is wrong`,
-      );
-    }
-    if (offset + capturedLength > buf.length) {
-      throw new PcapParseError(
-        `truncated packet ${packets.length}: incl_len ${capturedLength} at offset ` +
+        `truncated packet ${packets.length}: incl_len ${record.capturedLength} at offset ` +
           `${offset} exceeds the ${buf.length}-byte file`,
       );
     }
 
     packets.push({
-      timestampMs: seconds * 1000 + (subSeconds / subSecondsPerSecond) * 1000,
-      seconds,
-      subSeconds,
-      capturedLength,
-      originalLength,
-      data: Buffer.from(buf.subarray(offset, offset + capturedLength)),
+      timestampMs: record.timestampMs,
+      seconds: record.seconds,
+      subSeconds: record.subSeconds,
+      capturedLength: record.capturedLength,
+      originalLength: record.originalLength,
+      data: Buffer.from(buf.subarray(offset, offset + record.capturedLength)),
     });
-    offset += capturedLength;
+    offset += record.capturedLength;
   }
 
   return { header, packets };
@@ -257,7 +303,7 @@ export function encodePcap(
   const nanosecondPrecision = options.nanosecondPrecision ?? false;
   const snapLen = options.snapLen ?? 65535;
   const linkType = options.linkType ?? LINKTYPE_ETHERNET;
-  const subSecondsPerSecond = nanosecondPrecision ? 1_000_000_000 : 1_000_000;
+  const perSecond = nanosecondPrecision ? 1_000_000_000 : 1_000_000;
 
   const writeU32 = (target: Buffer, offset: number, value: number): void => {
     if (byteOrder === "big") target.writeUInt32BE(value >>> 0, offset);
@@ -285,12 +331,10 @@ export function encodePcap(
     // Split seconds from sub-seconds without ever multiplying an epoch-scale
     // millisecond value by 1e6, which would exceed Number.MAX_SAFE_INTEGER.
     let seconds = Math.floor(packet.timestampMs / 1000);
-    let subSeconds = Math.round(
-      (packet.timestampMs - seconds * 1000) * (subSecondsPerSecond / 1000),
-    );
-    if (subSeconds >= subSecondsPerSecond) {
+    let subSeconds = Math.round((packet.timestampMs - seconds * 1000) * (perSecond / 1000));
+    if (subSeconds >= perSecond) {
       seconds += 1;
-      subSeconds -= subSecondsPerSecond;
+      subSeconds -= perSecond;
     }
 
     const recordHeader = Buffer.alloc(PCAP_RECORD_HEADER_LENGTH);
