@@ -24,6 +24,8 @@ import ApiCredentialControl from './components/ApiCredentialControl';
 
 // Validator Dashboard (issue #453)
 import ValidatorDashboard from './pages/ValidatorDashboard';
+// Slashing & Liveness Visualizer (issue #456)
+import SlashingVisualizer from './pages/SlashingVisualizer';
 
 const App: React.FC = () => {
   return (
@@ -81,6 +83,11 @@ const App: React.FC = () => {
               Anchor Backend
             </a>
           </Link>
+          <Link href="/slashing">
+            <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
+              Slashing
+            </a>
+          </Link>
         </nav>
         <ApiCredentialControl />
       </header>
@@ -103,6 +110,9 @@ const App: React.FC = () => {
 
           {/* Admin: Anchor-Backend Switch UX (issue #455) */}
           <Route path="/admin/anchor-backend" component={AnchorBackend} />
+
+          {/* Slashing & Liveness Visualizer (issue #456) */}
+          <Route path="/slashing" component={SlashingVisualizer} />
 
           {/* Catch-all route */}
           <Route>

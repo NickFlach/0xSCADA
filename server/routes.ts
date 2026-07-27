@@ -30,7 +30,10 @@ import { marketplaceService } from "./services/marketplace";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
-import { nodeRoutes } from "./routes/nodes"; // #454: cross-node state queries
+import {
+  nodeRoutes, // #454: cross-node state queries
+  nodesRoutes, // #456 slashing & liveness visualizer
+} from "./routes/nodes";
 import { blueprintSafeStateRoutes } from "./routes/blueprint-safe-state"; // #459
 import { blueprintRoutes } from "./routes/blueprints";
 import { vendorRoutes } from "./routes/vendors";
@@ -84,6 +87,12 @@ export async function registerRoutes(
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
   app.use("/api/nodes", nodeRoutes); // #454: GET /api/nodes/:id/state/:key
   app.use("/api/blueprint-safe-state", blueprintSafeStateRoutes); // #459 watchdog & safe-state
+  // #456 validator attestation history (read-only). The live endpoint fails
+  // closed with 503 while no observed-attestation feed is registered; synthetic
+  // demo data lives on a separate route that is off unless SLASHING_DEMO_DATA=true.
+  // Mounted after nodeRoutes on the same prefix: the two route sets are
+  // disjoint, so unmatched requests fall through from one router to the other.
+  app.use("/api/nodes", nodesRoutes);
 
   // Blueprint / vendor / codegen surfaces (extracted from this file, #446).
   // vendorRoutes and codegenRoutes span several top-level prefixes
