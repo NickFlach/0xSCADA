@@ -13,11 +13,17 @@ export {
   type UseWebSocketOptions, 
   type UseWebSocketReturn 
 } from "./use-websocket";
-export { 
-  useEventStream, 
-  type StreamEvent, 
-  type EventFilter, 
-  type UseEventStreamOptions, 
+export {
+  useEventStream,
+  type StreamEvent,
+  type EventFilter,
+  type UseEventStreamOptions,
   type UseEventStreamReturn,
   type StreamMetrics,
 } from "./use-event-stream";
+// Validator Dashboard (issue #453) — same-origin /api/validators proxy
+export {
+  useValidatorOverview,
+  type UseValidatorOverviewOptions,
+  type UseValidatorOverviewReturn,
+} from "./use-validator-overview";

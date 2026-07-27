@@ -106,6 +106,74 @@ monitor.onAlert((alert, node) => {
 });
 ```
 
+## Operator Dashboard — `GET /api/validators` (issue #453)
+
+The React Validator Dashboard (`/validators`) does **not** talk to `:9090`. The
+browser makes a single same-origin request to `GET /api/validators`; the server
+polls the nodes listed in `ANCHOR_NODE_URLS` and returns an aggregate. Two
+reasons this is a proxy and not a direct browser fetch:
+
+- **TLS.** A dashboard served over `https` cannot fetch `http://node:9090` —
+  browsers block it as mixed content.
+- **CORS.** A direct fetch would require every node to serve permissive
+  cross-origin headers.
+
+`ANCHOR_NODE_URLS` is deliberately **not** `VITE_`-prefixed, so node URLs never
+enter the client bundle. With it unset the route makes no outbound request and
+answers `{"configured": false, ...}`.
+
+### Authorization
+
+The route is guarded by `requireControlPlaneAccess({ scopes: ['validators.read'] })`
+and fails closed: anonymous callers get 401, an out-of-scope key gets 403. Grant
+it in `API_KEYS`, e.g. `somekey:validator-reader:validators.read`.
+
+### Provenance — read this before acting on the data
+
+`/status` responses are **unsigned**, and this repository holds no registry of
+validator public keys. Nothing in the aggregate is cryptographically verified: a
+node can report an arbitrary validator set, arbitrary phases and an arbitrary
+order parameter. Every response therefore carries
+
+```json
+"provenance": { "verified": false, "method": "none", "detail": "..." }
+```
+
+and the dashboard renders it as a permanent banner. Per-node
+response-signature verification is issue #454's work; when it lands, this field
+becomes a real per-node result instead of a fixed value. Until then the surface
+is diagnostic telemetry, not attested fact.
+
+Because reports are unverified, the aggregate does **not** average conflicting
+phases: a validator whose phase is reported differently by two nodes is flagged
+`disputed`, and the dashboard shows the largest gap between the coherence
+derived from the published phases and each node's self-reported
+`order_parameter`.
+
+### Bounded server-side fetching
+
+A slow or hostile node cannot hang the API:
+
+| Bound | Default | Env |
+|-------|---------|-----|
+| Per-node request timeout (covers the body read) | 3000 ms | `VALIDATOR_RPC_TIMEOUT_MS` (250–10000) |
+| Concurrent node fetches | 4 | `VALIDATOR_RPC_MAX_CONCURRENCY` (1–16) |
+| Aggregate cache TTL (also de-duplicates concurrent requests) | 2000 ms | `VALIDATOR_RPC_CACHE_TTL_MS` (0–60000) |
+| Response body cap | 256 KiB | fixed |
+| Configured nodes | 32 | fixed |
+| Retries | **none** — exactly one attempt per node per poll | — |
+
+Only `http:` and `https:` URLs are accepted; other schemes are dropped. A node
+that fails becomes one errored row rather than a failed request.
+
+### Metrics this RPC cannot supply
+
+Sub-wave 2a asked for per-round attestation health and anchor-batch throughput.
+The oxscada `:9090` surface exposes neither — `/status` has no attest/miss record
+and `/events` carries bridged SCADA events, not consensus attestations. Rather
+than synthesise them, the response lists them in `unavailableMetrics` and the
+dashboard renders that list, so an empty panel is never mistaken for "zero".
+
 ## API
 
 - `addNode(config)` — Register a validator node
