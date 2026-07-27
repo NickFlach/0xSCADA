@@ -1,10 +1,17 @@
 /**
  * PID Auto-Tuner
- * 
+ *
  * Issue #351: Self-Optimizing PID Loops
- * 
+ *
  * Implements relay feedback (Åström-Hägglund), Ziegler-Nichols, and Cohen-Coon
- * auto-tuning methods. Monitors performance and suggests or applies new tuning.
+ * auto-tuning methods. Monitors performance and SUGGESTS new tuning.
+ *
+ * This class never writes gains. Issue #215 removed the `automatic` mode that
+ * called `controller.applyGains` from `evaluatePerformance` and `relayStep`,
+ * along with the mode selector itself: every gain change now goes through the
+ * human-approval gate in `server/services/tuning` (ADR-0013 [13.4],
+ * docs/decisions/ADR-0013-autonomous-agent-architecture.md). A retained but
+ * inert "automatic" mode would only invite the self-apply path back.
  */
 
 import { EventEmitter } from 'events';
@@ -12,7 +19,6 @@ import { PIDController, PIDGains, PIDPerformanceMetrics } from './pid-controller
 
 // ─── Types ──────────────────────────────────────────────────────────────
 
-export type AutoTuneMode = 'automatic' | 'suggest' | 'manual';
 export type TuningMethod = 'relay-feedback' | 'ziegler-nichols' | 'cohen-coon';
 
 export interface TuningRecommendation {
@@ -114,7 +120,6 @@ const DEFAULT_THRESHOLDS: DegradationThresholds = {
 
 export class PIDAutoTuner extends EventEmitter {
   private controller: PIDController;
-  private mode: AutoTuneMode;
   private method: TuningMethod = 'relay-feedback';
   private thresholds: DegradationThresholds;
   private recommendations: TuningRecommendation[] = [];
@@ -125,19 +130,15 @@ export class PIDAutoTuner extends EventEmitter {
 
   constructor(
     controller: PIDController,
-    mode: AutoTuneMode = 'suggest',
     thresholds?: Partial<DegradationThresholds>,
   ) {
     super();
     this.controller = controller;
-    this.mode = mode;
     this.thresholds = { ...DEFAULT_THRESHOLDS, ...thresholds };
   }
 
-  // ─── Mode & config ─────────────────────────────────────────────
+  // ─── Config ────────────────────────────────────────────────────
 
-  getMode(): AutoTuneMode { return this.mode; }
-  setMode(m: AutoTuneMode): void { this.mode = m; }
   setMethod(m: TuningMethod): void { this.method = m; }
   setRelayConfig(cfg: Partial<RelayFeedbackConfig>): void { this.relayConfig = { ...this.relayConfig, ...cfg }; }
   getRecommendations(): TuningRecommendation[] { return [...this.recommendations]; }
@@ -158,7 +159,7 @@ export class PIDAutoTuner extends EventEmitter {
     }
   }
 
-  /** Evaluate current performance and act based on mode */
+  /** Evaluate current performance and emit a recommendation when degraded. */
   evaluatePerformance(): TuningRecommendation | null {
     const metrics = this.controller.getMetrics();
     const degraded = this.detectDegradation(metrics);
@@ -170,18 +171,8 @@ export class PIDAutoTuner extends EventEmitter {
     this.recommendations.push(rec);
     if (this.recommendations.length > 50) this.recommendations.shift();
 
+    // Recommendation only: applying it is the tuning service's gated job (#215).
     this.emit('recommendation', rec);
-
-    if (this.mode === 'automatic') {
-      const applied = this.controller.applyGains(rec.gains);
-      if (applied) {
-        this.emit('gains-applied', rec);
-        this.controller.resetMetrics();
-      } else {
-        this.emit('gains-rejected', rec);
-      }
-    }
-
     return rec;
   }
 
@@ -309,11 +300,7 @@ export class PIDAutoTuner extends EventEmitter {
       };
       this.recommendations.push(rec);
       this.emit('relay-complete', rec);
-
-      if (this.mode === 'automatic') {
-        const applied = this.controller.applyGains(gains);
-        this.emit(applied ? 'gains-applied' : 'gains-rejected', rec);
-      }
+      // No self-apply — see evaluatePerformance (ADR-0013 [13.4], #215)
     } else {
       this.emit('relay-failed', 'Insufficient oscillation data');
     }

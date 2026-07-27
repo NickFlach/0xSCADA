@@ -34,6 +34,7 @@ import {
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod"; // #459: safe-state config validation schemas
+import type { GainEnvelope, TuningGains } from "./types/tuning";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -706,6 +707,41 @@ export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
 export type BlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferSelect;
 export type InsertBlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferInsert;
 
+// ─── PID Tuning Audit (ADR-0013 [13.4], #215) ────────────────────────────────
+
+/**
+ * Append-only audit trail for every PID tuning decision that could move — or
+ * was refused from moving — live controller gains.
+ *
+ * Immutability is enforced in the database, not only in application code:
+ * migration 0010 installs BEFORE UPDATE / BEFORE DELETE triggers that raise.
+ * There is deliberately no update or delete helper anywhere in the codebase.
+ *
+ * `proposedBy` / `decidedBy` are control-plane principal names taken from the
+ * authenticated API key record — never from a request body.
+ */
+export const pidTuningAudit = pgTable("pid_tuning_audit", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  proposalId: varchar("proposal_id", { length: 128 }).notNull(),
+  controllerId: varchar("controller_id", { length: 128 }).notNull(),
+  method: varchar("method", { length: 64 }).notNull(),
+  decision: varchar("decision", { length: 32 }).notNull(),
+  proposedBy: varchar("proposed_by", { length: 128 }).notNull(),
+  decidedBy: varchar("decided_by", { length: 128 }),
+  currentGains: jsonb("current_gains").$type<TuningGains>().notNull(),
+  proposedGains: jsonb("proposed_gains").$type<TuningGains>().notNull(),
+  appliedGains: jsonb("applied_gains").$type<TuningGains>(),
+  envelope: jsonb("envelope").$type<GainEnvelope>().notNull(),
+  envelopeDecision: varchar("envelope_decision", { length: 32 }).notNull(),
+  reasonCode: varchar("reason_code", { length: 64 }),
+  detail: text("detail"),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  proposalIdx: index("idx_pid_tuning_audit_proposal").on(table.proposalId),
+  controllerIdx: index("idx_pid_tuning_audit_controller").on(table.controllerId),
+  recordedAtIdx: index("idx_pid_tuning_audit_recorded_at").on(table.recordedAt),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -771,3 +807,5 @@ export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
 export type InsertValidatorStateWatermark = typeof validatorStateWatermarks.$inferInsert;
 export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
 export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
+export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;
+export type InsertPidTuningAuditRow = typeof pidTuningAudit.$inferInsert;

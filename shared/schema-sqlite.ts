@@ -5,6 +5,7 @@
  */
 
 import { sqliteTable, text, integer, real, blob } from "drizzle-orm/sqlite-core";
+import type { GainEnvelope, TuningGains } from "./types/tuning";
 
 // Simplified schemas for SQLite (development mode)
 export const sites = sqliteTable("sites", {
@@ -353,6 +354,34 @@ export const blueprintSafeStateLog = sqliteTable("blueprint_safe_state_log", {
   anchorTxHash: text("anchor_tx_hash"),
   metadata: text("metadata", { mode: "json" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── PID Tuning Audit (ADR-0013 [13.4], #215) ────────────────────────────────
+// Dev-mode parity with `shared/schema.ts`. jsonb → text(mode json), timestamptz
+// → integer timestamp_ms (millisecond precision keeps audit rows totally
+// ordered), uuid → text. Append-only is enforced by BEFORE UPDATE / BEFORE
+// DELETE triggers created alongside the table (see
+// server/services/tuning/audit-store.ts for the SQLite DDL and migration 0010
+// for the Postgres equivalent). Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+export const pidTuningAudit = sqliteTable("pid_tuning_audit", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  controllerId: text("controller_id").notNull(),
+  method: text("method").notNull(),
+  decision: text("decision").notNull(),
+  proposedBy: text("proposed_by").notNull(),
+  decidedBy: text("decided_by"),
+  currentGains: text("current_gains", { mode: "json" }).$type<TuningGains>().notNull(),
+  proposedGains: text("proposed_gains", { mode: "json" }).$type<TuningGains>().notNull(),
+  appliedGains: text("applied_gains", { mode: "json" }).$type<TuningGains>(),
+  envelope: text("envelope", { mode: "json" }).$type<GainEnvelope>().notNull(),
+  envelopeDecision: text("envelope_decision").notNull(),
+  reasonCode: text("reason_code"),
+  detail: text("detail"),
+  recordedAt: integer("recorded_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 // Basic exports for compatibility

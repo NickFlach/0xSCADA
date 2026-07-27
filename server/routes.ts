@@ -14,7 +14,6 @@ import { certificationRoutes } from "./routes/certifications";
 import artifactRoutes from "./routes/ArtifactRoutes";
 import { assetRoutes } from "./routes/assets";
 import { alarmRoutes } from "./routes/alarms";
-import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
@@ -24,6 +23,8 @@ import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
 import { alarmCorrelationService } from "./services/alarm-correlation";
 import { predictiveRoutes } from "./routes/predictive";
 import { predictiveMaintenanceService } from "./services/predictive";
+import { tuningRoutes } from "./routes/tuning";
+import { tuningService } from "./services/tuning";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -63,7 +64,6 @@ export async function registerRoutes(
   app.use("/api/artifacts", artifactRoutes);
   app.use("/api/assets", assetRoutes);
   app.use("/api/alarms", alarmRoutes);
-  app.use("/api/pid", pidRoutes);
   app.use("/api/flux", fluxRoutes);
   app.use("/api/gateway", gatewayRoutes);
 
@@ -72,6 +72,10 @@ export async function registerRoutes(
   app.use("/api/twin", twinRoutes);  // ADR-0013 [13.3] (#214)
   app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
   app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
+  // ADR-0013 [13.4] (#215). PID tuning deliberately does NOT live under
+  // /api/pid: that prefix belongs to the P&ID diagram surface the client
+  // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
+  app.use("/api/tuning", tuningRoutes);
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -151,6 +155,16 @@ export async function registerRoutes(
   httpServer.once("close", () => {
     unsubscribeTwin();
     void digitalTwinService.shutdown();
+  });
+
+  // Start the tuning service (and its underlying optimization service)
+  // here — services/initializeServices() has no callers at startup (#215).
+  // initialize() opens the durable tuning-audit store and logs whether the
+  // approver allowlist and the gain-apply opt-in are configured, so a
+  // fail-closed deployment is visible at boot rather than at first approval.
+  void tuningService.initialize();
+  httpServer.once("close", () => {
+    void tuningService.shutdown();
   });
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;

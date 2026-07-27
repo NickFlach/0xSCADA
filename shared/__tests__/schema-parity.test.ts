@@ -8,6 +8,7 @@ import {
   validatorPubkeys as pgValidatorPubkeys,
   validatorStateWatermarks as pgValidatorStateWatermarks,
   blueprintSafeStateLog as pgBlueprintSafeStateLog,
+  pidTuningAudit as pgPidTuningAudit,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -16,6 +17,7 @@ import {
   validatorPubkeys as sqliteValidatorPubkeys,
   validatorStateWatermarks as sqliteValidatorStateWatermarks,
   blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
+  pidTuningAudit as sqlitePidTuningAudit,
 } from '../schema-sqlite';
 
 /**
@@ -28,8 +30,8 @@ import {
  * or renames a column without the other, this suite fails instead of the
  * divergence surfacing as a silent no-op at runtime.
  *
- * Covers the alarm tables (#7) and the validator registry backing the
- * cross-node state proxy (#454).
+ * Covers the alarm tables (#7), the validator registry backing the cross-node
+ * state proxy (#454), and the PID tuning audit trail (#215).
  *
  * `blueprint_safe_state_log` (#459) is covered here because a safe-state audit
  * that silently vanishes on one dialect is a safety defect, not a dev-mode
@@ -59,6 +61,10 @@ const cases = [
     pg: pgBlueprintSafeStateLog,
     sqlite: sqliteBlueprintSafeStateLog,
   },
+  // #215: the tuning audit trail is written through whichever backend is
+  // configured, so a column that exists on only one of them would silently
+  // drop part of a plant-change record.
+  { name: 'pid_tuning_audit', pg: pgPidTuningAudit, sqlite: sqlitePidTuningAudit },
 ] as const;
 
 describe('schema parity (Postgres vs SQLite dev fallback)', () => {
