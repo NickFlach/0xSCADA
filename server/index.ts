@@ -201,6 +201,20 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "IEC 61850 GOOSE subscriber failed to start");
       }
 
+      // Start OPC-UA Server Mode (Issue #461) — OFF unless
+      // OPCUA_SERVER_ENABLED=true. Defaults bind loopback with Basic256Sha256
+      // and no anonymous access; an invalid configuration throws here and leaves
+      // the process without an OPC-UA listener rather than opening a permissive
+      // one.
+      try {
+        const { startOpcuaServer } = await import(
+          "./protocols/opcua-server/runtime"
+        );
+        await startOpcuaServer();
+      } catch (err) {
+        logError(err, "OPC-UA Server Mode failed to start — not listening");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 
