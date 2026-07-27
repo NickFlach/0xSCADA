@@ -612,6 +612,37 @@ export const validatorStateWatermarks = pgTable("validator_state_watermarks", {
   nodeKeyIdx: uniqueIndex("idx_validator_state_watermarks_node_key").on(table.nodeId, table.stateKey),
 }));
 
+// ─── Modbus Register Map (Issue #462: Modbus TCP Server Mode) ────────────────
+//
+// Per-site mapping of 0xSCADA tags to Modbus addresses so standard Modbus
+// masters can poll 0xSCADA. One row per (site, area, address). `area` is one of
+// coil | discreteInput | holdingRegister | inputRegister; `dataType` is one of
+// bool | uint16 | int16 | uint32 | int32 | float32 (see
+// server/protocols/modbus-server/register-map.ts for the runtime schema/codec).
+//
+// `writable` defaults to FALSE. Modbus TCP has no authentication, so mapping a
+// tag only ever makes it readable; permitting a master to actuate it is a
+// per-address opt-in that additionally requires the listener to have been
+// started with MODBUS_SERVER_ALLOW_WRITES=true.
+
+export const modbusRegisterMap = pgTable("modbus_register_map", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  siteId: varchar("site_id", { length: 64 }).notNull().references(() => sites.id, { onDelete: "cascade" }),
+  unitId: integer("unit_id").default(1).notNull(),
+  area: varchar("area", { length: 32 }).notNull(),
+  address: integer("address").notNull(),
+  tagId: varchar("tag_id", { length: 255 }).notNull(),
+  dataType: varchar("data_type", { length: 16 }).notNull(),
+  scale: real("scale"),
+  wordOrder: varchar("word_order", { length: 8 }),
+  writable: boolean("writable").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  siteAreaAddressIdx: uniqueIndex("idx_modbus_register_map_site_area_address").on(table.siteId, table.unitId, table.area, table.address),
+  siteIdIdx: index("idx_modbus_register_map_site_id").on(table.siteId),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -634,6 +665,7 @@ export const insertControllerSchema = createInsertSchema(controllers);
 export const insertValidatorNodeSchema = createInsertSchema(validatorNodes);
 export const insertValidatorPubkeySchema = createInsertSchema(validatorPubkeys);
 export const insertValidatorStateWatermarkSchema = createInsertSchema(validatorStateWatermarks);
+export const insertModbusRegisterMapSchema = createInsertSchema(modbusRegisterMap);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -674,3 +706,5 @@ export type ValidatorStateWatermark = typeof validatorStateWatermarks.$inferSele
 export type InsertValidatorNode = typeof validatorNodes.$inferInsert;
 export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
 export type InsertValidatorStateWatermark = typeof validatorStateWatermarks.$inferInsert;
+export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
+export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;

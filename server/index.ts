@@ -215,6 +215,19 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "OPC-UA Server Mode failed to start — not listening");
       }
 
+      // Start Modbus TCP Server Mode (Issue #462) — no-op unless
+      // MODBUS_SERVER_ENABLED=true. The protocol has no authentication, so the
+      // listener defaults to loopback, refuses peers outside its allowlist, and
+      // serves write function codes only when separately opted in. A
+      // configuration or register-map failure is terminal for the listener:
+      // it is logged and no socket is bound, never downgraded to defaults.
+      try {
+        const { startModbusServer } = await import("./protocols/modbus-server");
+        await startModbusServer();
+      } catch (err) {
+        logError(err, "Modbus TCP Server Mode not started (failed closed)");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 

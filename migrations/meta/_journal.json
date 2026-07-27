@@ -36,6 +36,13 @@
       "when": 1784780404000,
       "tag": "0007_validator_registry",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1784780405000,
+      "tag": "0008_modbus_register_map",
+      "breakpoints": true
     }
   ]
 }
