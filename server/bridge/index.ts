@@ -47,6 +47,12 @@ import {
   type AnchorBackend,
 } from './anchor-backend';
 import { AnchorPipeline } from '../integrity/anchor-pipeline';
+import {
+  isLatencyProbeEnabled,
+  readLatencyProbeConfig,
+  startControlLoopLatencyProbe,
+  stopControlLoopLatencyProbe,
+} from '../integrity/latency-probe';
 import { log, logError } from '../logger';
 import { natsPublisher } from '../services/nats';
 import {
@@ -294,7 +300,26 @@ export async function initializeBridges(): Promise<void> {
     // Real integrity chain: pipeline → merkle → sign → relayer. Boot continues
     // if preparation fails; bridge health then reports the selected path as
     // unavailable instead of treating a disconnected relayer as healthy.
-    await ensureAnchorPipelineStarted();
+    const pipeline = await ensureAnchorPipelineStarted();
+    // Control-loop latency telemetry (#460). The pipeline instruments its own
+    // stages unconditionally; the sentinel probe below only adds a floor of
+    // traffic so a quiet plant is distinguishable from a stalled one. It is
+    // OFF unless CONTROL_LOOP_LATENCY_PROBE=true, and it never runs without a
+    // live pipeline to drive — probe_up stays 0 in both cases.
+    const probe = startControlLoopLatencyProbe(pipeline);
+    if (probe) {
+      log(
+        `🫀 Control-loop sentinel latency probe started (every ${probe.intervalMs}ms, `
+        + `blueprint ${probe.getSentinelBlueprint().id}, non-control-relevant)`,
+        'anchor',
+      );
+    } else if (isLatencyProbeEnabled()) {
+      log(
+        `Control-loop sentinel latency probe requested (${readLatencyProbeConfig().intervalMs}ms) `
+        + 'but no anchor pipeline is available; scada_control_loop_probe_up stays 0',
+        'anchor',
+      );
+    }
   } else if (!anchorsToL2()) {
     log(`Anchor pipeline not started (ANCHOR_BACKEND=${getAnchorBackend()}); anchoring via 0xSCADA-node`, 'anchor');
   }
@@ -375,6 +400,9 @@ export async function getBridgeHealthStatus(): Promise<{
  * Shutdown all bridge modules gracefully
  */
 export async function shutdownBridges(): Promise<void> {
+  // Stop the sentinel probe before the pipeline it drives, so probe_up drops to
+  // 0 rather than the probe flipping into a torn-down pipeline.
+  stopControlLoopLatencyProbe();
   if (anchorPipelineStart) {
     await anchorPipelineStart.catch(() => null);
   }

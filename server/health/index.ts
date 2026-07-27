@@ -16,6 +16,15 @@ import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
 import { getBridgeHealthStatus } from '../bridge';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
+import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
+
+// Control-loop latency telemetry (#460): publish the sentinel probe's liveness
+// gauge as part of normal server composition so `scada_control_loop_probe_up`
+// is a real series on every scrape — 0 while the (opt-in) probe is not running,
+// 1 once it is. Without this the "probe absent" alert could never fire because
+// the series would simply not exist. This only publishes the current status; it
+// never starts a probe (server/bridge/index.ts owns that, behind its opt-in).
+publishControlLoopProbeStatus();
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
