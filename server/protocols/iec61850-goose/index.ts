@@ -1,32 +1,41 @@
 /**
  * IEC 61850 GOOSE subscriber service.
  *
- * Opens a raw Layer-2 (AF_PACKET) socket on a configurable interface, filters
- * for the GOOSE ethertype (0x88B8), decodes each frame, validates it against
- * the registered subscriptions and surfaces accepted dataset values as tag
- * updates (origin="goose").
+ * Consumes raw EtherType-0x88B8 frames from an injected
+ * {@link GooseCaptureBackend}, decodes each frame, validates it against the
+ * registered subscriptions (timing, monotonicity, quality) and surfaces
+ * accepted dataset values as tag updates with `origin="goose"`.
  *
- * CAPABILITY DETECTION
- * --------------------
- * A raw Ethernet (AF_PACKET / SOCK_RAW) socket requires:
- *   - Linux (AF_PACKET is Linux-only)
- *   - CAP_NET_RAW (root, or `setcap cap_net_raw+ep node`)
- *   - a native binding to capture L2 frames (Node has no built-in AF_PACKET)
+ * WHAT THIS CAN AND CANNOT DO
+ * ---------------------------
+ * GOOSE is Layer-2 multicast. Node cannot receive those frames without a
+ * native addon, and this repository ships none. Therefore:
  *
- * None of that is available on the dev box (Windows) or in CI, so the live
- * capture path is guarded behind {@link detectRawSocketCapability}. When the
- * capability is absent the service starts in a DISABLED state and never throws
- * — the pure decode/validation core (frame-parser + subscription) remains
- * fully usable (e.g. for pcap replay and unit tests). See the TODO in
- * `startCapture` for the native-binding integration point.
+ *   - LIVE capture is NOT provided. The default {@link NullGooseCaptureBackend}
+ *     delivers nothing, `start()` resolves to "unavailable", and it says why in
+ *     a log line. It does not throw and it never reports itself as running.
+ *   - OFFLINE replay IS provided and fully works: point
+ *     {@link GoosePcapReplayBackend} at a captured `.pcap` and the decoder,
+ *     validator, tag-update emission and metrics all run on real frames.
+ *   - A live backend is an injection point: implement
+ *     {@link GooseCaptureBackend} against a native binding and pass it as
+ *     `options.backend`. Nothing else in this module needs to change.
  *
  * Issue: #465
  */
 
 import { logError, logInfo, logWarn } from "../../logger.js";
+import { tagStreamServer } from "../../websocket/tag-stream.js";
 import { parseGooseFrame, GooseParseError } from "./frame-parser.js";
 import { GooseSubscription, type GooseSubscriptionConfig } from "./subscription.js";
 import type { GooseTagUpdate } from "./types.js";
+import {
+  NullGooseCaptureBackend,
+  type GooseCaptureAvailability,
+  type GooseCaptureBackend,
+} from "./capture-backend.js";
+import { GoosePcapReplayBackend } from "./pcap-backend.js";
+import { loadGooseServiceConfig, type GooseServiceConfig } from "./config.js";
 import {
   gooseFramesReceivedTotal,
   gooseFramesRejectedTotal,
@@ -39,75 +48,47 @@ import {
 export type GooseTagUpdateSink = (update: GooseTagUpdate) => void;
 
 export interface GooseSubscriberOptions {
-  /** Network interface to capture on. Default: env GOOSE_IFACE or "eth0". */
-  iface?: string;
+  /**
+   * Frame source. Defaults to {@link NullGooseCaptureBackend}, i.e. no capture.
+   * Inject {@link GoosePcapReplayBackend} for offline replay, or your own
+   * implementation for live capture.
+   */
+  backend?: GooseCaptureBackend;
   /** Initial subscriptions. More can be added later via {@link subscribe}. */
   subscriptions?: GooseSubscriptionConfig[];
   /**
-   * Sink for accepted tag updates. Defaults to a logging sink.
-   *
-   * INTEGRATION (#206 tag-stream): wire this to
-   * `tagStreamServer.broadcastTagUpdate(...)` once the GOOSE origin is added to
-   * the shared TagUpdate type. We keep the seam abstract to avoid editing the
-   * shared websocket module from this issue's branch.
+   * Sink for accepted tag updates. Defaults to a logging sink;
+   * {@link startGooseSubscriber} wires it to the websocket tag stream.
    */
   onTagUpdate?: GooseTagUpdateSink;
   /** Override clock (testability). Returns ms since epoch. */
   now?: () => number;
-}
-
-export type GooseSubscriberState = "disabled" | "stopped" | "running" | "error";
-
-export interface RawSocketCapability {
-  available: boolean;
-  reason: string;
+  /** TTL watchdog interval in ms. Default 100. */
+  ttlSweepIntervalMs?: number;
 }
 
 /**
- * Determine whether a raw AF_PACKET capture socket can be opened in this
- * environment. Pure / side-effect-free so it can be unit tested.
+ * - "stopped"     — constructed, or stopped after running.
+ * - "running"     — a backend is open and frames are being consumed.
+ * - "unavailable" — the backend reported it cannot capture here (default case).
+ * - "error"       — the backend was available but failed to open.
  */
-export function detectRawSocketCapability(
-  platform: NodeJS.Platform = process.platform,
-  isRoot: boolean = typeof process.getuid === "function" ? process.getuid!() === 0 : false,
-): RawSocketCapability {
-  if (platform !== "linux") {
-    return {
-      available: false,
-      reason: `AF_PACKET raw sockets require Linux (platform=${platform}); live capture disabled`,
-    };
-  }
-  if (!isRoot) {
-    // CAP_NET_RAW may still be granted via file capabilities even when not root;
-    // we cannot reliably detect that from JS, so we report it as the reason.
-    return {
-      available: false,
-      reason:
-        "raw L2 capture needs CAP_NET_RAW (run as root or `setcap cap_net_raw+ep $(command -v node)`)",
-    };
-  }
-  // Even on Linux+root, Node has no built-in AF_PACKET binding — a native addon
-  // (e.g. `cap`/`pcap`) is required. We surface this as the integration gap.
-  return {
-    available: false,
-    reason:
-      "no native L2 capture binding present (TODO: add a pcap/AF_PACKET addon to enable live capture)",
-  };
-}
+export type GooseSubscriberState = "unavailable" | "stopped" | "running" | "error";
 
 export class GooseSubscriber {
-  private readonly iface: string;
+  private readonly backend: GooseCaptureBackend;
   private readonly subscriptions: GooseSubscription[] = [];
   private readonly onTagUpdate: GooseTagUpdateSink;
   private readonly now: () => number;
+  private readonly ttlSweepIntervalMs: number;
   private state: GooseSubscriberState = "stopped";
-  private capability: RawSocketCapability;
   /** TTL staleness watchdog handle. */
   private ttlTimer?: ReturnType<typeof setInterval>;
 
   constructor(options: GooseSubscriberOptions = {}) {
-    this.iface = options.iface ?? process.env.GOOSE_IFACE ?? "eth0";
+    this.backend = options.backend ?? new NullGooseCaptureBackend();
     this.now = options.now ?? (() => Date.now());
+    this.ttlSweepIntervalMs = options.ttlSweepIntervalMs ?? 100;
     this.onTagUpdate =
       options.onTagUpdate ??
       ((u) => logInfo(`[goose] tag update ${u.tagName}=${u.value} (q=${u.quality}, st=${u.stNum})`));
@@ -115,19 +96,20 @@ export class GooseSubscriber {
     for (const sub of options.subscriptions ?? []) {
       this.subscribe(sub);
     }
-    this.capability = detectRawSocketCapability();
   }
 
   getState(): GooseSubscriberState {
     return this.state;
   }
 
-  getCapability(): RawSocketCapability {
-    return this.capability;
+  /** The injected backend, for diagnostics. */
+  getBackend(): GooseCaptureBackend {
+    return this.backend;
   }
 
-  getInterface(): string {
-    return this.iface;
+  /** Whether the injected backend can capture here, and why not if it cannot. */
+  getBackendAvailability(): GooseCaptureAvailability {
+    return this.backend.availability();
   }
 
   /** Register a new subscription. Returns the created subscription. */
@@ -139,81 +121,110 @@ export class GooseSubscriber {
   }
 
   /**
-   * Start the subscriber. On a non-capable host this transitions to "disabled"
-   * (with a clear log line) instead of throwing — the decode core is still
-   * usable via {@link handleFrame} for pcap replay / tests.
+   * Open the capture backend and begin consuming frames.
+   *
+   * Resolves to "unavailable" (never throws) when the backend cannot capture on
+   * this host — that is the normal outcome with the default null backend.
    */
-  start(): GooseSubscriberState {
-    if (!this.capability.available) {
-      this.state = "disabled";
+  async start(): Promise<GooseSubscriberState> {
+    if (this.state === "running") {
+      // Opening the backend a second time would either throw (pcap replay) or
+      // install a second frame stream, double-counting every metric.
+      logWarn(`[goose] subscriber is already running on backend "${this.backend.name}"`);
+      return this.state;
+    }
+    const availability = this.backend.availability();
+    if (!availability.available) {
+      this.state = "unavailable";
       logWarn(
-        `[goose] live capture disabled on iface=${this.iface}: ${this.capability.reason}`,
+        `[goose] capture backend "${this.backend.name}" cannot receive frames: ` +
+          `${availability.reason}. Decode/validation stay available via handleFrame(); ` +
+          "replay a capture with GOOSE_PCAP_FILE or inject a live GooseCaptureBackend.",
       );
       return this.state;
     }
+
     try {
-      this.startCapture();
+      await this.backend.open((frame, receivedAtMs) => {
+        this.handleFrame(frame, receivedAtMs);
+      });
       this.startTtlWatchdog();
       this.state = "running";
-      logInfo(`[goose] subscriber running on ${this.iface} (ethertype 0x88B8)`);
+      logInfo(
+        `[goose] subscriber running on backend "${this.backend.name}" ` +
+          `(${availability.reason}); ${this.subscriptions.length} subscription(s)`,
+      );
     } catch (err) {
       this.state = "error";
-      logError(err, "[goose] failed to start raw capture");
+      logError(err, `[goose] capture backend "${this.backend.name}" failed to open`);
     }
     return this.state;
   }
 
-  stop(): void {
+  /** Close the backend and stop the TTL watchdog. */
+  async stop(): Promise<void> {
     if (this.ttlTimer) {
       clearInterval(this.ttlTimer);
       this.ttlTimer = undefined;
     }
-    // TODO(#465): close the native capture handle here once integrated.
+    try {
+      await this.backend.close();
+    } catch (err) {
+      logError(err, `[goose] capture backend "${this.backend.name}" failed to close`);
+    }
     this.state = "stopped";
   }
 
   /**
-   * Open the raw AF_PACKET socket and begin reading frames.
-   *
-   * TODO(#465): This is the native-binding integration point. The intended
-   * implementation (Linux, CAP_NET_RAW):
-   *   1. open AF_PACKET/SOCK_RAW bound to ETH_P_ALL (or 0x88B8) on this.iface
-   *   2. set a BPF filter for ethertype 0x88B8 (incl. the 802.1Q variant)
-   *   3. for each captured frame: this.handleFrame(buf, this.now())
-   * Node has no built-in AF_PACKET, so a native addon (e.g. `cap`, `pcap`,
-   * `raw-socket`) is required. Until that dependency is approved/added, the
-   * capability check above keeps us in DISABLED on every supported host, so
-   * this body is intentionally unreachable in practice.
+   * "Now" in the backend's receive-timestamp time base. For a replayed capture
+   * this is capture time, so TTL expiry is judged exactly as it would have been
+   * judged live rather than against today's wall clock.
    */
-  private startCapture(): void {
-    throw new Error(
-      "GOOSE live capture not yet wired to a native L2 binding (see TODO in startCapture)",
-    );
+  private captureNow(): number {
+    return this.backend.clockNowMs?.() ?? this.now();
+  }
+
+  /**
+   * Flag every subscription whose previous message's timeAllowedToLive has
+   * elapsed: the publisher missed its retransmission window, so the last value
+   * can no longer be trusted. Public so the countdown can be driven
+   * deterministically in tests instead of only by the interval timer.
+   *
+   * @returns the subscriptions that were found stale and reset.
+   */
+  sweepStaleSubscriptions(nowMs: number = this.captureNow()): GooseSubscription[] {
+    const stale: GooseSubscription[] = [];
+    for (const sub of this.subscriptions) {
+      if (sub.isStale(nowMs)) {
+        gooseFramesRejectedTotal.inc({ reason: "ttl_expired" });
+        logWarn(`[goose] subscription ${sub.config.gocbRef} link stale (TTL elapsed)`);
+        sub.reset();
+        stale.push(sub);
+      }
+    }
+    return stale;
   }
 
   /** Periodically flag subscriptions whose previous TTL elapsed (lost link). */
   private startTtlWatchdog(): void {
-    this.ttlTimer = setInterval(() => {
-      const now = this.now();
-      for (const sub of this.subscriptions) {
-        if (sub.isStale(now)) {
-          gooseFramesRejectedTotal.inc({ reason: "ttl_expired" });
-          logWarn(`[goose] subscription ${sub.config.gocbRef} link stale (TTL elapsed)`);
-          sub.reset();
-        }
-      }
-    }, 100);
+    if (this.ttlTimer) return;
+    const timer = setInterval(() => {
+      this.sweepStaleSubscriptions();
+    }, this.ttlSweepIntervalMs);
+    // The watchdog is background bookkeeping: it must not hold the process open.
+    timer.unref?.();
+    this.ttlTimer = timer;
   }
 
   /**
    * Decode + validate a single raw GOOSE frame and surface tag updates.
    *
-   * This is the seam shared by the live capture path and pcap replay / tests.
-   * It never throws — all failures are counted as rejections.
+   * This is the seam every backend feeds. It never throws — all failures are
+   * counted as rejections.
    *
    * @returns the accepted tag updates (empty array on rejection).
    */
-  handleFrame(frame: Buffer, receiveMs: number = this.now()): GooseTagUpdate[] {
+  handleFrame(frame: Buffer, receiveMs: number = this.captureNow()): GooseTagUpdate[] {
     let parsed;
     try {
       parsed = parseGooseFrame(frame);
@@ -264,6 +275,66 @@ export class GooseSubscriber {
   }
 }
 
+// ───────────────────────────────────────────────────────────────────────────
+// Service wiring (mirrors server/protocols/sparkplug-b/index.ts)
+// ───────────────────────────────────────────────────────────────────────────
+
+let _subscriber: GooseSubscriber | null = null;
+
+/**
+ * Build a subscriber from the environment and start it.
+ *
+ * Returns null when no subscriptions are configured — the service stays off
+ * rather than inventing a control-block map. When subscriptions ARE configured
+ * but no capture source is, it still starts and reports "unavailable" so the
+ * gap is visible in the boot log instead of looking like a silent success.
+ */
+export async function startGooseSubscriber(
+  config: GooseServiceConfig = loadGooseServiceConfig(),
+): Promise<GooseSubscriber | null> {
+  // A previously started subscriber owns a watchdog interval (and possibly an
+  // in-flight replay); replacing the singleton without stopping it would leak
+  // both and keep a second frame stream feeding the tag stream.
+  await stopGooseSubscriber();
+
+  if (config.subscriptions.length === 0) {
+    logInfo(
+      "[goose] subscriber not configured (set GOOSE_SUBSCRIPTIONS_FILE to a JSON " +
+        "array of control-block subscriptions to enable it)",
+    );
+    return null;
+  }
+
+  const backend: GooseCaptureBackend = config.pcapPath
+    ? new GoosePcapReplayBackend({ path: config.pcapPath, realtime: config.pcapRealtime })
+    : new NullGooseCaptureBackend({ iface: config.iface });
+
+  const subscriber = new GooseSubscriber({
+    backend,
+    subscriptions: config.subscriptions,
+    // Decoded GOOSE dataset members become tag updates on the existing tag
+    // stream. GooseTagUpdate is a superset of the stream's TagUpdate, so the
+    // extra provenance fields (origin/gocbRef/stNum/simulated) ride along.
+    onTagUpdate: (update) => tagStreamServer.broadcastTagUpdate(update),
+  });
+
+  _subscriber = subscriber;
+  await subscriber.start();
+  return subscriber;
+}
+
+/** Stop the GOOSE subscriber started by {@link startGooseSubscriber}. */
+export async function stopGooseSubscriber(): Promise<void> {
+  const subscriber = _subscriber;
+  _subscriber = null;
+  await subscriber?.stop();
+}
+
+/** The running subscriber, if any (diagnostics/health). */
+export function getGooseSubscriber(): GooseSubscriber | null {
+  return _subscriber;
+}
+
 // Re-export the public surface for convenience.
 export { parseGooseFrame, parseGoosePdu, GooseParseError } from "./frame-parser.js";
 export { GooseSubscription } from "./subscription.js";
@@ -273,4 +344,34 @@ export type {
   GooseValidationResult,
   DatasetMember,
 } from "./subscription.js";
+export {
+  NullGooseCaptureBackend,
+  GooseCaptureUnavailableError,
+  detectRawSocketCapability,
+  isGooseFrame,
+  readFrameEtherType,
+} from "./capture-backend.js";
+export type {
+  GooseCaptureBackend,
+  GooseCaptureAvailability,
+  GooseFrameHandler,
+} from "./capture-backend.js";
+export { GoosePcapReplayBackend } from "./pcap-backend.js";
+export type { GoosePcapReplayOptions, GoosePcapReplayStats } from "./pcap-backend.js";
+export {
+  parsePcap,
+  encodePcap,
+  readPcapGlobalHeader,
+  PcapParseError,
+  LINKTYPE_ETHERNET,
+  PCAP_MAGIC_MICROSECONDS,
+  PCAP_MAGIC_NANOSECONDS,
+} from "./pcap.js";
+export type { PcapFile, PcapPacket, PcapGlobalHeader } from "./pcap.js";
+export {
+  loadGooseServiceConfig,
+  gooseServiceConfigSchema,
+  loadGooseSubscriptionsFile,
+} from "./config.js";
+export type { GooseServiceConfig } from "./config.js";
 export * from "./types.js";
