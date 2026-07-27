@@ -189,6 +189,17 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "Sparkplug B bridge failed to start");
       }
 
+      // Start the IEC 61850 GOOSE subscriber (Issue #465) — no-op unless
+      // GOOSE_SUBSCRIPTIONS_FILE is configured. Live Layer-2 capture is NOT
+      // provided (it needs a native addon); with GOOSE_PCAP_FILE set it
+      // replays a capture, otherwise it starts "unavailable" and logs why.
+      try {
+        const { startGooseSubscriber } = await import("./protocols/iec61850-goose");
+        await startGooseSubscriber();
+      } catch (err) {
+        logError(err, "IEC 61850 GOOSE subscriber failed to start");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 
