@@ -23,6 +23,7 @@ import {
   timestamp,
   boolean,
   integer,
+  bigint,
   real,
   jsonb,
   pgEnum,
@@ -543,6 +544,74 @@ export const controllers = pgTable("controllers", {
   vendorIdx: index("idx_controllers_vendor").on(table.vendorId),
 }));
 
+// ─── Validator Nodes & Pubkeys (#454: Cross-Node State Queries) ───────────────
+// Additive — these tables back the per-validator /state/:key proxy so the server
+// can resolve a validator's RPC endpoint and verify its signed responses against
+// a registered public key before returning them to the operator.
+
+export const validatorNodes = pgTable("validator_nodes", {
+  // Human/operator-facing node id used in the URL (e.g. "validator-2").
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  // Base URL of the oxscada RPC endpoint, e.g. "http://10.0.0.12:9090"
+  // (see docs/blockchain/validator-monitoring.md for the node RPC surface).
+  rpcUrl: varchar("rpc_url", { length: 512 }).notNull(),
+  // Owning operator, for inventory/reporting. NOT the rate-limit bucket: state
+  // reads are bucketed by the caller's authenticated API-key identity, which is
+  // a property of the requester rather than of the validator being queried.
+  operatorId: varchar("operator_id", { length: 255 }),
+  region: varchar("region", { length: 64 }),
+  enabled: boolean("enabled").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  operatorIdIdx: index("idx_validator_nodes_operator_id").on(table.operatorId),
+  enabledIdx: index("idx_validator_nodes_enabled").on(table.enabled),
+}));
+
+export const validatorPubkeys = pgTable("validator_pubkeys", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  nodeId: varchar("node_id", { length: 64 }).notNull().references(() => validatorNodes.id, { onDelete: "cascade" }),
+  // Signature scheme of the registered key. Default is ed25519 (node:crypto).
+  algorithm: varchar("algorithm", { length: 32 }).default("ed25519").notNull(),
+  // PEM-encoded SPKI public key (one row per active/rotated key).
+  publicKeyPem: text("public_key_pem").notNull(),
+  // Short fingerprint identifying which key the validator signed with. Required:
+  // the proxy resolves the exact key named by the response so a rotated-out key
+  // can never be substituted for the active one.
+  keyId: varchar("key_id", { length: 128 }).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+}, (table) => ({
+  nodeIdIdx: index("idx_validator_pubkeys_node_id").on(table.nodeId),
+  nodeActiveIdx: index("idx_validator_pubkeys_node_active").on(table.nodeId, table.active),
+  nodeKeyIdIdx: uniqueIndex("idx_validator_pubkeys_node_key_id").on(table.nodeId, table.keyId),
+}));
+
+/**
+ * Per-(validator, state key) high-water mark of the highest block height the
+ * server has ever accepted a signed answer for.
+ *
+ * This is the persisted half of the anti-rollback check in
+ * `server/routes/nodes.ts`: a validator that answers a *fresh* challenge but
+ * reports a block height below the mark is serving a rolled-back view of state,
+ * and the proxy refuses to hand it to an operator. Persisting the mark (rather
+ * than keeping it in process memory) is what makes the check survive restarts
+ * and hold across server replicas sharing one database.
+ */
+export const validatorStateWatermarks = pgTable("validator_state_watermarks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  nodeId: varchar("node_id", { length: 64 }).notNull().references(() => validatorNodes.id, { onDelete: "cascade" }),
+  // Named `state_key` rather than `key` to avoid quoting a SQL keyword.
+  stateKey: varchar("state_key", { length: 512 }).notNull(),
+  blockHeight: bigint("block_height", { mode: "number" }).notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nodeKeyIdx: uniqueIndex("idx_validator_state_watermarks_node_key").on(table.nodeId, table.stateKey),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -562,6 +631,9 @@ export const insertDesignSpecificationSchema = createInsertSchema(designSpecific
 export const insertGeneratedCodeSchema = createInsertSchema(generatedCode);
 export const insertDataTypeMappingSchema = createInsertSchema(dataTypeMappings);
 export const insertControllerSchema = createInsertSchema(controllers);
+export const insertValidatorNodeSchema = createInsertSchema(validatorNodes);
+export const insertValidatorPubkeySchema = createInsertSchema(validatorPubkeys);
+export const insertValidatorStateWatermarkSchema = createInsertSchema(validatorStateWatermarks);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -596,3 +668,9 @@ export type DataTypeMapping = typeof dataTypeMappings.$inferSelect;
 export type InsertDataTypeMapping = typeof dataTypeMappings.$inferInsert;
 export type Controller = typeof controllers.$inferSelect;
 export type InsertController = typeof controllers.$inferInsert;
+export type ValidatorNode = typeof validatorNodes.$inferSelect;
+export type ValidatorPubkey = typeof validatorPubkeys.$inferSelect;
+export type ValidatorStateWatermark = typeof validatorStateWatermarks.$inferSelect;
+export type InsertValidatorNode = typeof validatorNodes.$inferInsert;
+export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
+export type InsertValidatorStateWatermark = typeof validatorStateWatermarks.$inferInsert;

@@ -182,6 +182,36 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_instances_type_name
   ON control_module_instances(control_module_type_id, name);
 `;
 
+/**
+ * Validator registry tables for the development SQLite database (#454).
+ *
+ * Mirrors `migrations/0007_validator_registry.sql`. Without this the cross-node
+ * `/state/:key` proxy would only ever be usable against a hand-seeded Postgres,
+ * which was the reason the first attempt at this feature was rejected.
+ */
+const validatorRegistrySqliteSchema = `
+CREATE TABLE IF NOT EXISTS validator_nodes (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, rpc_url TEXT NOT NULL,
+  operator_id TEXT, region TEXT, enabled INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS validator_pubkeys (
+  id TEXT PRIMARY KEY, node_id TEXT NOT NULL REFERENCES validator_nodes(id) ON DELETE CASCADE,
+  algorithm TEXT NOT NULL DEFAULT 'ed25519', public_key_pem TEXT NOT NULL,
+  key_id TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL, retired_at INTEGER,
+  UNIQUE(node_id, key_id)
+);
+CREATE TABLE IF NOT EXISTS validator_state_watermarks (
+  id TEXT PRIMARY KEY, node_id TEXT NOT NULL REFERENCES validator_nodes(id) ON DELETE CASCADE,
+  state_key TEXT NOT NULL, block_height INTEGER NOT NULL,
+  observed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL,
+  UNIQUE(node_id, state_key)
+);
+CREATE INDEX IF NOT EXISTS idx_validator_pubkeys_node_active
+  ON validator_pubkeys(node_id, active);
+`;
+
 function toSnakeCase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
@@ -320,6 +350,7 @@ async function openSqliteDatabase(databasePath: string): Promise<void> {
     const client = new Database(databasePath, (error) => error ? reject(error) : resolve(client));
   });
   await sqliteExec(blueprintSqliteSchema);
+  await sqliteExec(validatorRegistrySqliteSchema);
 }
 
 export const initializeDatabase = async () => {
@@ -594,6 +625,377 @@ async function runStorageTransaction<T>(operation: () => Promise<T>): Promise<T>
     });
   });
 }
+
+// ─── Validator Registry Access (#454: Cross-Node State Queries) ────────────────
+// DB access goes through this module per repo conventions. These helpers back the
+// per-validator `/state/:key` proxy in `server/routes/nodes.ts`:
+//   * `validator_nodes`             — which validators exist and where their RPC is
+//   * `validator_pubkeys`           — the Ed25519 keys their responses are verified against
+//   * `validator_state_watermarks`  — per-(node, key) highest accepted block height
+//
+// Both the Postgres and the SQLite development database are implemented, so the
+// feature is usable without hand-seeding a Postgres instance. Every lookup is
+// fail-closed by construction: an unregistered node or an unregistered key
+// resolves to `null` and the route refuses to return validator data.
+
+export interface ValidatorNodeRecord {
+  id: string;
+  name: string;
+  rpcUrl: string;
+  operatorId?: string | null;
+  region?: string | null;
+  enabled: boolean;
+}
+
+export interface ValidatorPubkeyRecord {
+  nodeId: string;
+  algorithm: string;
+  publicKeyPem: string;
+  keyId: string;
+  active: boolean;
+}
+
+export interface ValidatorStateWatermarkRecord {
+  nodeId: string;
+  stateKey: string;
+  blockHeight: number;
+  observedAt: Date;
+}
+
+export interface UpsertValidatorNodeInput {
+  id: string;
+  name: string;
+  rpcUrl: string;
+  operatorId?: string | null;
+  region?: string | null;
+  enabled?: boolean;
+}
+
+export interface UpsertValidatorPubkeyInput {
+  nodeId: string;
+  keyId: string;
+  publicKeyPem: string;
+  algorithm?: string;
+  active?: boolean;
+}
+
+function toValidatorNodeRecord(row: Record<string, unknown>): ValidatorNodeRecord {
+  return {
+    id: String(row.id),
+    name: String(row.name),
+    rpcUrl: String(row.rpcUrl),
+    operatorId: (row.operatorId as string | null | undefined) ?? null,
+    region: (row.region as string | null | undefined) ?? null,
+    enabled: Boolean(row.enabled),
+  };
+}
+
+function toValidatorPubkeyRecord(row: Record<string, unknown>): ValidatorPubkeyRecord {
+  return {
+    nodeId: String(row.nodeId),
+    algorithm: String(row.algorithm),
+    publicKeyPem: String(row.publicKeyPem),
+    keyId: String(row.keyId),
+    active: Boolean(row.active),
+  };
+}
+
+/** Resolve a validator node by its registry id, or null if unknown. */
+export const getValidatorNode = async (id: string): Promise<ValidatorNodeRecord | null> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(
+        'SELECT * FROM validator_nodes WHERE id = ? LIMIT 1',
+        [id],
+      );
+      const row = rows[0];
+      return row ? toValidatorNodeRecord(decodeSqliteRow(row)) : null;
+    }
+    const rows = await requireDatabase()
+      .select()
+      .from(schema.validatorNodes)
+      .where(eq(schema.validatorNodes.id, id))
+      .limit(1);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? toValidatorNodeRecord(row) : null;
+  });
+};
+
+/** List every registered validator node (admin surface). */
+export const listValidatorNodes = async (): Promise<ValidatorNodeRecord[]> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll('SELECT * FROM validator_nodes ORDER BY id');
+      return rows.map((row) => toValidatorNodeRecord(decodeSqliteRow(row)));
+    }
+    const rows = await requireDatabase()
+      .select()
+      .from(schema.validatorNodes)
+      .orderBy(schema.validatorNodes.id);
+    return (rows as Record<string, unknown>[]).map(toValidatorNodeRecord);
+  });
+};
+
+/**
+ * Register (or update) a validator node. This is the seeding path for the
+ * cross-node state proxy — see `POST /api/nodes` in `server/routes/nodes.ts`.
+ */
+export const upsertValidatorNode = async (
+  input: UpsertValidatorNodeInput,
+): Promise<ValidatorNodeRecord> => {
+  const enabled = input.enabled ?? true;
+  const operatorId = input.operatorId ?? null;
+  const region = input.region ?? null;
+
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const now = Date.now();
+      await sqliteRun(
+        `INSERT INTO validator_nodes (id, name, rpc_url, operator_id, region, enabled, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(id) DO UPDATE SET
+           name = excluded.name,
+           rpc_url = excluded.rpc_url,
+           operator_id = excluded.operator_id,
+           region = excluded.region,
+           enabled = excluded.enabled,
+           updated_at = excluded.updated_at`,
+        [input.id, input.name, input.rpcUrl, operatorId, region, enabled ? 1 : 0, now, now],
+      );
+      const rows = await sqliteAll('SELECT * FROM validator_nodes WHERE id = ?', [input.id]);
+      return toValidatorNodeRecord(decodeSqliteRow(rows[0]));
+    }
+
+    const [row] = await requireDatabase()
+      .insert(schema.validatorNodes)
+      .values({
+        id: input.id,
+        name: input.name,
+        rpcUrl: input.rpcUrl,
+        operatorId,
+        region,
+        enabled,
+      })
+      .onConflictDoUpdate({
+        target: schema.validatorNodes.id,
+        set: {
+          name: input.name,
+          rpcUrl: input.rpcUrl,
+          operatorId,
+          region,
+          enabled,
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+    return toValidatorNodeRecord(row as Record<string, unknown>);
+  });
+};
+
+/**
+ * Resolve the active Ed25519 verification key a validator named in its response.
+ * Returns null when the (node, keyId) pair is unregistered, retired, or is not
+ * an Ed25519 key — all of which the route treats as "do not trust this answer".
+ */
+export const getActiveValidatorPubkey = async (
+  nodeId: string,
+  keyId: string,
+): Promise<ValidatorPubkeyRecord | null> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(
+        `SELECT * FROM validator_pubkeys
+         WHERE node_id = ? AND key_id = ? AND active = 1 AND algorithm = 'ed25519'
+         LIMIT 1`,
+        [nodeId, keyId],
+      );
+      const row = rows[0];
+      return row ? toValidatorPubkeyRecord(decodeSqliteRow(row)) : null;
+    }
+    const rows = await requireDatabase()
+      .select()
+      .from(schema.validatorPubkeys)
+      .where(and(
+        eq(schema.validatorPubkeys.nodeId, nodeId),
+        eq(schema.validatorPubkeys.keyId, keyId),
+        eq(schema.validatorPubkeys.active, true),
+        eq(schema.validatorPubkeys.algorithm, 'ed25519'),
+      ))
+      .limit(1);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    return row ? toValidatorPubkeyRecord(row) : null;
+  });
+};
+
+/** Register (or rotate) a validator verification key. */
+export const upsertValidatorPubkey = async (
+  input: UpsertValidatorPubkeyInput,
+): Promise<ValidatorPubkeyRecord> => {
+  const algorithm = input.algorithm ?? 'ed25519';
+  const active = input.active ?? true;
+
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      await sqliteRun(
+        `INSERT INTO validator_pubkeys (id, node_id, algorithm, public_key_pem, key_id, active, created_at, retired_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+         ON CONFLICT(node_id, key_id) DO UPDATE SET
+           algorithm = excluded.algorithm,
+           public_key_pem = excluded.public_key_pem,
+           active = excluded.active,
+           retired_at = NULL`,
+        [randomUUID(), input.nodeId, algorithm, input.publicKeyPem, input.keyId, active ? 1 : 0, Date.now()],
+      );
+      const rows = await sqliteAll(
+        'SELECT * FROM validator_pubkeys WHERE node_id = ? AND key_id = ?',
+        [input.nodeId, input.keyId],
+      );
+      return toValidatorPubkeyRecord(decodeSqliteRow(rows[0]));
+    }
+
+    const [row] = await requireDatabase()
+      .insert(schema.validatorPubkeys)
+      .values({
+        nodeId: input.nodeId,
+        algorithm,
+        publicKeyPem: input.publicKeyPem,
+        keyId: input.keyId,
+        active,
+      })
+      .onConflictDoUpdate({
+        target: [schema.validatorPubkeys.nodeId, schema.validatorPubkeys.keyId],
+        set: {
+          algorithm,
+          publicKeyPem: input.publicKeyPem,
+          active,
+          retiredAt: null,
+        },
+      })
+      .returning();
+    return toValidatorPubkeyRecord(row as Record<string, unknown>);
+  });
+};
+
+/** Retire a validator key so its signatures stop being accepted. */
+export const retireValidatorPubkey = async (
+  nodeId: string,
+  keyId: string,
+): Promise<boolean> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(
+        'SELECT id FROM validator_pubkeys WHERE node_id = ? AND key_id = ? AND active = 1',
+        [nodeId, keyId],
+      );
+      if (rows.length === 0) return false;
+      await sqliteRun(
+        'UPDATE validator_pubkeys SET active = 0, retired_at = ? WHERE node_id = ? AND key_id = ?',
+        [Date.now(), nodeId, keyId],
+      );
+      return true;
+    }
+    const updated = await requireDatabase()
+      .update(schema.validatorPubkeys)
+      .set({ active: false, retiredAt: new Date() })
+      .where(and(
+        eq(schema.validatorPubkeys.nodeId, nodeId),
+        eq(schema.validatorPubkeys.keyId, keyId),
+        eq(schema.validatorPubkeys.active, true),
+      ))
+      .returning();
+    return (updated as unknown[]).length > 0;
+  });
+};
+
+/**
+ * Highest block height already accepted for `(nodeId, stateKey)`, or null when
+ * this pair has never been queried. Used as the anti-rollback high-water mark.
+ */
+export const getValidatorStateWatermark = async (
+  nodeId: string,
+  stateKey: string,
+): Promise<ValidatorStateWatermarkRecord | null> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(
+        'SELECT * FROM validator_state_watermarks WHERE node_id = ? AND state_key = ? LIMIT 1',
+        [nodeId, stateKey],
+      );
+      const row = rows[0];
+      if (!row) return null;
+      return {
+        nodeId: String(row.node_id),
+        stateKey: String(row.state_key),
+        blockHeight: Number(row.block_height),
+        observedAt: new Date(Number(row.observed_at)),
+      };
+    }
+    const rows = await requireDatabase()
+      .select()
+      .from(schema.validatorStateWatermarks)
+      .where(and(
+        eq(schema.validatorStateWatermarks.nodeId, nodeId),
+        eq(schema.validatorStateWatermarks.stateKey, stateKey),
+      ))
+      .limit(1);
+    const row = rows[0] as Record<string, unknown> | undefined;
+    if (!row) return null;
+    return {
+      nodeId: String(row.nodeId),
+      stateKey: String(row.stateKey),
+      blockHeight: Number(row.blockHeight),
+      observedAt: new Date(row.observedAt as string | number | Date),
+    };
+  });
+};
+
+/**
+ * Advance the `(nodeId, stateKey)` high-water mark to `blockHeight`, but never
+ * lower it. The conditional `ON CONFLICT ... WHERE` makes the compare-and-set
+ * atomic in the database, so concurrent server replicas sharing one database
+ * cannot race the mark backwards. Returns the mark in force after the write.
+ */
+export const recordValidatorStateWatermark = async (
+  nodeId: string,
+  stateKey: string,
+  blockHeight: number,
+  observedAt: Date,
+): Promise<ValidatorStateWatermarkRecord> => {
+  await withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      await sqliteRun(
+        `INSERT INTO validator_state_watermarks (id, node_id, state_key, block_height, observed_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(node_id, state_key) DO UPDATE SET
+           block_height = excluded.block_height,
+           observed_at = excluded.observed_at,
+           updated_at = excluded.updated_at
+         WHERE validator_state_watermarks.block_height < excluded.block_height`,
+        [randomUUID(), nodeId, stateKey, blockHeight, observedAt.getTime(), Date.now()],
+      );
+      return;
+    }
+    if (!pgClient) throw new Error('PostgreSQL client is not initialized');
+    await pgClient.query(
+      `INSERT INTO validator_state_watermarks (node_id, state_key, block_height, observed_at, updated_at)
+       VALUES ($1, $2, $3, $4, NOW())
+       ON CONFLICT (node_id, state_key) DO UPDATE SET
+         block_height = EXCLUDED.block_height,
+         observed_at = EXCLUDED.observed_at,
+         updated_at = NOW()
+       WHERE validator_state_watermarks.block_height < EXCLUDED.block_height`,
+      [nodeId, stateKey, blockHeight, observedAt.toISOString()],
+    );
+  });
+
+  const current = await getValidatorStateWatermark(nodeId, stateKey);
+  if (!current) {
+    throw new Error(
+      `Watermark for ${nodeId}/${stateKey} disappeared immediately after being written`,
+    );
+  }
+  return current;
+};
 
 // Export storage object as expected by health/index.ts
 export const storage = {
