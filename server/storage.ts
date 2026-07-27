@@ -47,7 +47,7 @@ async function withStorageLock<T>(operation: () => Promise<T>): Promise<T> {
   }
 }
 
-type BlueprintTableName =
+type StorageTableName =
   | 'vendors'
   | 'template_packages'
   | 'control_module_types'
@@ -59,9 +59,11 @@ type BlueprintTableName =
   | 'design_specifications'
   | 'generated_code'
   | 'data_type_mappings'
-  | 'controllers';
+  | 'controllers'
+  | 'plugin_registry'
+  | 'plugin_installations';
 
-const sqliteColumns: Record<BlueprintTableName, readonly string[]> = {
+const sqliteColumns: Record<StorageTableName, readonly string[]> = {
   vendors: ['id', 'name', 'displayName', 'description', 'platforms', 'languages', 'configSchema', 'isActive', 'createdAt', 'updatedAt'],
   template_packages: ['id', 'name', 'vendorId', 'version', 'description', 'templateType', 'language', 'templateContent', 'placeholders', 'requiredInputs', 'createdAt', 'updatedAt'],
   control_module_types: ['id', 'name', 'vendorId', 'version', 'description', 'inputs', 'outputs', 'inOuts', 'dataTypeMappings', 'templatePackageId', 'sourcePackage', 'classification', 'createdAt', 'updatedAt'],
@@ -74,6 +76,8 @@ const sqliteColumns: Record<BlueprintTableName, readonly string[]> = {
   generated_code: ['id', 'sourceType', 'sourceId', 'vendorId', 'templatePackageId', 'language', 'code', 'codeHash', 'txHash', 'metadata', 'status', 'generatedAt', 'approvedAt', 'approvedBy'],
   data_type_mappings: ['id', 'vendorId', 'canonicalType', 'vendorType', 'size', 'precision', 'metadata', 'createdAt'],
   controllers: ['id', 'name', 'vendorId', 'siteId', 'model', 'firmwareVersion', 'address', 'configuration', 'status', 'createdAt', 'updatedAt'],
+  plugin_registry: ['id', 'version', 'manifest', 'publisher', 'installs', 'publishedAt', 'updatedAt'],
+  plugin_installations: ['id', 'version', 'manifest', 'status', 'config', 'grantedCapabilities', 'installedBy', 'installedAt', 'updatedAt'],
 };
 
 const sqliteJsonColumns = new Set([
@@ -82,10 +86,14 @@ const sqliteJsonColumns = new Set([
   'currentState', 'variables', 'equipmentModules', 'linkedModules',
   'internalValues', 'hmiParameters', 'recipeParameters', 'reportParameters',
   'sequences', 'linkedModuleInstances', 'content', 'metadata',
+  // Agent marketplace (#217)
+  'manifest', 'config', 'grantedCapabilities',
 ]);
 const sqliteBooleanColumns = new Set(['isActive']);
 const sqliteDateColumns = new Set([
   'createdAt', 'updatedAt', 'anchoredAt', 'generatedAt', 'approvedAt',
+  // Agent marketplace (#217)
+  'publishedAt', 'installedAt',
 ]);
 
 const blueprintSqliteSchema = `
@@ -183,6 +191,17 @@ CREATE TABLE IF NOT EXISTS blueprint_safe_state_log (
   operator TEXT, reason TEXT NOT NULL, anchor_hash TEXT NOT NULL,
   anchor_tx_hash TEXT, metadata TEXT, created_at INTEGER NOT NULL
 );
+CREATE TABLE IF NOT EXISTS plugin_registry (
+  id TEXT PRIMARY KEY, version TEXT NOT NULL, manifest TEXT NOT NULL,
+  publisher TEXT NOT NULL, installs INTEGER NOT NULL DEFAULT 0,
+  published_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS plugin_installations (
+  id TEXT PRIMARY KEY, version TEXT NOT NULL, manifest TEXT NOT NULL,
+  status TEXT NOT NULL, config TEXT NOT NULL DEFAULT '{}',
+  granted_capabilities TEXT NOT NULL DEFAULT '[]', installed_by TEXT NOT NULL,
+  installed_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_unit_instances_type_name
   ON unit_instances(unit_type_id, name);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_control_module_instances_type_name
@@ -195,6 +214,10 @@ CREATE INDEX IF NOT EXISTS idx_safe_state_log_created_at
   ON blueprint_safe_state_log(created_at);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_safe_state_log_anchor_hash
   ON blueprint_safe_state_log(anchor_hash);
+CREATE INDEX IF NOT EXISTS idx_plugin_registry_publisher
+  ON plugin_registry(publisher);
+CREATE INDEX IF NOT EXISTS idx_plugin_installations_status
+  ON plugin_installations(status);
 `;
 
 /**
@@ -295,7 +318,7 @@ function encodeSqliteValue(key: string, value: unknown): unknown {
 }
 
 async function sqliteFind(
-  table: BlueprintTableName,
+  table: StorageTableName,
   where: Record<string, unknown> = {},
   orderBy?: string,
 ): Promise<Record<string, unknown>[]> {
@@ -318,7 +341,7 @@ async function sqliteFind(
 }
 
 async function sqliteInsert(
-  table: BlueprintTableName,
+  table: StorageTableName,
   input: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
   const now = new Date();
@@ -340,7 +363,7 @@ async function sqliteInsert(
 }
 
 async function sqliteUpdate(
-  table: BlueprintTableName,
+  table: StorageTableName,
   id: string,
   input: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
@@ -477,7 +500,7 @@ export async function withLockedDatabase<T>(
 
 async function createRecord<T>(
   pgTable: any,
-  sqliteTable: BlueprintTableName,
+  sqliteTable: StorageTableName,
   input: Record<string, unknown>,
 ): Promise<T> {
   return withStorageLock(async () => {
@@ -491,7 +514,7 @@ async function createRecord<T>(
 
 async function listRecords<T>(
   pgTable: any,
-  sqliteTable: BlueprintTableName,
+  sqliteTable: StorageTableName,
   options: {
     pgWhere?: unknown;
     sqliteWhere?: Record<string, unknown>;
@@ -512,7 +535,7 @@ async function listRecords<T>(
 
 async function firstRecord<T>(
   pgTable: any,
-  sqliteTable: BlueprintTableName,
+  sqliteTable: StorageTableName,
   pgWhere: unknown,
   sqliteWhere: Record<string, unknown>,
 ): Promise<T | undefined> {
@@ -522,7 +545,7 @@ async function firstRecord<T>(
 
 async function updateRecord<T>(
   pgTable: any,
-  sqliteTable: BlueprintTableName,
+  sqliteTable: StorageTableName,
   id: string,
   input: Record<string, unknown>,
 ): Promise<T> {
@@ -541,7 +564,7 @@ async function updateRecord<T>(
 
 async function upsertRecord<T>(
   pgTable: any,
-  sqliteTable: BlueprintTableName,
+  sqliteTable: StorageTableName,
   insertInput: Record<string, unknown>,
   updateInput: Record<string, unknown>,
   pgWhere: unknown,
@@ -598,6 +621,20 @@ async function upsertRecord<T>(
       throw new Error(`Instance upsert conflict for ${sqliteTable} returned no row`);
     }
     return existing as T;
+  });
+}
+
+async function deleteRecord(
+  pgTable: any,
+  sqliteTable: StorageTableName,
+  id: string,
+): Promise<void> {
+  await withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      await sqliteRun(`DELETE FROM ${sqliteTable} WHERE id = ?`, [id]);
+      return;
+    }
+    await requireDatabase().delete(pgTable).where(eq(pgTable.id, id));
   });
 }
 
@@ -1462,4 +1499,54 @@ export const storage = {
         sqliteWhere: { siteId },
       },
     ),
+
+  // ── Agent marketplace (#217) ───────────────────────────────────────────
+  // The registry row carries the durable plugin-ownership record; the
+  // installation row carries the durable capability grants. Both must
+  // survive a restart or neither is a security control.
+
+  getPluginRegistryEntries: () =>
+    listRecords<schema.PluginRegistryRow>(schema.pluginRegistry, 'plugin_registry'),
+  upsertPluginRegistryEntry: (input: schema.InsertPluginRegistryRow) =>
+    upsertRecord<schema.PluginRegistryRow>(
+      schema.pluginRegistry,
+      'plugin_registry',
+      input,
+      {
+        version: input.version,
+        manifest: input.manifest,
+        publisher: input.publisher,
+        installs: input.installs,
+        updatedAt: input.updatedAt ?? new Date(),
+      },
+      eq(schema.pluginRegistry.id, input.id),
+      { id: input.id },
+      [schema.pluginRegistry.id],
+    ),
+
+  getPluginInstallations: () =>
+    listRecords<schema.PluginInstallationRow>(
+      schema.pluginInstallations,
+      'plugin_installations',
+    ),
+  upsertPluginInstallation: (input: schema.InsertPluginInstallationRow) =>
+    upsertRecord<schema.PluginInstallationRow>(
+      schema.pluginInstallations,
+      'plugin_installations',
+      input,
+      {
+        version: input.version,
+        manifest: input.manifest,
+        status: input.status,
+        config: input.config,
+        grantedCapabilities: input.grantedCapabilities,
+        installedBy: input.installedBy,
+        updatedAt: input.updatedAt ?? new Date(),
+      },
+      eq(schema.pluginInstallations.id, input.id),
+      { id: input.id },
+      [schema.pluginInstallations.id],
+    ),
+  deletePluginInstallation: (pluginId: string) =>
+    deleteRecord(schema.pluginInstallations, 'plugin_installations', pluginId),
 };

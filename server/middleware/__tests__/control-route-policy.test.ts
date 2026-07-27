@@ -37,6 +37,12 @@ const records: ApiKeyRecord[] = [
     createdAt: new Date(),
   },
   {
+    key: "marketplace-publish-key",
+    name: "plugin-publisher",
+    scopes: ["marketplace.publish"],
+    createdAt: new Date(),
+  },
+  {
     key: "predictive-configure-key",
     name: "predictive-configurer",
     scopes: ["predictive.configure"],
@@ -100,6 +106,9 @@ async function startApp(logs: string[] = []): Promise<string> {
   app.post("/api/tuning/proposals/proposal-1/approve", (_req, res) =>
     res.status(200).json({ approved: true })
   );
+  app.post("/api/marketplace/plugins", (_req, res) =>
+    res.status(201).json({ published: true })
+  );
 
   const server = createServer(app);
   openServers.push(server);
@@ -151,8 +160,25 @@ describe("control route policy inventory", () => {
         "predictive-threshold-control",
         "predictive-ingestion",
         "geometry-control",
+        "marketplace-control",
       ]),
     );
+  });
+
+  it("keeps agent-marketplace mutations off the generic write scope", () => {
+    for (const path of [
+      "/api/marketplace/plugins",
+      "/api/marketplace/plugins/demo/install",
+      "/api/marketplace/plugins/demo/invoke",
+      "/api/marketplace/plugins/demo",
+    ]) {
+      expect(mutationPolicyFor("POST", path)?.scopes).toEqual([
+        "marketplace.publish",
+        "marketplace.install",
+        "marketplace.invoke",
+        "marketplace.uninstall",
+      ]);
+    }
   });
 
   it("assigns write to unlisted mutations and nothing to reads", () => {
@@ -290,6 +316,18 @@ describe("mutating REST authorization", () => {
       method: "PUT",
       headers: { "X-API-Key": "predictive-ingest-key" },
     })).status).toBe(403);
+  });
+
+  it("blocks a generic write key from the agent-marketplace surface", async () => {
+    const baseUrl = await startApp();
+    expect((await fetch(`${baseUrl}/api/marketplace/plugins`, {
+      method: "POST",
+      headers: { "X-API-Key": "write-key" },
+    })).status).toBe(403);
+    expect((await fetch(`${baseUrl}/api/marketplace/plugins`, {
+      method: "POST",
+      headers: { "X-API-Key": "marketplace-publish-key" },
+    })).status).toBe(201);
   });
 
   it("separates tuning proposal creation from human approval authority", async () => {

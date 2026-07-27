@@ -80,6 +80,10 @@ export { alarmCorrelationService } from './alarm-correlation';
 export * from './tuning';
 export { tuningService } from './tuning';
 
+// ── Agent Marketplace Service (ADR-0013 [13.6], #217) ────────────────────────
+export * from './marketplace';
+export { marketplaceService } from './marketplace';
+
 /**
  * Initialize all services
  * 
@@ -97,7 +101,8 @@ export async function initializeServices(): Promise<void> {
     { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
     { name: 'Digital Twin', service: () => import('./twin').then(m => m.digitalTwinService.initialize()) },
     { name: 'Predictive Maintenance', service: () => import('./predictive').then(m => m.predictiveMaintenanceService.initialize()) },
-    { name: 'PID Tuning', service: () => import('./tuning').then(m => m.tuningService.initialize()) }
+    { name: 'PID Tuning', service: () => import('./tuning').then(m => m.tuningService.initialize()) },
+    { name: 'Agent Marketplace', service: () => import('./marketplace').then(m => m.marketplaceService.initialize()) }
   ];
 
   for (const { name, service } of services) {
@@ -212,6 +217,14 @@ export async function getServicesHealthStatus(): Promise<{
         return await tuningService.healthCheck();
       } catch {
         return { healthy: false, message: 'Tuning service not available' };
+      }
+    },
+    marketplace: async () => {
+      try {
+        const { marketplaceService } = await import('./marketplace');
+        return await marketplaceService.healthCheck();
+      } catch {
+        return { healthy: false, message: 'Marketplace service not available' };
       }
     }
   };

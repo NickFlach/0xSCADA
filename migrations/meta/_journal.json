@@ -57,6 +57,13 @@
       "when": 1784780407000,
       "tag": "0010_pid_tuning_audit",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1784780408000,
+      "tag": "0011_agent_marketplace",
+      "breakpoints": true
     }
   ]
 }

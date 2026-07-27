@@ -90,8 +90,10 @@ healthManager.registerSimple(
   'agent-runtime',
   async () => {
     try {
+      // Report whether the runtime can actually serve agents, not merely
+      // whether the module resolves (#217).
       const { agentRuntime } = await import('../agents/runtime');
-      return agentRuntime != null;
+      return await agentRuntime.isRunning();
     } catch {
       return false;
     }

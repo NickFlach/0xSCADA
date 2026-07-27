@@ -13,6 +13,7 @@
  *   - event_anchors: Blockchain-anchored events
  *   - maintenance_records: Maintenance tracking
  *   - certifications, certification_approvals: Certification workflow
+ *   - plugin_registry, plugin_installations: Agent marketplace (#217)
  */
 
 import {
@@ -742,6 +743,52 @@ export const pidTuningAudit = pgTable("pid_tuning_audit", {
   recordedAtIdx: index("idx_pid_tuning_audit_recorded_at").on(table.recordedAt),
 }));
 
+// ─── Agent Marketplace (ADR-0013 [13.6], #217) ───────────────────────────────
+
+/**
+ * Published plugin manifests plus their durable ownership record.
+ *
+ * `publisher` is the authenticated control-plane principal that first
+ * published the id. Publishing a later version of an existing id is refused
+ * unless the requesting principal matches this row. There is deliberately NO
+ * admin break-glass: an `admin`/`*` key reaches the publish route but is still
+ * refused with `ownership-conflict` on someone else's id, because a takeover
+ * that any privileged key can perform is not an ownership record. A transfer,
+ * if ever wanted, belongs on its own explicitly-scoped endpoint.
+ * The check is only a security control because the row is durable — an
+ * ownership table that resets on restart would let a restart re-open the id.
+ */
+export const pluginRegistry = pgTable("plugin_registry", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  version: varchar("version", { length: 32 }).notNull(),
+  manifest: jsonb("manifest").notNull(),
+  publisher: varchar("publisher", { length: 255 }).notNull(),
+  installs: integer("installs").default(0).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  publisherIdx: index("idx_plugin_registry_publisher").on(table.publisher),
+}));
+
+/**
+ * One row per installed plugin: the manifest version pinned at install time,
+ * the validated configuration, the capabilities actually granted, and the
+ * lifecycle status. Grants are security state, so they are durable too.
+ */
+export const pluginInstallations = pgTable("plugin_installations", {
+  id: varchar("id", { length: 64 }).primaryKey().references(() => pluginRegistry.id),
+  version: varchar("version", { length: 32 }).notNull(),
+  manifest: jsonb("manifest").notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+  grantedCapabilities: jsonb("granted_capabilities").notNull().default(sql`'[]'::jsonb`),
+  installedBy: varchar("installed_by", { length: 255 }).notNull(),
+  installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_plugin_installations_status").on(table.status),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -809,3 +856,7 @@ export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
 export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
 export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;
 export type InsertPidTuningAuditRow = typeof pidTuningAudit.$inferInsert;
+export type PluginRegistryRow = typeof pluginRegistry.$inferSelect;
+export type InsertPluginRegistryRow = typeof pluginRegistry.$inferInsert;
+export type PluginInstallationRow = typeof pluginInstallations.$inferSelect;
+export type InsertPluginInstallationRow = typeof pluginInstallations.$inferInsert;

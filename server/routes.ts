@@ -25,6 +25,8 @@ import { predictiveRoutes } from "./routes/predictive";
 import { predictiveMaintenanceService } from "./services/predictive";
 import { tuningRoutes } from "./routes/tuning";
 import { tuningService } from "./services/tuning";
+import { marketplaceRoutes } from "./routes/marketplace";
+import { marketplaceService } from "./services/marketplace";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -76,6 +78,7 @@ export async function registerRoutes(
   // /api/pid: that prefix belongs to the P&ID diagram surface the client
   // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
   app.use("/api/tuning", tuningRoutes);
+  app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
@@ -166,6 +169,12 @@ export async function registerRoutes(
   httpServer.once("close", () => {
     void tuningService.shutdown();
   });
+  // Load marketplace state and register the first-party plugin
+  // implementations here — services/initializeServices() has no callers at
+  // startup (#217). This is awaited rather than fired-and-forgotten: the
+  // publish path checks plugin ownership against the loaded registry, and an
+  // ownership check against an unhydrated registry would authorize a hijack.
+  await marketplaceService.initialize();
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).
