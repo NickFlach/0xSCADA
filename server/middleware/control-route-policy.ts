@@ -68,6 +68,20 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
       + "Route-local guards enforce the exact per-action scope.",
   },
   {
+    id: "marketplace-control",
+    pathPrefix: "/api/marketplace",
+    scopes: Object.freeze([
+      "marketplace.publish",
+      "marketplace.install",
+      "marketplace.invoke",
+      "marketplace.uninstall",
+    ]),
+    description:
+      "Publish, install, invoke, or uninstall an agent-marketplace plugin. "
+      + "Route-local guards enforce the exact per-action scope, so a generic "
+      + "`write` key cannot reach any of them.",
+  },
+  {
     id: "predictive-alert-acknowledgement",
     pathPrefix: "/api/predictive/alerts",
     scopes: Object.freeze(["predictive.acknowledge"]),
