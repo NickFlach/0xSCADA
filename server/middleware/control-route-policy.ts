@@ -101,7 +101,11 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
     id: "digital-twin-control",
     pathPrefix: "/api/intelligence/digitaltwin/operate",
     scopes: Object.freeze(["control.write"]),
-    description: "Operate a digital twin against control inputs.",
+    description:
+      "Retired legacy path (#216): the handler now returns 410 with a pointer "
+      + "to /api/twin, which enforces its own twin.* scopes. The policy is kept "
+      + "so the prefix cannot silently fall back to broad `write` if a handler "
+      + "is ever remounted here.",
   },
   {
     id: "hsm-control",
