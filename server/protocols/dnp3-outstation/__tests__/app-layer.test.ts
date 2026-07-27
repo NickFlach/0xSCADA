@@ -14,7 +14,7 @@ import {
 import { Dnp3PointMap } from '../point-map';
 import { Dnp3EventBuffer, DEFAULT_EVENT_BUFFER_CONFIG } from '../event-buffer';
 import { Sav5Outstation } from '../secure-auth';
-import { handleApplicationRequest, type OutstationContext } from '../index';
+import { createOutstationContext, handleApplicationRequest, type OutstationContext } from '../index';
 import { DNP3_FUNCTION, DNP3_GROUP, DNP3_VARIATION, DNP3_IIN } from '../app-objects';
 
 function readClass0Fragment(): Buffer {
@@ -112,13 +112,13 @@ describe('handleApplicationRequest (pure)', () => {
     pointMap.applyTagUpdate('ai0', { value: 42, quality: 'good', timestamp: 1 });
     const secureAuth = new Sav5Outstation();
     if (withKey) secureAuth.setUpdateKey(1, Buffer.alloc(16, 0x11));
-    return {
+    return createOutstationContext({
       pointMap,
       eventBuffer: new Dnp3EventBuffer(DEFAULT_EVENT_BUFFER_CONFIG),
       secureAuth,
       restartPending: false,
       unsolicitedEnabled: false,
-    };
+    });
   }
 
   test('class 0 read returns a response with static data', () => {
