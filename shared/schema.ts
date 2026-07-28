@@ -859,6 +859,61 @@ export const pluginInstallations = pgTable("plugin_installations", {
   statusIdx: index("idx_plugin_installations_status").on(table.status),
 }));
 
+// ─── Digital Twin Persistence (ADR-0013 [13.3], #550) ────────────────────────
+//
+// The twin runtime kept its model registry and simulation state in process
+// memory, so a restart lost both. These two tables make the registry and one
+// explicitly committed checkpoint per model durable.
+//
+// Physical DDL: migrations/0014_twin_persistence.sql (Postgres) and the
+// SQLITE_DDL in server/services/twin/persistence.ts (dev/test fallback).
+// Kept in sync by `shared/__tests__/schema-parity.test.ts`.
+
+/**
+ * One row per registered `ProcessModel`. `id` is the model id itself — the
+ * same natural key the in-memory registry is keyed by, so storage and runtime
+ * cannot disagree about which model a row describes.
+ *
+ * `schema_version` is the `TWIN_MODEL_SCHEMA_VERSION` the payload was written
+ * under. A loader that does not know the version refuses the row rather than
+ * decoding it under today's assumptions.
+ */
+export const twinModels = pgTable("twin_models", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  // The full ProcessModel as authored, re-validated by the runtime on load.
+  definition: jsonb("definition").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * The LAST COMMITTED checkpoint for a model — at most one row per model,
+ * written in the same transaction as the model it belongs to. A model row
+ * without a checkpoint row is therefore a torn write, and the loader treats it
+ * as corrupt rather than seeding the model from authored initial conditions
+ * (which would silently substitute different state for real state).
+ *
+ * There is deliberately no `status` column: a restored simulation is always
+ * idle and only starts when an authorized caller starts or steps it.
+ */
+export const twinCheckpoints = pgTable("twin_checkpoints", {
+  modelId: varchar("model_id", { length: 128 })
+    .primaryKey()
+    .references(() => twinModels.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull(),
+  tick: bigint("tick", { mode: "number" }).notNull(),
+  // Simulated clock in ms. Double precision rather than bigint because the
+  // runtime carries it as a JS number and only requires it to stay finite.
+  timeMs: doublePrecision("time_ms").notNull(),
+  // Record<componentId, Record<parameter, number>>, re-validated against the
+  // model's components before it is admitted into the runtime.
+  componentStates: jsonb("component_states").notNull(),
+  // Epoch ms of the last live-tag assimilation folded into this checkpoint.
+  lastSyncAt: bigint("last_sync_at", { mode: "number" }),
+  committedAt: timestamp("committed_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -933,3 +988,7 @@ export type PluginRegistryRow = typeof pluginRegistry.$inferSelect;
 export type InsertPluginRegistryRow = typeof pluginRegistry.$inferInsert;
 export type PluginInstallationRow = typeof pluginInstallations.$inferSelect;
 export type InsertPluginInstallationRow = typeof pluginInstallations.$inferInsert;
+export type TwinModelRow = typeof twinModels.$inferSelect;
+export type InsertTwinModelRow = typeof twinModels.$inferInsert;
+export type TwinCheckpointRow = typeof twinCheckpoints.$inferSelect;
+export type InsertTwinCheckpointRow = typeof twinCheckpoints.$inferInsert;

@@ -10,6 +10,8 @@ import {
   validatorLivenessObservations as pgValidatorLivenessObservations,
   blueprintSafeStateLog as pgBlueprintSafeStateLog,
   pidTuningAudit as pgPidTuningAudit,
+  twinModels as pgTwinModels,
+  twinCheckpoints as pgTwinCheckpoints,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -20,6 +22,8 @@ import {
   validatorLivenessObservations as sqliteValidatorLivenessObservations,
   blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
   pidTuningAudit as sqlitePidTuningAudit,
+  twinModels as sqliteTwinModels,
+  twinCheckpoints as sqliteTwinCheckpoints,
 } from '../schema-sqlite';
 
 /**
@@ -76,6 +80,12 @@ const cases = [
   // configured, so a column that exists on only one of them would silently
   // drop part of a plant-change record.
   { name: 'pid_tuning_audit', pg: pgPidTuningAudit, sqlite: sqlitePidTuningAudit },
+  // #550: the digital-twin model registry and its committed checkpoints. A
+  // column present on only one dialect would drop part of a restored model or
+  // checkpoint, and a twin that comes back with partial state is worse than
+  // one that refuses to come back at all.
+  { name: 'twin_models', pg: pgTwinModels, sqlite: sqliteTwinModels },
+  { name: 'twin_checkpoints', pg: pgTwinCheckpoints, sqlite: sqliteTwinCheckpoints },
 ] as const;
 
 describe('schema parity (Postgres vs SQLite dev fallback)', () => {

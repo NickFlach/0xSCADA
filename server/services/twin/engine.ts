@@ -48,6 +48,35 @@ interface ModelEntry {
   nextStepAt?: number;
 }
 
+/**
+ * The durable part of a simulation: everything a checkpoint restores.
+ *
+ * `status` is absent on purpose — a restored simulation is always idle
+ * (#550). Live actuals are absent too: they are readings of the real plant
+ * that a restarted process must re-observe, not replay from disk.
+ */
+export interface TwinCheckpointState {
+  tick: number;
+  timeMs: number;
+  componentStates: Record<string, Record<string, number>>;
+  lastSyncAt?: number;
+}
+
+/**
+ * Deep-cloned snapshot of one registered model's complete runtime entry.
+ *
+ * Used only to roll the in-memory registry back when the durable write that
+ * accompanies a registry mutation fails, so storage and runtime cannot end up
+ * describing different models (#550).
+ */
+export interface TwinEntrySnapshot {
+  model: ProcessModel;
+  state: SimulationState;
+  actuals: Array<[string, { value: number; timestamp: number }]>;
+  appliedActualTimestamps: Array<[string, number]>;
+  nextStepAt?: number;
+}
+
 export class TwinRuntime extends EventEmitter {
   private readonly maxModels: number;
   private readonly maxStepWorkUnits: number;
@@ -88,6 +117,100 @@ export class TwinRuntime extends EventEmitter {
       appliedActualTimestamps: new Map(),
     });
     return structuredClone(state);
+  }
+
+  /**
+   * Throw if `model` is not a model this runtime would accept, without
+   * touching the registry. Lets a restore report say whether a stored row was
+   * refused for its definition or for its checkpoint (#550).
+   */
+  validateModelDefinition(model: ProcessModel): void {
+    this.validateModel(structuredClone(model));
+  }
+
+  /**
+   * Register a model together with a checkpoint restored from storage (#550).
+   *
+   * The checkpoint is validated against the model exactly as a solver result
+   * would be — an unknown component, a missing bound parameter, a non-finite
+   * value or a non-integer tick throws, so a corrupt or torn checkpoint is
+   * refused rather than admitted into the runtime.
+   *
+   * The restored simulation is ALWAYS idle. Nothing here starts a timer or
+   * schedules a tick: an authorized caller must explicitly start or step it.
+   */
+  restoreModel(model: ProcessModel, checkpoint: TwinCheckpointState): SimulationState {
+    const storedModel = structuredClone(model);
+    this.validateModel(storedModel);
+    if (!this.entries.has(storedModel.id) && this.entries.size >= this.maxModels) {
+      throw new Error(`Model limit (${this.maxModels}) reached`);
+    }
+    if (!Number.isSafeInteger(checkpoint.tick) || checkpoint.tick < 0) {
+      throw new Error('checkpoint tick must be a non-negative safe integer');
+    }
+    if (!Number.isFinite(checkpoint.timeMs) || checkpoint.timeMs < 0) {
+      throw new Error('checkpoint timeMs must be a non-negative finite number');
+    }
+    if (checkpoint.lastSyncAt !== undefined && !Number.isFinite(checkpoint.lastSyncAt)) {
+      throw new Error('checkpoint lastSyncAt must be finite when present');
+    }
+    const componentStates = structuredClone(checkpoint.componentStates);
+    this.assertValidStates(storedModel, componentStates);
+
+    const state: SimulationState = {
+      modelId: storedModel.id,
+      tick: checkpoint.tick,
+      timeMs: checkpoint.timeMs,
+      componentStates,
+      // Stopped is the safe state: a restart never resumes stepping.
+      status: 'idle',
+      ...(checkpoint.lastSyncAt !== undefined ? { lastSyncAt: checkpoint.lastSyncAt } : {}),
+    };
+    this.entries.set(storedModel.id, {
+      model: storedModel,
+      state,
+      actuals: new Map(),
+      appliedActualTimestamps: new Map(),
+    });
+    return structuredClone(state);
+  }
+
+  /**
+   * Deep-cloned snapshot of one entry, or undefined when the model is not
+   * registered. Paired with `restoreEntry` to undo a registry mutation whose
+   * durable write failed (#550).
+   */
+  exportEntry(modelId: string): TwinEntrySnapshot | undefined {
+    const entry = this.entries.get(modelId);
+    if (!entry) return undefined;
+    return {
+      model: structuredClone(entry.model),
+      state: structuredClone(entry.state),
+      actuals: structuredClone([...entry.actuals.entries()]),
+      appliedActualTimestamps: [...entry.appliedActualTimestamps.entries()],
+      nextStepAt: entry.nextStepAt,
+    };
+  }
+
+  /**
+   * Put the registry back exactly as `exportEntry` found it. An undefined
+   * snapshot means the model was not registered at snapshot time, so it is
+   * removed. Restores the entry verbatim, including a `running` status the
+   * caller had already set — this reverses a failed mutation, it does not
+   * start anything that was not already started.
+   */
+  restoreEntry(modelId: string, snapshot: TwinEntrySnapshot | undefined): void {
+    if (!snapshot) {
+      this.entries.delete(modelId);
+      return;
+    }
+    this.entries.set(modelId, {
+      model: structuredClone(snapshot.model),
+      state: structuredClone(snapshot.state),
+      actuals: new Map(structuredClone(snapshot.actuals)),
+      appliedActualTimestamps: new Map(snapshot.appliedActualTimestamps),
+      nextStepAt: snapshot.nextStepAt,
+    });
   }
 
   getModel(modelId: string): ProcessModel | undefined {
