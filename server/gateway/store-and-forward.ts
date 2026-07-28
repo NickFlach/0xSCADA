@@ -8,7 +8,7 @@
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { log, logError } from "../logger";
 import {
@@ -57,9 +57,16 @@ export interface ConnectivityStatus {
   lastSuccessfulForward: Date | null;
   pendingRecords: number;
   lastError?: string;
+  storageError?: string;
   consecutiveFailures: number;
   nextRetryAt: Date | null;
   divergenceCount: number;
+}
+
+export interface EdgeHealthStatus {
+  healthy: boolean;
+  degraded: boolean;
+  message: string;
 }
 
 export interface DurableEdgeQueue {
@@ -109,11 +116,19 @@ export class JsonFileEdgeQueue implements DurableEdgeQueue {
       version: 1,
       records: records.map(serializeRecord),
     };
-    await writeFile(temporary, `${canonicalJson(payload)}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-    });
-    await rename(temporary, this.path);
+    try {
+      const handle = await open(temporary, "wx");
+      try {
+        await handle.writeFile(`${canonicalJson(payload)}\n`, "utf8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await rename(temporary, this.path);
+    } catch (error) {
+      await rm(temporary, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 }
 
@@ -228,6 +243,7 @@ export class StoreAndForwardService extends EventEmitter {
   private timer?: NodeJS.Timeout;
   private lastSuccessfulForward: Date | null = null;
   private lastError?: string;
+  private lastStorageError?: string;
   private consecutiveFailures = 0;
   private nextRetryAt: Date | null = null;
   private divergenceCount = 0;
@@ -274,6 +290,7 @@ export class StoreAndForwardService extends EventEmitter {
     }
     const loaded = (await this.queue.load()).map(cloneRecord);
     for (const record of loaded) {
+      validateStoredRecord(record);
       assertRecordIntegrity(record);
     }
     const ids = new Set<string>();
@@ -322,20 +339,42 @@ export class StoreAndForwardService extends EventEmitter {
   ): Promise<void> {
     this.assertInitialized();
     await this.serialized(async () => {
+      if (this.stopped) {
+        throw new Error("store-and-forward service is shutting down");
+      }
       if (this.localStore.size >= this.config.maxLocalStorage) {
         throw new QueueCapacityError(this.config.maxLocalStorage);
       }
       const timestamp = options.timestamp
         ? new Date(options.timestamp)
         : this.now();
+      const kind = options.kind ?? "telemetry";
+      const origin = options.origin ?? driverId ?? "edge";
+      assertValidDate(timestamp, "record timestamp");
+      if (kind !== "telemetry" && kind !== "configuration") {
+        throw new Error(`unsupported edge record kind: ${String(kind)}`);
+      }
+      if (!origin.trim()) {
+        throw new Error("edge record origin cannot be empty");
+      }
+      assertJsonSafe(data, "$.data");
+      if (kind === "configuration") {
+        if (!isPlainObject(data)) {
+          throw new Error("configuration records must contain a JSON object");
+        }
+        validateConfigurationObject(data);
+      }
+      if (options.fieldVersions) {
+        validateFieldVersions(options.fieldVersions);
+      }
       const recordWithoutChecksum: Omit<StoredRecord, "checksum"> = {
         id: this.idFactory(),
         timestamp,
         data: structuredClone(data),
         attempts: 0,
         driverId,
-        kind: options.kind ?? "telemetry",
-        origin: options.origin ?? driverId ?? "edge",
+        kind,
+        origin,
         fieldVersions: options.fieldVersions
           ? cloneFieldVersions(options.fieldVersions)
           : undefined,
@@ -376,6 +415,7 @@ export class StoreAndForwardService extends EventEmitter {
         : null,
       pendingRecords: this.localStore.size,
       lastError: this.lastError,
+      storageError: this.lastStorageError,
       consecutiveFailures: this.consecutiveFailures,
       nextRetryAt: this.nextRetryAt ? new Date(this.nextRetryAt) : null,
       divergenceCount: this.divergenceCount,
@@ -386,22 +426,46 @@ export class StoreAndForwardService extends EventEmitter {
     return [...this.localStore.values()].map(cloneRecord);
   }
 
-  async healthCheck(): Promise<{ healthy: boolean; message: string }> {
+  isInitialized(): boolean {
+    return this.initialized;
+  }
+
+  async healthCheck(): Promise<EdgeHealthStatus> {
+    if (!this.initialized) {
+      return {
+        healthy: false,
+        degraded: false,
+        message: "Store-and-forward is not initialized",
+      };
+    }
     const pendingCount = this.localStore.size;
+    if (this.lastStorageError) {
+      return {
+        healthy: false,
+        degraded: false,
+        message: `Store-and-forward persistence failed: ${this.lastStorageError}`,
+      };
+    }
     if (pendingCount >= this.config.maxLocalStorage * 0.8) {
       return {
         healthy: false,
+        degraded: false,
         message: `Store-and-forward overloaded: ${pendingCount} pending records`,
       };
     }
     if (this.lastError && this.consecutiveFailures > 0) {
       return {
-        healthy: false,
-        message: `Store-and-forward disconnected: ${this.lastError}; ${pendingCount} pending records`,
+        // Loss of upstream connectivity is the operating condition this queue
+        // exists to tolerate. Surface it as degraded text without making an
+        // otherwise durable edge node permanently unready.
+        healthy: true,
+        degraded: true,
+        message: `Store-and-forward offline/degraded: ${this.lastError}; ${pendingCount} pending records`,
       };
     }
     return {
       healthy: true,
+      degraded: false,
       message: `Store-and-forward healthy: ${pendingCount} pending records`,
     };
   }
@@ -656,7 +720,13 @@ export class StoreAndForwardService extends EventEmitter {
   }
 
   private async persist(): Promise<void> {
-    await this.queue.save([...this.localStore.values()].map(cloneRecord));
+    try {
+      await this.queue.save([...this.localStore.values()].map(cloneRecord));
+      this.lastStorageError = undefined;
+    } catch (error) {
+      this.lastStorageError = errorMessage(error);
+      throw error;
+    }
   }
 
   private assertInitialized(): void {
@@ -685,6 +755,8 @@ export function resolveTelemetryConflict(
   local: EdgeReplicaValue,
   remote: EdgeReplicaValue,
 ): EdgeReplicaValue {
+  validateReplicaValue(local, false);
+  validateReplicaValue(remote, false);
   const comparison =
     local.timestamp.getTime() - remote.timestamp.getTime() ||
     local.origin.localeCompare(remote.origin) ||
@@ -701,6 +773,8 @@ export function mergeConfigurationConflict(
   local: EdgeReplicaValue,
   remote: EdgeReplicaValue,
 ): EdgeReplicaValue {
+  validateReplicaValue(local, true);
+  validateReplicaValue(remote, true);
   if (!isPlainObject(local.data) || !isPlainObject(remote.data)) {
     throw new Error("configuration conflict values must be objects");
   }
@@ -774,6 +848,7 @@ function flatten(
   for (const [key, child] of Object.entries(value).sort(([left], [right]) =>
     left.localeCompare(right),
   )) {
+    validateConfigurationKey(key);
     const path = prefix ? `${prefix}.${key}` : key;
     if (isPlainObject(child) && Object.keys(child).length > 0) {
       flatten(child, path, result);
@@ -785,9 +860,10 @@ function flatten(
 }
 
 function unflatten(fields: ReadonlyMap<string, unknown>): Record<string, unknown> {
-  const result: Record<string, unknown> = {};
+  const result: Record<string, unknown> = Object.create(null);
   for (const [path, value] of fields) {
     const segments = path.split(".");
+    segments.forEach(validateConfigurationKey);
     let cursor = result;
     segments.forEach((segment, index) => {
       if (index === segments.length - 1) {
@@ -795,7 +871,7 @@ function unflatten(fields: ReadonlyMap<string, unknown>): Record<string, unknown
       } else {
         const child = cursor[segment];
         if (!isPlainObject(child)) {
-          cursor[segment] = {};
+          cursor[segment] = Object.create(null);
         }
         cursor = cursor[segment] as Record<string, unknown>;
       }
@@ -815,12 +891,14 @@ function recordChecksum(record: Omit<StoredRecord, "checksum"> | StoredRecord): 
 }
 
 function assertRecordIntegrity(record: StoredRecord): void {
+  validateStoredRecord(record);
   if (record.checksum !== recordChecksum(record)) {
     throw new QueueIntegrityError(record.id);
   }
 }
 
 function serializeRecord(record: StoredRecord): SerializedRecord {
+  validateStoredRecord(record);
   return {
     ...structuredClone(record),
     timestamp: record.timestamp.toISOString(),
@@ -846,7 +924,7 @@ function deserializeRecord(record: SerializedRecord): StoredRecord {
   if (Number.isNaN(timestamp.getTime())) {
     throw new Error(`invalid timestamp for edge queue record ${record.id}`);
   }
-  return {
+  const deserialized: StoredRecord = {
     ...record,
     timestamp,
     fieldVersions: record.fieldVersions
@@ -861,6 +939,8 @@ function deserializeRecord(record: SerializedRecord): StoredRecord {
         )
       : undefined,
   };
+  validateStoredRecord(deserialized);
+  return deserialized;
 }
 
 function cloneRecord(record: StoredRecord): StoredRecord {
@@ -893,12 +973,171 @@ function maxDate(left: Date, right: Date): Date {
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
-  return (
-    value !== null &&
-    typeof value === "object" &&
-    !Array.isArray(value) &&
-    !(value instanceof Date)
-  );
+  if (value === null || typeof value !== "object" || Array.isArray(value)) {
+    return false;
+  }
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
+const FORBIDDEN_CONFIGURATION_KEYS = new Set([
+  "__proto__",
+  "constructor",
+  "prototype",
+]);
+
+function assertJsonSafe(
+  value: unknown,
+  path: string,
+  ancestors = new WeakSet<object>(),
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`${path} must contain only finite JSON numbers`);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new Error(`${path} must be JSON-safe`);
+  }
+  if (ancestors.has(value)) {
+    throw new Error(`${path} contains a circular reference`);
+  }
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      value.forEach((child, index) =>
+        assertJsonSafe(child, `${path}[${index}]`, ancestors),
+      );
+      return;
+    }
+    if (!isPlainObject(value)) {
+      throw new Error(`${path} must contain only plain JSON objects`);
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (typeof key !== "string") {
+        throw new Error(`${path} cannot contain symbol keys`);
+      }
+      if (FORBIDDEN_CONFIGURATION_KEYS.has(key)) {
+        throw new Error(`${path} contains forbidden key ${key}`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor)) {
+        throw new Error(`${path}.${key} must be a data property`);
+      }
+      assertJsonSafe(descriptor.value, `${path}.${key}`, ancestors);
+    }
+  } finally {
+    ancestors.delete(value);
+  }
+}
+
+function validateConfigurationKey(key: string): void {
+  if (
+    !key ||
+    key.includes(".") ||
+    FORBIDDEN_CONFIGURATION_KEYS.has(key)
+  ) {
+    throw new Error(`invalid configuration field name: ${key}`);
+  }
+}
+
+function validateConfigurationObject(
+  value: Readonly<Record<string, unknown>>,
+): void {
+  const visit = (candidate: unknown): void => {
+    if (Array.isArray(candidate)) {
+      candidate.forEach(visit);
+      return;
+    }
+    if (!isPlainObject(candidate)) {
+      return;
+    }
+    for (const [key, child] of Object.entries(candidate)) {
+      validateConfigurationKey(key);
+      visit(child);
+    }
+  };
+  visit(value);
+}
+
+function assertValidDate(value: Date, name: string): void {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    throw new Error(`${name} must be a valid date`);
+  }
+}
+
+function validateFieldVersions(
+  versions: Readonly<Record<string, FieldVersion>>,
+): void {
+  for (const [path, version] of Object.entries(versions)) {
+    if (!path) {
+      throw new Error("configuration field version path cannot be empty");
+    }
+    path.split(".").forEach(validateConfigurationKey);
+    if (!version?.origin?.trim()) {
+      throw new Error(`configuration field ${path} requires an origin`);
+    }
+    assertValidDate(version.timestamp, `configuration field ${path} timestamp`);
+  }
+}
+
+function validateReplicaValue(
+  value: EdgeReplicaValue,
+  configuration: boolean,
+): void {
+  assertValidDate(value.timestamp, "replica timestamp");
+  if (!value.origin?.trim()) {
+    throw new Error("replica origin cannot be empty");
+  }
+  assertJsonSafe(value.data, "$.data");
+  if (configuration) {
+    if (!isPlainObject(value.data)) {
+      throw new Error("configuration conflict values must be objects");
+    }
+    validateConfigurationObject(value.data);
+    if (value.fieldVersions) {
+      validateFieldVersions(value.fieldVersions);
+    }
+  }
+}
+
+function validateStoredRecord(record: StoredRecord): void {
+  if (!record.id?.trim()) {
+    throw new Error("edge queue record id cannot be empty");
+  }
+  if (!Number.isSafeInteger(record.attempts) || record.attempts < 0) {
+    throw new Error(`invalid attempts for edge queue record ${record.id}`);
+  }
+  if (record.kind !== "telemetry" && record.kind !== "configuration") {
+    throw new Error(`invalid kind for edge queue record ${record.id}`);
+  }
+  if (!record.origin?.trim()) {
+    throw new Error(`invalid origin for edge queue record ${record.id}`);
+  }
+  if (!/^[0-9a-f]{64}$/i.test(record.checksum)) {
+    throw new Error(`invalid checksum for edge queue record ${record.id}`);
+  }
+  assertValidDate(record.timestamp, `edge queue record ${record.id} timestamp`);
+  assertJsonSafe(record.data, "$.data");
+  if (record.kind === "configuration") {
+    if (!isPlainObject(record.data)) {
+      throw new Error(
+        `configuration edge queue record ${record.id} must contain an object`,
+      );
+    }
+    validateConfigurationObject(record.data);
+  }
+  if (record.fieldVersions) {
+    validateFieldVersions(record.fieldVersions);
+  }
 }
 
 function validateConfig(config: StoreAndForwardConfig): void {
@@ -929,4 +1168,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export const storeAndForwardService = new StoreAndForwardService();
+export let storeAndForwardService = new StoreAndForwardService();
+
+/**
+ * Composition hook used before startup. Static importers observe this live
+ * binding, so gateway writes and health checks share the injected service.
+ */
+export function configureStoreAndForwardService(
+  config: Partial<StoreAndForwardConfig>,
+  dependencies: StoreAndForwardDependencies,
+): StoreAndForwardService {
+  if (storeAndForwardService.isInitialized()) {
+    throw new Error(
+      "store-and-forward service must be configured before initialization",
+    );
+  }
+  if (!dependencies.transport) {
+    throw new Error("a real edge upstream transport must be injected");
+  }
+  storeAndForwardService = new StoreAndForwardService(config, dependencies);
+  return storeAndForwardService;
+}

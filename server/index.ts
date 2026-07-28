@@ -26,6 +26,7 @@ import { blueprintSafetyHost } from "./blueprint/safety-host";
 // Observed-liveness collector (#456). Off unless
 // VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and ANCHOR_NODE_URLS is set.
 import { startValidatorLivenessCollector } from "./blockchain/liveness-collector";
+import { productionScaleRuntime } from "./scaling/runtime";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -90,6 +91,13 @@ registerSwaggerRoutes(app, gatewayConfig);
   await initializeDefaultAgents();
   await startDefaultAgents();
   
+  // Bind production-scale adapters before the shared edge singleton starts.
+  // Enabling the runtime without a complete real binding fails startup closed.
+  await productionScaleRuntime.initialize();
+  if (productionScaleRuntime.isEnabled()) {
+    log("Production-scale runtime bindings initialized");
+  }
+
   // Initialize edge store-and-forward service
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");

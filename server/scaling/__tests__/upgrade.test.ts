@@ -1,6 +1,11 @@
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   InMemoryMigrationJournal,
+  InMemoryUpgradeJournal,
+  JsonFileUpgradeJournal,
   MigrationExecutionError,
   ReversibleMigrationRunner,
   RollingCanaryOrchestrator,
@@ -9,6 +14,7 @@ import {
   type DatabaseMigration,
   type DeploymentAdapter,
   type DeploymentInstance,
+  type MigrationJournal,
 } from "../upgrade";
 
 describe("zero-downtime upgrades (#227)", () => {
@@ -144,6 +150,70 @@ describe("zero-downtime upgrades (#227)", () => {
     expect(applied).toEqual([]);
   });
 
+  it("recovers an interrupted migration before attempting it again", async () => {
+    const journal = new InMemoryMigrationJournal();
+    await journal.append({ migrationId: "001", status: "started" });
+    const calls: string[] = [];
+    const migration: DatabaseMigration<string[]> = {
+      id: "001",
+      up: async () => {
+        calls.push("up");
+      },
+      down: async () => {
+        calls.push("down");
+      },
+    };
+
+    await expect(
+      new ReversibleMigrationRunner(journal).run([migration], calls),
+    ).resolves.toEqual(["001"]);
+    expect(calls).toEqual(["down", "up"]);
+    expect(
+      (await journal.entries()).map((entry) => entry.status),
+    ).toEqual([
+      "started",
+      "rollback-started",
+      "rolled-back",
+      "started",
+      "applied",
+    ]);
+  });
+
+  it("runs rollback even when failure journaling is unavailable", async () => {
+    const durable = new InMemoryMigrationJournal();
+    const journal: MigrationJournal = {
+      entries: () => durable.entries(),
+      append: async (entry) => {
+        if (
+          entry.status === "failed" ||
+          entry.status === "rollback-started" ||
+          entry.status === "rolled-back"
+        ) {
+          throw new Error("journal unavailable");
+        }
+        return durable.append(entry);
+      },
+    };
+    const calls: string[] = [];
+    const migration: DatabaseMigration<string[]> = {
+      id: "001",
+      up: async () => {
+        calls.push("up");
+        throw new Error("partial DDL");
+      },
+      down: async () => {
+        calls.push("down");
+      },
+    };
+
+    const error = await new ReversibleMigrationRunner(journal)
+      .run([migration], calls)
+      .catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(MigrationExecutionError);
+    expect((error as MigrationExecutionError).rollbackFailures).not.toEqual([]);
+    expect(calls).toEqual(["up", "down"]);
+  });
+
   it("runs canaries before rolling batches and restores traffic", async () => {
     const fake = deployment([
       { id: "a", version: "1.0.0", healthy: true, zone: "1" },
@@ -195,6 +265,101 @@ describe("zero-downtime upgrades (#227)", () => {
     expect(result.rollbackFailures).toEqual([]);
     expect([...fake.versions.values()]).toEqual(["1.0.0", "1.0.0", "1.0.0"]);
     expect(result.events.some((event) => event.stage === "rollback")).toBe(true);
+  });
+
+  it("restores a healthy target-version node left drained by a controller crash", async () => {
+    const journal = new InMemoryUpgradeJournal();
+    for (const status of ["drain-started", "deployed", "healthy"] as const) {
+      await journal.append({
+        targetVersion: "1.1.0",
+        instanceId: "a",
+        originalVersion: "1.0.0",
+        status,
+      });
+    }
+    let instance: DeploymentInstance = {
+      id: "a",
+      version: "1.1.0",
+      healthy: true,
+      trafficEnabled: false,
+    };
+    const calls: string[] = [];
+    const adapter: DeploymentAdapter = {
+      instances: async () => [{ ...instance }],
+      drain: async () => {
+        calls.push("drain");
+      },
+      deploy: async () => {
+        calls.push("deploy");
+      },
+      waitUntilHealthy: async () => {
+        calls.push("health");
+        return true;
+      },
+      restoreTraffic: async () => {
+        calls.push("restore");
+        instance = { ...instance, trafficEnabled: true };
+      },
+      rollback: async () => {
+        calls.push("rollback");
+      },
+    };
+
+    const result = await new RollingCanaryOrchestrator(
+      adapter,
+      new VersionCompatibilityMatrix([]),
+      journal,
+    ).execute({
+      targetVersion: "1.1.0",
+      canaryCount: 1,
+      batchSize: 1,
+      healthTimeoutMs: 1_000,
+    });
+
+    expect(result.succeeded).toBe(true);
+    expect(result.upgraded).toEqual([]);
+    expect(calls).toEqual(["health", "restore"]);
+    expect(result.events).toContainEqual(
+      expect.objectContaining({
+        stage: "recovery",
+        instanceId: "a",
+        outcome: "restored",
+      }),
+    );
+    expect((await journal.entries()).at(-1)?.status).toBe(
+      "traffic-restored",
+    );
+  });
+
+  it("persists upgrade progress in the fsync-backed file journal", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "0xscada-upgrade-"));
+    try {
+      const path = join(directory, "journal.json");
+      const journal = new JsonFileUpgradeJournal(
+        path,
+        () => new Date("2026-07-28T12:00:00Z"),
+      );
+      await journal.append({
+        targetVersion: "1.1.0",
+        instanceId: "a",
+        originalVersion: "1.0.0",
+        status: "drain-started",
+      });
+
+      const recovered = await new JsonFileUpgradeJournal(path).entries();
+      expect(recovered).toEqual([
+        {
+          targetVersion: "1.1.0",
+          instanceId: "a",
+          originalVersion: "1.0.0",
+          status: "drain-started",
+          sequence: 1,
+          timestamp: new Date("2026-07-28T12:00:00Z"),
+        },
+      ]);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 
   it("performs no deployment side effects for an incompatible target", async () => {

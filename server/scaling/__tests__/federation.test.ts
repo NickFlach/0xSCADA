@@ -198,4 +198,22 @@ describe("multi-site federation (#223)", () => {
     expect(left.conflicts()[0].reason).toBe("equivocation");
     expect(right.conflicts()[0].reason).toBe("equivocation");
   });
+
+  it("rejects configuration values that cannot converge through JSON", () => {
+    const configuration = new ReplicatedConfiguration("north");
+    expect(() => configuration.set("sensor.value", Number.NaN)).toThrow(
+      /finite/,
+    );
+    expect(() =>
+      configuration.set("sensor.observed", new Date()),
+    ).toThrow(/plain JSON/);
+    expect(() =>
+      configuration.apply({
+        path: "sensor.value",
+        version: { counter: 1, actor: "south" },
+        value: 1n,
+        deleted: false,
+      }),
+    ).toThrow(/JSON-safe/);
+  });
 });

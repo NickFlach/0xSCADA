@@ -82,10 +82,23 @@ certificate metadata supplied only by an unauthenticated advertisement.
 - `LocalEdgeProcessor` hooks that run after the local durable commit even when
   the upstream is unreachable.
 
+The JSON queue accepts only values that round-trip through JSON without
+coercion: null, booleans, strings, finite numbers, arrays, and plain objects.
+It rejects `NaN`, infinities, dates, maps, class instances, cycles, accessors,
+symbols, and prototype-mutating keys before committing. Configuration field
+names also cannot contain dots because dotted paths are the merge namespace.
+Queue snapshots are fsynced before atomic rename, and their checksums are
+verified after deserialization.
+
 Production must inject an `EdgeUpstreamTransport`. The default environment
 transport contains no socket and reports reachable only in development or when
 `SIMULATE_CONNECTIVITY=true`; this prevents a production process from deleting
 records based on a fake acknowledgement.
+
+An upstream outage is reported as `degraded` rather than readiness-failing:
+local durability and edge processing remain available. Capacity exhaustion,
+queue corruption, failed initialization, and local persistence failures remain
+hard health failures.
 
 Forward acknowledgements are accepted only for IDs in the offered batch. A
 Merkle mismatch keeps the full batch, increments retry state, emits an
@@ -111,12 +124,48 @@ until the peer acknowledges it.
   gates, rolls the remainder, and restores every touched node to its original
   version after a failure.
 
+On startup, the migration runner classifies incomplete `started`, `failed`,
+`rollback-started`, and `rollback-failed` entries and runs the migration's
+idempotent `down` recovery before any new `up`. Journal write failures never
+skip a safety rollback. The rolling orchestrator likewise journals drain,
+deploy, health, traffic restoration, and rollback boundaries. A controller
+restart health-checks a target-version node left drained, restores traffic only
+when it is healthy, and otherwise returns it to the recorded original version.
+`JsonFileUpgradeJournal` is the fsync-backed single-controller implementation;
+multi-controller deployments bind the same port to a transactional store with
+leader election.
+
 Deployment adapters must make `drain`, `restoreTraffic`, and `rollback`
 idempotent. A controller call can fail after partially changing external state,
 so the orchestrator marks a node rollback-eligible before crossing each drain
 or deploy boundary. The journal implementation used in production must be
 durable (normally an append-only database table); the included in-memory
 implementation is useful for tests and embedded controllers.
+
+## Production composition and health
+
+`server/scaling/runtime.ts` is the application composition root. The server
+invokes it before initializing the shared store-and-forward singleton, and
+health exposes horizontal scaling, federation, upgrades, and detailed edge
+state. To enable it:
+
+```text
+PRODUCTION_SCALE_ENABLED=true
+PRODUCTION_SCALE_REQUIRED=true
+PRODUCTION_SCALE_BINDINGS_MODULE=/absolute/path/to/production-scale-bindings.mjs
+```
+
+The module exports `createProductionScaleBindings`, `productionScaleBindings`,
+or a default `ProductionScaleBindings` object. The factory form receives the
+bundle's `productionScaleFactories`, so an external `.mjs` binding can construct
+the built-in rings, federation services, journals, and orchestrator without
+importing TypeScript source or duplicating the server bundle. A complete binding supplies the
+four horizontal services, the four federation services, the upgrade
+orchestrator plus the exact durable journal it uses, migration/feature-flag
+services, component health probes, and a real edge transport. Enabled startup
+fails closed on any missing service, an in-memory upgrade journal, a mismatched
+orchestrator journal, or `EnvironmentEdgeTransport`; the development-only
+environment transport is never accepted as a production binding.
 
 ## Verification
 
@@ -126,6 +175,7 @@ Focused deterministic tests live in:
 - `server/scaling/__tests__/federation.test.ts`
 - `server/gateway/__tests__/store-and-forward.test.ts`
 - `server/scaling/__tests__/upgrade.test.ts`
+- `server/scaling/__tests__/runtime.test.ts`
 
 They cover membership churn, all load-balancing modes, historian partial
 failure, partition fan-out, mTLS rejection, conflicting discovery identities,

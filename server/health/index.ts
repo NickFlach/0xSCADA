@@ -28,6 +28,7 @@ import type { Response } from 'express';
 // applied only by an explicit `applyScheduler()` call from a composition root
 // that owns a dedicated control process (see server/blueprint/scheduler.ts).
 import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
+import { productionScaleRuntime, type ProductionScaleComponent } from '../scaling/runtime';
 
 // Control-loop latency telemetry (#460): publish the sentinel probe's liveness
 // gauge as part of normal server composition so `scada_control_loop_probe_up`
@@ -125,19 +126,62 @@ healthManager.registerSimple(
   false,
 );
 
-// 7. Edge store-and-forward service (required for edge deployments)
-healthManager.registerSimple(
-  'store-and-forward',
-  async () => {
+// 7. Edge store-and-forward service. Upstream loss is degraded, not unready:
+// the durable local queue is specifically required to operate through it.
+healthManager.register({
+  name: 'store-and-forward',
+  required: true,
+  check: async () => {
     try {
       const status = await storeAndForwardService.healthCheck();
-      return status.healthy;
-    } catch {
-      return false;
+      return {
+        name: 'store-and-forward',
+        status: status.healthy
+          ? status.degraded
+            ? 'degraded'
+            : 'healthy'
+          : 'unhealthy',
+        lastCheck: new Date(),
+        message: status.message,
+        details: { ...storeAndForwardService.getStatus() },
+      };
+    } catch (error) {
+      return {
+        name: 'store-and-forward',
+        status: 'unhealthy',
+        lastCheck: new Date(),
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   },
-  true, // Required for edge deployments
-);
+});
+
+// ADR-0014 composition health. Disabled components report healthy/disabled;
+// enabled-but-unbound components fail closed and can be made readiness-critical.
+for (const component of [
+  'horizontal',
+  'federation',
+  'upgrades',
+] as const satisfies readonly ProductionScaleComponent[]) {
+  healthManager.register({
+    name: `production-scale-${component}`,
+    required: productionScaleRuntime.isRequired(),
+    check: async () => {
+      const status = await productionScaleRuntime.health(component);
+      return {
+        name: `production-scale-${component}`,
+        status: status.healthy
+          ? status.degraded
+            ? 'degraded'
+            : 'healthy'
+          : 'unhealthy',
+        lastCheck: new Date(),
+        message: status.message,
+        details: status.details ? { ...status.details } : undefined,
+      };
+    },
+  });
+}
 
 // 8. Bridge modules (event-anchor, state-sync)
 healthManager.registerSimple(

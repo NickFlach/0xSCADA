@@ -121,6 +121,41 @@ describe("durable edge resilience (#224)", () => {
     );
   });
 
+  it("round-trips JSON data losslessly and rejects values JSON would coerce", async () => {
+    const directory = await mkdtemp(join(tmpdir(), "0xscada-edge-json-"));
+    temporaryDirectories.push(directory);
+    const storagePath = join(directory, "queue.json");
+    const dependencies = {
+      queue: new JsonFileEdgeQueue(storagePath),
+      transport: unavailableTransport(),
+      idFactory: () => "json-safe",
+    };
+    const first = service({ storagePath }, dependencies);
+    await first.initialize();
+    await expect(first.store({ reading: Number.NaN })).rejects.toThrow(
+      /finite JSON numbers/,
+    );
+    await expect(
+      first.store({ observedAt: new Date("2026-07-28T12:00:00Z") }),
+    ).rejects.toThrow(/plain JSON objects/);
+    const expected = {
+      readings: [0, 12.5, null, true],
+      labels: { area: "north", unit: "psi" },
+    };
+    await first.store(expected);
+    await first.shutdown();
+
+    const recovered = service(
+      { storagePath },
+      {
+        queue: new JsonFileEdgeQueue(storagePath),
+        transport: unavailableTransport(),
+      },
+    );
+    await recovered.initialize();
+    expect(recovered.pending()[0].data).toEqual(expected);
+  });
+
   it("uses capped exponential reconnect backoff", async () => {
     const fixedNow = new Date("2026-07-28T12:00:00Z");
     const edge = service(
@@ -290,5 +325,41 @@ describe("durable edge resilience (#224)", () => {
       alarm: { high: 90, low: 10 },
       display: { units: "C" },
     });
+  });
+
+  it("rejects ambiguous and prototype-mutating configuration fields", () => {
+    const malicious = JSON.parse(
+      '{"__proto__":{"edgePolluted":"yes"}}',
+    ) as Record<string, unknown>;
+    expect(() =>
+      mergeConfigurationConflict(
+        {
+          data: {},
+          timestamp: new Date("2026-07-28T11:00:00Z"),
+          origin: "edge",
+        },
+        {
+          data: malicious,
+          timestamp: new Date("2026-07-28T12:00:00Z"),
+          origin: "cloud",
+        },
+      ),
+    ).toThrow(/forbidden key|invalid configuration field/);
+    expect(({} as { edgePolluted?: string }).edgePolluted).toBeUndefined();
+
+    expect(() =>
+      mergeConfigurationConflict(
+        {
+          data: { "alarm.high": 90 },
+          timestamp: new Date("2026-07-28T11:00:00Z"),
+          origin: "edge",
+        },
+        {
+          data: { alarm: { high: 80 } },
+          timestamp: new Date("2026-07-28T12:00:00Z"),
+          origin: "cloud",
+        },
+      ),
+    ).toThrow(/invalid configuration field/);
   });
 });

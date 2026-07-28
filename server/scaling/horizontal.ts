@@ -168,14 +168,33 @@ export class ServerLoadBalancer {
     if (!Number.isFinite(weight) || weight <= 0) {
       throw new Error(`weight for ${target.id} must be greater than zero`);
     }
+    if (
+      target.activeConnections !== undefined &&
+      (!Number.isSafeInteger(target.activeConnections) ||
+        target.activeConnections < 0)
+    ) {
+      throw new Error(
+        `activeConnections for ${target.id} must be a non-negative integer`,
+      );
+    }
     const previous = this.targets.get(target.id);
+    if (previous) {
+      // Leases retain this object by identity. Mutating it in place ensures a
+      // lease acquired before a health/weight refresh still decrements the
+      // live counter when it is released.
+      previous.weight = weight;
+      previous.healthy = target.healthy ?? previous.healthy;
+      if (target.activeConnections !== undefined) {
+        previous.activeConnections = target.activeConnections;
+      }
+      return;
+    }
     this.targets.set(target.id, {
       id: target.id,
       weight,
-      healthy: target.healthy ?? previous?.healthy ?? true,
-      activeConnections:
-        target.activeConnections ?? previous?.activeConnections ?? 0,
-      currentWeight: previous?.currentWeight ?? 0,
+      healthy: target.healthy ?? true,
+      activeConnections: target.activeConnections ?? 0,
+      currentWeight: 0,
     });
   }
 
@@ -293,6 +312,8 @@ export interface FederatedHistorianResult {
  */
 export class PartitionedHistorian {
   private readonly partitions: readonly HistorianPartition[];
+  private readonly partitionsById: ReadonlyMap<string, HistorianPartition>;
+  private readonly ring: ConsistentHashRing;
 
   constructor(partitions: readonly HistorianPartition[]) {
     if (partitions.length === 0) {
@@ -305,11 +326,16 @@ export class PartitionedHistorian {
     this.partitions = [...partitions].sort((left, right) =>
       left.id.localeCompare(right.id),
     );
+    this.partitionsById = new Map(
+      this.partitions.map((partition) => [partition.id, partition]),
+    );
+    this.ring = new ConsistentHashRing(
+      this.partitions.map((partition) => ({ id: partition.id })),
+    );
   }
 
   route(tag: string): HistorianPartition {
-    const index = Number(hash64(tag) % BigInt(this.partitions.length));
-    return this.partitions[index];
+    return this.partitionsById.get(this.ring.owner(tag))!;
   }
 
   async write(point: HistorianPoint): Promise<string> {

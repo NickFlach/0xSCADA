@@ -431,6 +431,7 @@ export class ReplicatedConfiguration {
     if (value === undefined) {
       throw new Error("configuration value cannot be undefined");
     }
+    validateConfigurationValue(value, path);
     const operation: ConfigurationOperation = {
       path,
       value: structuredClone(value),
@@ -590,6 +591,9 @@ function validateOperation(operation: ConfigurationOperation): void {
   if (!operation.deleted && operation.value === undefined) {
     throw new Error("non-delete CRDT operation requires a value");
   }
+  if (!operation.deleted) {
+    validateConfigurationValue(operation.value, operation.path);
+  }
 }
 
 function validateConfigPath(path: string): void {
@@ -600,6 +604,70 @@ function validateConfigPath(path: string): void {
     path.split(".").some((segment) => !SITE_SEGMENT.test(segment))
   ) {
     throw new Error(`invalid configuration path: ${path}`);
+  }
+}
+
+function validateConfigurationValue(
+  value: unknown,
+  path: string,
+  ancestors = new WeakSet<object>(),
+): void {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "boolean"
+  ) {
+    return;
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new Error(`configuration value at ${path} must be finite`);
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new Error(`configuration value at ${path} must be JSON-safe`);
+  }
+  if (ancestors.has(value)) {
+    throw new Error(`configuration value at ${path} is circular`);
+  }
+  ancestors.add(value);
+  try {
+    if (Array.isArray(value)) {
+      value.forEach((child, index) =>
+        validateConfigurationValue(child, `${path}[${index}]`, ancestors),
+      );
+      return;
+    }
+    const prototype = Object.getPrototypeOf(value);
+    if (prototype !== Object.prototype && prototype !== null) {
+      throw new Error(
+        `configuration value at ${path} must use plain JSON objects`,
+      );
+    }
+    for (const key of Reflect.ownKeys(value)) {
+      if (
+        typeof key !== "string" ||
+        key === "__proto__" ||
+        key === "constructor" ||
+        key === "prototype"
+      ) {
+        throw new Error(`configuration value at ${path} has a forbidden key`);
+      }
+      const descriptor = Object.getOwnPropertyDescriptor(value, key);
+      if (!descriptor || !("value" in descriptor)) {
+        throw new Error(
+          `configuration value at ${path}.${key} must be a data property`,
+        );
+      }
+      validateConfigurationValue(
+        descriptor.value,
+        `${path}.${key}`,
+        ancestors,
+      );
+    }
+  } finally {
+    ancestors.delete(value);
   }
 }
 

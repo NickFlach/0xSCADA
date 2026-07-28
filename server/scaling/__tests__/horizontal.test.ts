@@ -87,6 +87,29 @@ describe("horizontal scaling primitives (#222)", () => {
     expect(least.acquire().target.id).toBe("large");
   });
 
+  it("keeps active leases attached when a target is refreshed", () => {
+    const balancer = new ServerLoadBalancer(
+      [{ id: "api-a", weight: 1 }],
+      "least-connections",
+    );
+    const lease = balancer.acquire();
+
+    balancer.upsert({ id: "api-a", weight: 4, healthy: true });
+    lease.release();
+
+    expect(balancer.snapshot()).toEqual([
+      {
+        id: "api-a",
+        weight: 4,
+        healthy: true,
+        activeConnections: 0,
+      },
+    ]);
+    expect(() =>
+      balancer.upsert({ id: "api-a", activeConnections: -1 }),
+    ).toThrow(/non-negative integer/);
+  });
+
   it("routes historian writes and federates sorted reads with explicit failures", async () => {
     const partitions = ["a", "b", "c"].map(
       (id): HistorianPartition & { writes: HistorianPoint[]; querySpy: ReturnType<typeof vi.fn> } => {
@@ -141,6 +164,27 @@ describe("horizontal scaling primitives (#222)", () => {
     expect(federated.failures).toEqual([
       { partitionId: "b", error: "shard unavailable" },
     ]);
+  });
+
+  it("moves historian tags only to a joining partition during scale-out", () => {
+    const partition = (id: string): HistorianPartition => ({
+      id,
+      write: async () => undefined,
+      query: async () => [],
+    });
+    const before = new PartitionedHistorian([partition("a"), partition("b")]);
+    const after = new PartitionedHistorian([
+      partition("a"),
+      partition("b"),
+      partition("c"),
+    ]);
+    const tags = Array.from({ length: 1_000 }, (_, index) => `tag-${index}`);
+    const changes = tags.filter(
+      (tag) => before.route(tag).id !== after.route(tag).id,
+    );
+    expect(changes.length).toBeGreaterThan(0);
+    expect(changes.length).toBeLessThan(tags.length * 0.5);
+    expect(changes.every((tag) => after.route(tag).id === "c")).toBe(true);
   });
 
   it("fans out only to a key's partition and isolates subscriber failures", async () => {
