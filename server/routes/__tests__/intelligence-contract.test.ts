@@ -12,6 +12,14 @@
  * same test server so the "the working APIs still work" half of the contract is
  * exercised rather than assumed.
  *
+ * Update (#216): POST /nlquery and GET /nlquery/history are no longer 501 —
+ * the engine was built, so they serve real answers behind a `nlquery.read`
+ * guard. They moved out of the 501 table into their own block below, which
+ * pins the property that actually matters for them: with no database and no
+ * live tag stream in this harness, they must REFUSE rather than produce a
+ * reading. The anti-fabrication assertions apply to them as much as to the
+ * refusals.
+ *
  * Harness pattern follows predictive-contract.test.ts: port-0 express server,
  * API_KEYS env, x-api-key header. No DB, no network, no new dependencies.
  */
@@ -55,10 +63,11 @@ async function api(method: string, path: string, body?: unknown): Promise<ApiRes
 }
 
 beforeAll(async () => {
-  // A single privileged key satisfies the guards on the real routers. The
-  // intelligence router carries no per-route control-plane guard of its own,
-  // which is precisely why its handlers must not serve engine data (see the
-  // module comment there).
+  // A single privileged key satisfies the guards on the real routers and the
+  // `nlquery.read` guard on the two implemented routes. Every OTHER handler on
+  // the intelligence router still carries no control-plane guard, which is
+  // precisely why those handlers must not serve engine data (see the module
+  // comment there).
   process.env.API_KEYS = `${KEY}:intelligence-contract-tester:*`;
   _resetControlPlaneAuthCache();
 
@@ -114,8 +123,9 @@ function expectNoFabricatedMeasurements(body: Record<string, unknown>): void {
 // ── Endpoints with no implementation anywhere on main → 501 ────────────────
 
 const NOT_IMPLEMENTED: ReadonlyArray<readonly [string, string, unknown]> = [
-  ["POST", "/api/intelligence/nlquery", { query: "Show me pump efficiency trends" }],
-  ["GET", "/api/intelligence/nlquery/history", undefined],
+  // The two /nlquery routes previously listed here are now implemented (#216)
+  // and are covered by their own contract block below, plus the auth matrix in
+  // nlquery-auth.test.ts.
   [
     "POST",
     "/api/intelligence/ml/pipeline",
@@ -223,6 +233,73 @@ describe("no intelligence endpoint returns a value that varies between calls", (
     const b = await api("GET", "/api/intelligence/maintenance/insights/TANK-203");
     expect(b.text).toBe(a.text);
     expect(a.status).toBe(410);
+  });
+});
+
+// ── The implemented NL query surface (#216) ────────────────────────────────
+
+describe("nlquery answers from real data or refuses — never fabricates", () => {
+  it("POST /nlquery refuses honestly when no process data store is reachable", async () => {
+    // This harness has no database and no live tag stream, which is exactly
+    // the condition under which a fabricating implementation would invent a
+    // number. The engine must instead report that it could not read.
+    const res = await api("POST", "/api/intelligence/nlquery", {
+      query: "What is the pressure in tank 3?",
+    });
+
+    expect(res.status).toBe(200);
+    expect(res.json.success).toBe(false);
+    const answer = res.json.answer as string;
+    expect(typeof answer).toBe("string");
+    // No digit-bearing reading may appear in a refusal.
+    expect(answer).not.toMatch(/\bis -?\d+(\.\d+)?\b/);
+    expect(res.json.parsedBy).toBe("regex");
+    // The refusal names WHY it could not read, rather than degrading to a
+    // generic error: an operator must be able to tell an outage from a quiet
+    // process. `getDatabase()` throws when uninitialized, so this also pins
+    // that the port converts that throw into a reason instead of letting it
+    // escape into the engine's generic failure branch.
+    expect(answer).toMatch(/tag catalogue/i);
+    expect(answer).toMatch(/Database not initialized/i);
+    expect(answer).not.toMatch(/process data store returned an error/i);
+  });
+
+  it("reports the same refusal on repeated calls — no PRNG in the answer", async () => {
+    const body = { query: "What is the pressure in tank 3?" };
+    const [first, second, third] = await Promise.all([
+      api("POST", "/api/intelligence/nlquery", body),
+      api("POST", "/api/intelligence/nlquery", body),
+      api("POST", "/api/intelligence/nlquery", body),
+    ]);
+    // `id`, `timestamp` and `durationMs` legitimately differ per call, so the
+    // whole body cannot be byte-compared. The ANSWER is the operator-facing
+    // payload and must be stable for a stable question.
+    expect(second.json.answer).toBe(first.json.answer);
+    expect(third.json.answer).toBe(first.json.answer);
+    expect(second.json.success).toBe(first.json.success);
+  });
+
+  it("rejects an over-long question with 400 instead of truncating it", async () => {
+    const res = await api("POST", "/api/intelligence/nlquery", {
+      query: "x".repeat(100_000),
+    });
+    expect(res.status).toBe(400);
+    expect(res.json.error).toBe("invalid_request");
+  });
+
+  it("GET /nlquery/history states plainly that history is not persisted", async () => {
+    const res = await api("GET", "/api/intelligence/nlquery/history");
+    expect(res.status).toBe(200);
+    expect(res.json.persistence).toBe("process-local");
+    expect(res.json.persistenceNote as string).toMatch(/lost on restart/i);
+    expect(Array.isArray(res.json.history)).toBe(true);
+  });
+
+  it("history records the queries this suite just ran, bounded", async () => {
+    const res = await api("GET", "/api/intelligence/nlquery/history?limit=5");
+    expect(res.status).toBe(200);
+    const history = res.json.history as unknown[];
+    expect(history.length).toBeLessThanOrEqual(5);
   });
 });
 
