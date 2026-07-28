@@ -18,6 +18,7 @@ import { getBridgeHealthStatus } from '../bridge';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
 import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
+import { zeroDowntimeUpgradeRuntime } from '../scaling/upgrade-runtime';
 import type { Response } from 'express';
 // Tick-aware scheduler (#458): surface schedulingMode in /health and append
 // blueprint tick telemetry to /metrics.
@@ -203,6 +204,28 @@ healthManager.register({
 //     probes the kernel and never applies a policy. Real-time scheduling stays
 //     off unless a dedicated control process opts in via OXSCADA_RT_ENABLED.
 healthManager.register(createSchedulerCheck());
+
+// Zero-downtime upgrade controller. Disabled deployments report healthy;
+// enabled deployments expose their real controller/journal health. Operators
+// can make this readiness-critical with ZERO_DOWNTIME_UPGRADES_REQUIRED=true.
+healthManager.register({
+  name: 'zero-downtime-upgrades',
+  required: zeroDowntimeUpgradeRuntime.isRequired(),
+  check: async () => {
+    const status = await zeroDowntimeUpgradeRuntime.health();
+    return {
+      name: 'zero-downtime-upgrades',
+      status: status.healthy
+        ? status.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: status.message,
+      details: status.details ? { ...status.details } : undefined,
+    };
+  },
+});
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {

@@ -31,12 +31,34 @@ Multi-controller deployments must bind the journal interfaces to a
 transactional store with leader election; the included JSON journal is for one
 controller and the in-memory journals are for tests or embedded use.
 
+## Production runtime
+
+`server/scaling/upgrade-runtime.ts` is the application composition root. It is
+off by default. Set `ZERO_DOWNTIME_UPGRADES_ENABLED=true` and point
+`ZERO_DOWNTIME_UPGRADES_BINDINGS_MODULE` at a local module that exports one of:
+
+- `createZeroDowntimeUpgradeBindings(factories)`
+- `zeroDowntimeUpgradeBindings`
+- a default bindings object
+
+The binding must provide a deployment-adapter-backed
+`RollingCanaryOrchestrator`, its `VersionCompatibilityMatrix`, the exact durable
+`UpgradeJournal` used by that orchestrator, callable migration and feature-flag
+services, and an operational health probe. Startup fails closed when any
+binding is absent, the journal is volatile, or the orchestrator uses a different
+journal. This prevents a production rollout from silently losing restart
+recovery.
+
+Set `ZERO_DOWNTIME_UPGRADES_REQUIRED=true` to make the registered
+`zero-downtime-upgrades` health check readiness-critical. The check reports
+disabled, not-initialized, healthy, degraded, and failed controller states.
+
 ## Verification
 
 Run:
 
 ```bash
-npx vitest run server/scaling/__tests__/upgrade.test.ts
+npx vitest run server/scaling/__tests__/upgrade.test.ts server/scaling/__tests__/upgrade-runtime.test.ts server/__tests__/startup-singleton-imports.test.ts
 npm run typecheck
 npm run build
 ```
@@ -44,4 +66,6 @@ npm run build
 The focused suite covers compatibility rejection before side effects, typed
 feature rollout, forward and reverse migrations, incomplete-journal recovery,
 journal failures, canary health failure, rollout restart recovery, and durable
-journal persistence.
+journal persistence. Runtime tests additionally prove production binding
+validation, durable-journal identity, fail-closed startup, and controller health
+propagation.
