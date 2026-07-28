@@ -200,6 +200,62 @@ export interface PollOptions {
 }
 
 /**
+ * Describe why a poll failed, in terms an operator can act on.
+ *
+ * `fetch` reports every connection-level failure with the same opaque message,
+ * "fetch failed", and puts the actionable reason on `err.cause` — an
+ * `AggregateError` when several addresses were tried. That message is the ONLY
+ * record of why a node was unreachable: it becomes `ValidatorNodeView.error` on
+ * the dashboard and, via `classifyObservation`, the `detail` column of every
+ * `miss` row in `validator_liveness_observations`. "fetch failed" alone cannot
+ * tell an operator auditing a slashing projection whether the node was down
+ * (ECONNREFUSED), the hostname does not resolve (ENOTFOUND), or the poll timed
+ * out — three findings with three different responses.
+ *
+ * Only the error CODE is appended, never the cause's message: causes embed the
+ * address that was dialled, which is exactly the topology detail the URL is
+ * deliberately kept out of. An aborted request is reported as a timeout,
+ * because the abort signal here has one cause — `options.timeoutMs` elapsing.
+ *
+ * Pure; exported for tests.
+ */
+export function describeFetchFailure(err: unknown): string {
+  const base = err instanceof Error ? err.message : String(err);
+  if (err instanceof Error && err.name === 'AbortError') {
+    return `${base} (timeout)`;
+  }
+
+  // Walk the cause chain, and the branches of any AggregateError within it, for
+  // the first errno-style code. Depth-bounded so a self-referential cause (or a
+  // hostile deep chain) cannot spin here.
+  const queue: unknown[] = [err];
+  for (let depth = 0; depth < 8 && queue.length > 0; depth += 1) {
+    const current = queue.shift();
+    if (typeof current !== 'object' || current === null) continue;
+    const code = (current as { code?: unknown }).code;
+    // errno-style codes only (ECONNREFUSED, ENOTFOUND, ...); a numeric or
+    // free-text `code` carries nothing an operator can look up.
+    if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{2,31}$/.test(code)) {
+      return base.includes(code) ? base : `${base} (${code})`;
+    }
+    const errors = (current as { errors?: unknown }).errors;
+    if (Array.isArray(errors)) {
+      // Push branch-by-branch, never `push(...errors)`: the array width is one
+      // entry per address the resolver returned, so it is not ours to choose,
+      // and spreading a wide one overflows the argument stack. This function
+      // throwing would break `pollNodeStatus`'s documented contract that it
+      // never throws — costing the whole poll round, not one node's row. Only
+      // as many branches as the depth bound can examine are queued at all.
+      for (const branch of errors.slice(0, 8)) queue.push(branch);
+    }
+    const cause = (current as { cause?: unknown }).cause;
+    if (cause !== undefined) queue.push(cause);
+  }
+
+  return base;
+}
+
+/**
  * Poll one node's `/status`. Exactly one attempt, no retry. Never throws:
  * failures are captured into the returned view so one dead node cannot fail the
  * whole request.
@@ -235,7 +291,7 @@ export async function pollNodeStatus(
       status: toStatusView(parsed),
     };
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = describeFetchFailure(err);
     return {
       label,
       reachable: false,

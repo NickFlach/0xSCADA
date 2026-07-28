@@ -18,6 +18,7 @@ import {
   _resetValidatorDashboardCache,
   buildOverview,
   collectValidatorOverview,
+  describeFetchFailure,
   getValidatorOverview,
   kuramotoCoherence,
   loadValidatorDashboardConfig,
@@ -209,6 +210,27 @@ describe('pollNodeStatus', () => {
     expect(view.error).toContain('503');
   });
 
+  it('records the errno behind a connection failure, not just "fetch failed"', async () => {
+    // What the global fetch actually throws when a port is closed: an opaque
+    // message with the actionable reason hidden on `cause`. The recorded string
+    // is the only account of why a node was unreachable — it becomes the
+    // `detail` of a `miss` row an operator may later slash on.
+    const failure = new TypeError('fetch failed');
+    (failure as { cause?: unknown }).cause = Object.assign(
+      new Error('connect ECONNREFUSED 127.0.0.1:9090'),
+      { code: 'ECONNREFUSED' },
+    );
+    const view = await pollNodeStatus('http://node-a:9090', {
+      timeoutMs: 1000,
+      fetchImpl: () => Promise.reject(failure),
+    });
+    expect(view.reachable).toBe(false);
+    expect(view.error).toBe('fetch failed (ECONNREFUSED)');
+    // The cause's own message embeds the address that was dialled; only the
+    // code is surfaced, so no topology detail is added that the URL withheld.
+    expect(view.error).not.toContain('127.0.0.1');
+  });
+
   it('captures a schema-drifted payload instead of throwing', async () => {
     const view = await pollNodeStatus('http://node-a:9090', {
       timeoutMs: 1000,
@@ -286,6 +308,86 @@ describe('pollNodeStatus', () => {
       fetchImpl: () => Promise.reject(new Error('x'.repeat(5000))),
     });
     expect(view.error?.length).toBeLessThanOrEqual(200);
+  });
+});
+
+describe('describeFetchFailure', () => {
+  const withCode = (message: string, code: string): Error =>
+    Object.assign(new Error(message), { code });
+
+  it('appends the errno hidden on `cause`', () => {
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = withCode('connect ECONNREFUSED', 'ECONNREFUSED');
+    expect(describeFetchFailure(err)).toBe('fetch failed (ECONNREFUSED)');
+  });
+
+  it('finds an errno inside an AggregateError, as happens with multiple addresses', () => {
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = new AggregateError([
+      withCode('connect ENETUNREACH ::1:9090', 'ENETUNREACH'),
+      withCode('connect ECONNREFUSED 127.0.0.1:9090', 'ECONNREFUSED'),
+    ]);
+    // The first branch reported is the one surfaced; both are real reasons.
+    expect(describeFetchFailure(err)).toBe('fetch failed (ENETUNREACH)');
+  });
+
+  it('reports an aborted request as a timeout', () => {
+    // The only thing that aborts a poll here is `timeoutMs` elapsing.
+    const err = new Error('This operation was aborted');
+    err.name = 'AbortError';
+    expect(describeFetchFailure(err)).toBe('This operation was aborted (timeout)');
+  });
+
+  it('leaves a message that already names its code unchanged', () => {
+    expect(describeFetchFailure(withCode('connect ECONNREFUSED', 'ECONNREFUSED'))).toBe(
+      'connect ECONNREFUSED',
+    );
+  });
+
+  it('passes through an error with no errno anywhere in the chain', () => {
+    expect(describeFetchFailure(new Error('/status returned HTTP 503'))).toBe(
+      '/status returned HTTP 503',
+    );
+  });
+
+  it('ignores a non-errno `code` rather than appending noise', () => {
+    // e.g. a numeric DOMException code, or a free-text application code.
+    expect(describeFetchFailure(Object.assign(new Error('boom'), { code: 20 }))).toBe('boom');
+    expect(describeFetchFailure(Object.assign(new Error('boom'), { code: 'nope' }))).toBe('boom');
+  });
+
+  it('terminates on a self-referential cause chain', () => {
+    const err = new Error('looping');
+    (err as { cause?: unknown }).cause = err;
+    expect(describeFetchFailure(err)).toBe('looping');
+  });
+
+  it('handles a non-Error rejection', () => {
+    expect(describeFetchFailure('plain string')).toBe('plain string');
+  });
+
+  it('survives a very wide AggregateError instead of throwing out of the poll', () => {
+    // The width of `errors` is one entry per address the resolver returned, so
+    // it is not ours to choose. Spreading it into `push` overflows the argument
+    // stack; this function throwing would break `pollNodeStatus`'s contract that
+    // it never throws, losing the whole round rather than one node's row.
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = new AggregateError(
+      Array.from({ length: 200_000 }, () => new Error('x')),
+      'all addresses failed',
+    );
+    expect(describeFetchFailure(err)).toBe('fetch failed');
+  });
+
+  it('still finds the errno when it is on an early branch of a wide AggregateError', () => {
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = new AggregateError([
+      Object.assign(new Error('connect ECONNREFUSED 127.0.0.1:9090'), {
+        code: 'ECONNREFUSED',
+      }),
+      ...Array.from({ length: 100_000 }, () => new Error('x')),
+    ]);
+    expect(describeFetchFailure(err)).toBe('fetch failed (ECONNREFUSED)');
   });
 });
 
