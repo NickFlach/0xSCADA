@@ -171,13 +171,24 @@ GET /api/nodes/attestation-history/demo?window=24h   # synthetic, opt-in
 Read-only history behind the Slashing & Liveness Visualizer. Both routes require
 an operator `X-API-Key`.
 
-This build has **no live attestation feed**, so the live route fails closed with
-`503 attestation_source_unavailable` and never substitutes generated records. The
-`/demo` route serves clearly-labelled synthetic PRNG output and is disabled
+This build has **no consensus attestation duty feed** — the oxscada `/status`
+surface exposes no per-slot duty outcome. What it can serve is an
+**observed-liveness** source: per poll round, whether each configured node
+answered and whether the height it reported advanced. It is OFF unless
+`VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true` with `ANCHOR_NODE_URLS` set; until
+then the live route fails closed with `503 attestation_source_unavailable` and
+never substitutes generated records.
+
+Every live 200 carries a mandatory `observation` descriptor stating what was
+polled, the cadence, and exactly what `hit` / `miss` / `late` mean — for this
+source `miss` means "the node did not answer this poll round", **not** a missed
+consensus duty.
+
+The `/demo` route serves clearly-labelled synthetic PRNG output and is disabled
 unless the server runs with `SLASHING_DEMO_DATA=true`.
 
 See [attestation-history.md](./attestation-history.md) for the full contract and
-for how to register a real feed.
+for how to register a real consensus attestation feed.
 
 ---
 

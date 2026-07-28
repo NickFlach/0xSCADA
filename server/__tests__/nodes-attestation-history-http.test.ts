@@ -21,12 +21,50 @@ import {
   nodesRoutes,
   registerLiveAttestationSource,
 } from "../routes/nodes";
+import {
+  getValidatorLivenessCollectorStatus,
+  loadLivenessCollectorConfig,
+  startValidatorLivenessCollector,
+  stopValidatorLivenessCollector,
+} from "../blockchain/liveness-collector";
 import { _resetControlPlaneAuthCache } from "../middleware/control-plane-auth";
 import type {
+  AttestationSourceDescriptor,
   AttestationSourceUnavailableResponse,
+  LiveAttestationHistoryResponse,
   SyntheticAttestationHistoryResponse,
   ValidatorHistory,
 } from "@shared/types/slashing";
+
+/**
+ * A descriptor is MANDATORY on a live source. `hit` / `miss` / `late` mean
+ * whatever the source measured, so a source that will not say what it measured
+ * cannot be served — see `LiveAttestationSource` in server/routes/nodes.ts.
+ */
+const TEST_DESCRIPTOR: AttestationSourceDescriptor = {
+  kind: "observed-liveness",
+  sourceId: "test-feed",
+  summary: "Test feed: whether the node answered each poll round.",
+  method: {
+    transport: "http-get",
+    endpoint: "/status",
+    fields: ["height"],
+    pollIntervalMs: 60_000,
+    retentionMs: 604_800_000,
+    maxRecordsPerQuery: 100_000,
+  },
+  statusSemantics: {
+    hit: "answered and height advanced",
+    miss: "did not answer this poll round",
+    late: "answered but height did not advance",
+  },
+  roundIdentifier: { field: "slot", meaning: "poll-round ordinal" },
+  stake: { available: false, note: "no stake source in this build" },
+  consensusAttestation: {
+    available: false,
+    note: "no per-slot duty outcome is observable in this build",
+  },
+};
 
 interface TestServer {
   server: Server;
@@ -134,6 +172,31 @@ describe("attestation history HTTP surface", () => {
       expect(body.demo.available).toBe(true);
     });
 
+    it("keeps failing closed when the observed-liveness collector is off", async () => {
+      // The collector is the only thing in the tree that registers a live
+      // source. With the default environment it must register NOTHING, so the
+      // route's fail-closed behaviour is byte-for-byte what it was before.
+      const config = loadLivenessCollectorConfig({});
+      expect(config.enabled).toBe(false);
+
+      const status = await startValidatorLivenessCollector({ config });
+      expect(status.enabled).toBe(false);
+      expect(status.running).toBe(false);
+      // Nothing was started, so there is no collector to report on.
+      expect(getValidatorLivenessCollectorStatus()).toBeNull();
+
+      const res = await get("/api/nodes/attestation-history?window=24h");
+      expect(res.status).toBe(503);
+      const body = (await res.json()) as AttestationSourceUnavailableResponse;
+      expect(body.error).toBe("attestation_source_unavailable");
+      expect(body).not.toHaveProperty("validators");
+      // The reason names the opt-in, so the operator can act on it.
+      expect(body.reason).toContain("VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true");
+      expect(body.reason).toContain("Consensus attestation duty history is unavailable");
+
+      await stopValidatorLivenessCollector();
+    });
+
     it("rejects an invalid window before consulting any source", async () => {
       const res = await get("/api/nodes/attestation-history?window=3y");
       expect(res.status).toBe(400);
@@ -150,26 +213,44 @@ describe("attestation history HTTP surface", () => {
       ];
       registerLiveAttestationSource({
         id: "test-feed",
+        descriptor: TEST_DESCRIPTOR,
         history: async () => observed,
       });
 
       const res = await get("/api/nodes/attestation-history?window=24h");
       expect(res.status).toBe(200);
-      const body = (await res.json()) as {
-        synthetic: boolean;
-        provenance: string;
-        source: string;
-        validators: ValidatorHistory[];
-      };
+      const body = (await res.json()) as LiveAttestationHistoryResponse;
       expect(body.synthetic).toBe(false);
       expect(body.provenance).toBe("live");
       expect(body.source).toBe("test-feed");
       expect(body.validators).toEqual(observed);
     });
 
+    it("serves the source's semantics descriptor so a miss cannot be misread", async () => {
+      registerLiveAttestationSource({
+        id: "test-feed",
+        descriptor: TEST_DESCRIPTOR,
+        history: async () => [],
+      });
+
+      const res = await get("/api/nodes/attestation-history?window=1h");
+      expect(res.status).toBe(200);
+      // The provenance header names the KIND, not just "live": an
+      // observed-liveness feed is live data but is not consensus attestation.
+      expect(res.headers.get("x-data-provenance")).toBe("live:observed-liveness");
+
+      const body = (await res.json()) as LiveAttestationHistoryResponse;
+      expect(body.observation).toEqual(TEST_DESCRIPTOR);
+      expect(body.observation.kind).toBe("observed-liveness");
+      expect(body.observation.consensusAttestation.available).toBe(false);
+      expect(body.observation.statusSemantics.miss).toContain("did not answer");
+      expect(body.observation.method.pollIntervalMs).toBe(60_000);
+    });
+
     it("surfaces a failing source as an error rather than substituting data", async () => {
       registerLiveAttestationSource({
         id: "broken-feed",
+        descriptor: { ...TEST_DESCRIPTOR, sourceId: "broken-feed" },
         history: async () => {
           throw new Error("rpc timeout");
         },

@@ -2,7 +2,7 @@
  * Storage/Database module with SQLite fallback for development
  */
 import { drizzle as drizzlePostgres } from 'drizzle-orm/node-postgres';
-import { and, desc, eq } from 'drizzle-orm';
+import { and, desc, eq, gte } from 'drizzle-orm';
 import { Client } from 'pg';
 import { Database } from 'sqlite3';
 import * as schema from '@shared/schema';
@@ -250,6 +250,44 @@ CREATE INDEX IF NOT EXISTS idx_validator_pubkeys_node_active
   ON validator_pubkeys(node_id, active);
 `;
 
+/**
+ * Observed-liveness observation history for the development SQLite database
+ * (#456). Mirrors `migrations/0012_validator_liveness_observations.sql`.
+ *
+ * A 24h/7d window is meaningless if the history dies with the process, so the
+ * collector's output has to be durable on BOTH dialects — otherwise the
+ * what-if slashing simulator would be replaying rules against whatever happened
+ * since the last restart while claiming a 7-day window.
+ *
+ * This table holds LIVENESS OBSERVATIONS (did the node answer this poll round;
+ * did the height it reported advance), never consensus attestation duty
+ * outcomes — this build has no source for those. See the migration for the full
+ * per-status semantics.
+ */
+const validatorLivenessSqliteSchema = `
+CREATE TABLE IF NOT EXISTS validator_liveness_observations (
+  id TEXT PRIMARY KEY,
+  validator_id TEXT NOT NULL,
+  observed_at INTEGER NOT NULL,
+  round_seq INTEGER NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('hit', 'miss', 'late')),
+  source_node_url TEXT NOT NULL,
+  observed_height INTEGER,
+  previous_height INTEGER,
+  observed_uptime_ticks INTEGER,
+  reported_node_id TEXT,
+  local_phase REAL,
+  mean_phase REAL,
+  detail TEXT,
+  created_at INTEGER NOT NULL,
+  UNIQUE(validator_id, round_seq)
+);
+CREATE INDEX IF NOT EXISTS idx_validator_liveness_observed_at
+  ON validator_liveness_observations(observed_at);
+CREATE INDEX IF NOT EXISTS idx_validator_liveness_validator_observed_at
+  ON validator_liveness_observations(validator_id, observed_at);
+`;
+
 function toSnakeCase(value: string): string {
   return value.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
 }
@@ -274,6 +312,21 @@ function sqliteExec(sqlText: string): Promise<void> {
 function sqliteRun(sqlText: string, parameters: unknown[] = []): Promise<void> {
   return new Promise((resolve, reject) => {
     requireSqliteClient().run(sqlText, parameters, (error) => error ? reject(error) : resolve());
+  });
+}
+
+/**
+ * `sqliteRun` variant that reports how many rows the statement touched.
+ * sqlite3 exposes that only as `this.changes` inside a non-arrow callback, so
+ * this cannot reuse `sqliteRun`. Used by retention pruning, which has to be
+ * able to report what it deleted rather than pruning blind.
+ */
+function sqliteRunWithChanges(sqlText: string, parameters: unknown[] = []): Promise<number> {
+  return new Promise((resolve, reject) => {
+    requireSqliteClient().run(sqlText, parameters, function (this: { changes: number }, error) {
+      if (error) reject(error);
+      else resolve(this.changes);
+    });
   });
 }
 
@@ -389,6 +442,7 @@ async function openSqliteDatabase(databasePath: string): Promise<void> {
   });
   await sqliteExec(blueprintSqliteSchema);
   await sqliteExec(validatorRegistrySqliteSchema);
+  await sqliteExec(validatorLivenessSqliteSchema);
 }
 
 export const initializeDatabase = async () => {
@@ -1047,6 +1101,278 @@ export const recordValidatorStateWatermark = async (
     );
   }
   return current;
+};
+
+// ─── Observed liveness observations (#456) ───────────────────────────────────
+//
+// Durable per-validator liveness history for the Slashing & Liveness
+// Visualizer's what-if simulator. Written only by
+// `server/blockchain/liveness-collector.ts`; read only by its live
+// attestation source. Postgres schema: migrations/0012_validator_liveness_observations.sql.
+// SQLite schema: `validatorLivenessSqliteSchema` above, applied on every open.
+//
+// These rows record whether a configured node ANSWERED a poll round and whether
+// the chain height it reported ADVANCED. They are not consensus attestation
+// duty outcomes and must never be populated from a computed or estimated one.
+
+/** One observation row, as stored and as read back. */
+export interface ValidatorLivenessObservationRecord {
+  /** `host[:port][/path]` of the configured node URL. */
+  validatorId: string;
+  observedAt: Date;
+  /** Monotonic poll-round ordinal (see the migration for why not chain height). */
+  roundSeq: number;
+  status: 'hit' | 'miss' | 'late';
+  sourceNodeUrl: string;
+  /** NULL when the node did not answer. Never carried forward. */
+  observedHeight: number | null;
+  previousHeight: number | null;
+  observedUptimeTicks: number | null;
+  reportedNodeId: string | null;
+  localPhase: number | null;
+  meanPhase: number | null;
+  detail: string | null;
+}
+
+/**
+ * Hard cap on rows returned by one `listValidatorLivenessObservations` call, so
+ * a 7d window over a large fleet cannot pull an unbounded result set into
+ * memory. The NEWEST rows win: when the cap bites, the older part of the window
+ * is simply absent. It is never summarised, downsampled or synthesised — the
+ * API descriptor reports the cap so a short timeline is explicable.
+ */
+export const MAX_LIVENESS_OBSERVATION_ROWS = 100_000;
+
+function toLivenessObservationRecord(
+  row: Record<string, unknown>,
+): ValidatorLivenessObservationRecord {
+  const num = (value: unknown): number | null =>
+    value === null || value === undefined ? null : Number(value);
+  const str = (value: unknown): string | null =>
+    value === null || value === undefined ? null : String(value);
+  const status = String(row.status);
+  if (status !== 'hit' && status !== 'miss' && status !== 'late') {
+    // The column is CHECK-constrained on both dialects, so this can only fire
+    // if the table was written outside this module. Fail loudly: a status this
+    // code cannot interpret must not be silently coerced into a duty outcome.
+    throw new Error(`Unknown liveness observation status "${status}"`);
+  }
+  return {
+    validatorId: String(row.validatorId),
+    observedAt: row.observedAt instanceof Date
+      ? row.observedAt
+      : new Date(Number(row.observedAt)),
+    roundSeq: Number(row.roundSeq),
+    status,
+    sourceNodeUrl: String(row.sourceNodeUrl),
+    observedHeight: num(row.observedHeight),
+    previousHeight: num(row.previousHeight),
+    observedUptimeTicks: num(row.observedUptimeTicks),
+    reportedNodeId: str(row.reportedNodeId),
+    localPhase: num(row.localPhase),
+    meanPhase: num(row.meanPhase),
+    detail: str(row.detail),
+  };
+}
+
+/**
+ * Append one poll round's observations.
+ *
+ * Conflicts on (validator_id, round_seq) are ignored rather than raising: the
+ * unique index assumes a single collector process, and a duplicate can only
+ * mean a second writer or a retried round. Dropping the duplicate keeps the
+ * ordering intact; it never overwrites an observation that was already made.
+ */
+export const appendValidatorLivenessObservations = async (
+  rows: readonly ValidatorLivenessObservationRecord[],
+): Promise<void> => {
+  if (rows.length === 0) return;
+
+  await withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const now = Date.now();
+      const placeholders = rows.map(() => '(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').join(', ');
+      const parameters: unknown[] = [];
+      for (const row of rows) {
+        parameters.push(
+          randomUUID(),
+          row.validatorId,
+          row.observedAt.getTime(),
+          row.roundSeq,
+          row.status,
+          row.sourceNodeUrl,
+          row.observedHeight,
+          row.previousHeight,
+          row.observedUptimeTicks,
+          row.reportedNodeId,
+          row.localPhase,
+          row.meanPhase,
+          row.detail,
+          now,
+        );
+      }
+      await sqliteRun(
+        `INSERT OR IGNORE INTO validator_liveness_observations
+           (id, validator_id, observed_at, round_seq, status, source_node_url,
+            observed_height, previous_height, observed_uptime_ticks,
+            reported_node_id, local_phase, mean_phase, detail, created_at)
+         VALUES ${placeholders}`,
+        parameters,
+      );
+      return;
+    }
+
+    await requireDatabase()
+      .insert(schema.validatorLivenessObservations)
+      .values(rows.map((row) => ({
+        validatorId: row.validatorId,
+        observedAt: row.observedAt,
+        roundSeq: row.roundSeq,
+        status: row.status,
+        sourceNodeUrl: row.sourceNodeUrl,
+        observedHeight: row.observedHeight,
+        previousHeight: row.previousHeight,
+        observedUptimeTicks: row.observedUptimeTicks,
+        reportedNodeId: row.reportedNodeId,
+        localPhase: row.localPhase,
+        meanPhase: row.meanPhase,
+        detail: row.detail,
+      })))
+      .onConflictDoNothing();
+  });
+};
+
+/**
+ * Observations at or after `fromMs`, chronologically ascending, optionally for
+ * one validator. Bounded by {@link MAX_LIVENESS_OBSERVATION_ROWS}: the query
+ * takes the NEWEST rows and the caller receives them oldest-first.
+ */
+export const listValidatorLivenessObservations = async (
+  fromMs: number,
+  validatorId?: string,
+  limit: number = MAX_LIVENESS_OBSERVATION_ROWS,
+): Promise<ValidatorLivenessObservationRecord[]> => {
+  const cap = Math.max(1, Math.min(Math.trunc(limit), MAX_LIVENESS_OBSERVATION_ROWS));
+
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const parameters: unknown[] = [fromMs];
+      let where = 'observed_at >= ?';
+      if (validatorId !== undefined) {
+        where += ' AND validator_id = ?';
+        parameters.push(validatorId);
+      }
+      parameters.push(cap);
+      const rows = await sqliteAll(
+        `SELECT * FROM validator_liveness_observations
+         WHERE ${where}
+         ORDER BY observed_at DESC, round_seq DESC
+         LIMIT ?`,
+        parameters,
+      );
+      return rows
+        .map((row) => toLivenessObservationRecord(decodeSqliteRow(row)))
+        .reverse();
+    }
+
+    const table = schema.validatorLivenessObservations;
+    const predicate = validatorId === undefined
+      ? gte(table.observedAt, new Date(fromMs))
+      : and(gte(table.observedAt, new Date(fromMs)), eq(table.validatorId, validatorId));
+    const rows = await requireDatabase()
+      .select()
+      .from(table)
+      .where(predicate)
+      .orderBy(desc(table.observedAt), desc(table.roundSeq))
+      .limit(cap);
+    return (rows as Record<string, unknown>[])
+      .map(toLivenessObservationRecord)
+      .reverse();
+  });
+};
+
+/**
+ * Delete observations older than `beforeMs`. Returns the number of rows
+ * removed so the caller can report retention rather than prune blind.
+ */
+export const pruneValidatorLivenessObservations = async (
+  beforeMs: number,
+): Promise<number> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      return sqliteRunWithChanges(
+        'DELETE FROM validator_liveness_observations WHERE observed_at < ?',
+        [beforeMs],
+      );
+    }
+    if (!pgClient) throw new Error('PostgreSQL client is not initialized');
+    const result = await pgClient.query(
+      'DELETE FROM validator_liveness_observations WHERE observed_at < $1',
+      [new Date(beforeMs).toISOString()],
+    );
+    return result.rowCount ?? 0;
+  });
+};
+
+/**
+ * Highest `round_seq` ever written, or 0 when the table is empty. The collector
+ * resumes from this on startup so the round ordinal stays monotonic across
+ * restarts instead of colliding with rows already in the window.
+ */
+export const getValidatorLivenessRoundSeqHighWaterMark = async (): Promise<number> => {
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(
+        'SELECT MAX(round_seq) AS max_round_seq FROM validator_liveness_observations',
+      );
+      const value = rows[0]?.max_round_seq;
+      return value === null || value === undefined ? 0 : Number(value);
+    }
+    if (!pgClient) throw new Error('PostgreSQL client is not initialized');
+    const result = await pgClient.query<{ max_round_seq: string | null }>(
+      'SELECT MAX(round_seq) AS max_round_seq FROM validator_liveness_observations',
+    );
+    const value = result.rows[0]?.max_round_seq;
+    return value === null || value === undefined ? 0 : Number(value);
+  });
+};
+
+/**
+ * The most recent height actually observed for each validator, used to seed the
+ * collector's height-progress comparison after a restart. Only rows that carry
+ * a height are considered, so a run of unanswered polls does not erase the last
+ * real reading — and nothing is invented for a validator that has never
+ * answered (it is simply absent, and its next observation is a baseline).
+ */
+export const getLatestValidatorLivenessHeights = async (): Promise<
+  Array<{ validatorId: string; observedHeight: number }>
+> => {
+  const sqlText = `
+    SELECT o.validator_id AS validator_id, o.observed_height AS observed_height
+    FROM validator_liveness_observations o
+    WHERE o.observed_height IS NOT NULL
+      AND o.round_seq = (
+        SELECT MAX(i.round_seq)
+        FROM validator_liveness_observations i
+        WHERE i.validator_id = o.validator_id AND i.observed_height IS NOT NULL
+      )
+  `;
+
+  return withStorageLock(async () => {
+    if (dbType !== 'postgres') {
+      const rows = await sqliteAll(sqlText);
+      return rows.map((row) => ({
+        validatorId: String(row.validator_id),
+        observedHeight: Number(row.observed_height),
+      }));
+    }
+    if (!pgClient) throw new Error('PostgreSQL client is not initialized');
+    const result = await pgClient.query<{ validator_id: string; observed_height: string }>(sqlText);
+    return result.rows.map((row) => ({
+      validatorId: String(row.validator_id),
+      observedHeight: Number(row.observed_height),
+    }));
+  });
 };
 // ─── Blueprint safe-state audit trail (#459) ────────────────────────────────
 // The watchdog's safe-state transitions must be durable on BOTH dialects. The
