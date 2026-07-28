@@ -308,7 +308,7 @@ describe("reads over a real socket", () => {
     expect([...fragment]).toEqual([
       0xe0, // FIR|FIN|CON, sequence 0
       DNP3_FUNCTION.RESPONSE,
-      0x00, 0x82, // IIN: CLASS1_EVENTS | DEVICE_RESTART
+      0x82, 0x00, // IIN1: CLASS1_EVENTS | DEVICE_RESTART
       0x02, 0x02, 0x17, 0x01, // g2v2, index-prefixed qualifier, count 1
       0x00, // index 0
       0x81, // ONLINE|STATE

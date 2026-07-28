@@ -39,14 +39,14 @@
  *     two masters connect at once the first CONFIRM drains events for both.
  *     DNP3 outstations conventionally serve a single master.
  *   - Full secondary link-confirm + frame-count-bit (FCB) state machine.
- *   - WRITE g80v1 (master clearing the DEVICE_RESTART IIN bit).
  *   - Group-120 free-format object framing (qualifier 0x5B); the SAv5 objects
  *     use the simple count-1 header this module also emits.
  *   - Unconfirmed events are re-sent on the next Class poll (correct), but
  *     there is no independent retry timer.
  *   - DNP3 serial transport (this is TCP only).
- *   - Nothing here has been exercised against opendnp3 or any real utility
- *     master; the wire behaviour is verified only by this repository's tests.
+ *   - The automated OpenDNP3 3.1.2 smoke covers startup, static/event polls,
+ *     unsolicited responses and SELECT/OPERATE. SAv5 remains covered by this
+ *     repository's deterministic handshake and live-dispatch tests.
  */
 
 import { z } from 'zod';
@@ -319,6 +319,9 @@ export function handleApplicationRequest(
     case DNP3_FUNCTION.READ:
       return dispatchFragments(handleRead(ctx, req), session);
 
+    case DNP3_FUNCTION.WRITE:
+      return handleWrite(ctx, req);
+
     case DNP3_FUNCTION.SELECT:
     case DNP3_FUNCTION.OPERATE:
     case DNP3_FUNCTION.DIRECT_OPERATE:
@@ -355,6 +358,53 @@ export function handleApplicationRequest(
 /** Wrap a single already-built fragment (no events, no confirm needed). */
 function singleFragment(bytes: Buffer, seq: number): Dnp3RequestResult {
   return { response: bytes, fragments: [{ bytes, seq, con: false, eventSeqs: [] }], challenged: false };
+}
+
+/** IIN1.7 is the DEVICE_RESTART bit addressed by WRITE g80v1. */
+const DEVICE_RESTART_IIN_INDEX = 7;
+
+/**
+ * Handle the standard WRITE g80v1 used by masters to acknowledge a device
+ * restart. No other database writes are exposed here.
+ *
+ * A conforming master writes the single packed bit at IIN index 7 to zero after
+ * it has completed startup integrity. Supporting this small write is important:
+ * without it the outstation advertises DEVICE_RESTART forever and reference
+ * masters continuously repeat their startup sequence.
+ */
+function handleWrite(ctx: OutstationContext, req: ParsedRequest): Dnp3RequestResult {
+  const object = req.objects[0];
+  if (
+    req.objects.length !== 1 ||
+    !object ||
+    object.group !== DNP3_GROUP.INTERNAL_INDICATIONS ||
+    object.variation !== 1
+  ) {
+    const response = buildResponseHeader({
+      seq: req.seq,
+      iin: currentIin(ctx) | buildIin({ objectUnknown: true }),
+    });
+    return singleFragment(response, req.seq);
+  }
+
+  const { range, data } = object;
+  if (
+    !range ||
+    !data ||
+    range.start !== DEVICE_RESTART_IIN_INDEX ||
+    range.stop !== DEVICE_RESTART_IIN_INDEX ||
+    data.length !== 1 ||
+    (data[0] & 0x01) !== 0
+  ) {
+    const response = buildResponseHeader({
+      seq: req.seq,
+      iin: currentIin(ctx) | buildIin({ parameterError: true }),
+    });
+    return singleFragment(response, req.seq);
+  }
+
+  ctx.restartPending = false;
+  return singleFragment(emptyResponse(ctx, req.seq), req.seq);
 }
 
 /**
@@ -675,8 +725,6 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
       userNumber: 1,
       session,
     });
-    // A successful read with the device-restart bit acknowledged clears it once
-    // the master writes IIN1.7 = 0 (WRITE g80v1). TODO: handle that write.
     return response;
   }
 

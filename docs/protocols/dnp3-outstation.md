@@ -17,10 +17,12 @@ Required for the utility-consortium pilots.
 > [Enabling the listener](#enabling-the-listener). Some framing details remain
 > explicit TODOs (see "Implemented vs TODO" below).
 >
-> **Nothing here has been tested against opendnp3 or any real utility master.**
-> Every claim on this page is backed by this repository's own tests over real
-> loopback TCP sockets; see
-> [Conformance smoke test](#conformance-smoke-test-opendnp3--cannot-run-in-ci-here).
+> **Reference-master interoperability is tested.** The automated conformance
+> smoke builds the pinned OpenDNP3 3.1.2 reference master (commit
+> `26b4c01e4839bbbda8866655e086471c4917ee53`) and verifies startup, the g80v1
+> restart acknowledgement, all five static point families, Class 1/2/3 events,
+> confirmed unsolicited responses, and SELECT/OPERATE reaching the tag sink.
+> See [OpenDNP3 conformance smoke](#opendnp3-conformance-smoke).
 
 ## Module layout
 
@@ -60,12 +62,12 @@ DNP3 is a four-layer stack. Here is exactly what is real today.
 | | object-header scan (qualifiers 0x00/0x01/0x06/0x07/0x08) | implemented |
 | | prefixed-index qualifiers (0x17/0x28) length decode | **implemented + tested** (for objects of known fixed size, which covers all control objects) |
 | | free-format qualifier 0x5B (group-120 objects) | **TODO** — SAv5 objects use the simple count-1 header this module also emits |
-| | response header + IIN | **fully implemented + tested** |
+| | response header + correctly ordered IIN1/IIN2 wire octets | **fully implemented + tested against OpenDNP3** |
 | | Class 0 static read (BI/AI/Counter/BO/AO + flags) | **fully implemented + tested**, split into fragment-sized object blocks, non-contiguous indices and 16-bit ranges handled |
 | | Class 1/2/3 event read | **fully implemented + tested** — g2v1/v2/v3, g11v1/v2, g22v1/v5, g32v1/v3/v5/v7, g42, with g51v1 CTO for relative time |
 | | multi-fragment responses (FIR/FIN/CON + per-fragment CONFIRM) | **implemented + tested** |
 | | SELECT/OPERATE/DIRECT-OPERATE (g12v1, g41v1..v4) | **implemented + tested**, fail-closed and off by default |
-| | WRITE g80v1 (clear DEVICE_RESTART IIN) | **TODO** |
+| | WRITE g80v1 (clear DEVICE_RESTART IIN) | **implemented + tested against OpenDNP3** |
 | | per-variation read selection (master asks for a variation, not a class) | **TODO** |
 | **Secure Auth v5** | HMAC over critical ASDU (challenge/response) | **fully implemented + tested** |
 | | dispatch of the ASDU once its reply verifies | **implemented + tested** |
@@ -381,10 +383,6 @@ Class 0 reads, and never reading a single response octet.
 
 ## Known limitations
 
-- **Not verified against a real DNP3 master.** No opendnp3, pydnp3, or utility
-  front-end processor has been pointed at this outstation. Interoperability is
-  therefore unproven; what is proven is the behaviour asserted by the tests
-  listed below.
 - **One master association.** Application-confirm state is per connection, but
   the event buffer is shared, so with two masters connected at once the first
   CONFIRM drains events for both. DNP3 outstations conventionally serve a single
@@ -409,8 +407,6 @@ Class 0 reads, and never reading a single response octet.
   independent retry timer.
 - The secondary link-confirm / frame-count-bit (FCB) state machine is not
   implemented.
-- `WRITE g80v1` (the master clearing `DEVICE_RESTART`) is not handled, so that
-  IIN bit stays set for the lifetime of the process.
 - The point map is read once at startup from
   `DNP3_OUTSTATION_POINT_MAP_FILE`; there is no reload path.
 - **The idle timeout does not evict a peer that keeps talking.**
@@ -458,39 +454,39 @@ or an explicit `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. Set the ke
 with `DNP3_OUTSTATION_SAV5_UPDATE_KEY` (hex, ≥ 16 octets) and
 `DNP3_OUTSTATION_SAV5_USER`.
 
-## Conformance smoke test (opendnp3) — CANNOT run in CI here
+## OpenDNP3 conformance smoke
 
-The acceptance criterion calls for a smoke test against an open-source DNP3
-master. **This has not been run** — there is no opendnp3 toolchain and no Docker
-network namespace for a real master in this environment. The procedure below is
-documented so it can be run on a host with opendnp3 available; do not treat it as
-executed, and do not read any statement on this page as evidence of
-interoperability with a real master.
+Run the Linux conformance harness from the repository root:
 
-### Procedure
+```bash
+bash scripts/run-dnp3-opendnp3-smoke.sh
+```
 
-1. Build/obtain opendnp3 and its `master-gprs-demo` (or use `pydnp3`).
-2. Start the outstation:
-   ```ts
-   const os = createDnp3Outstation({ port: 20000, localAddress: 10, unsolicitedEnabled: true, pointMap: {...} });
-   await os.start();
-   ```
-3. Point the master at `127.0.0.1:20000`, master link address 1, outstation
-   link address 10.
-4. **Integrity poll (Class 0):** master issues `READ g60v1` → expect a RESPONSE
-   (func 0x81) carrying g1/g30/g20/g10/g40 static objects with flags.
-5. **Event poll (Class 1/2/3):** push a tag change via `updateTag`, then have
-   the master `READ g60v2/v3/v4` → expect timestamped g2/g22/g32 objects and the
-   matching class-event IIN bit, cleared after the master's CONFIRM.
-6. **Unsolicited:** enable unsolicited on the master, breach a class threshold,
-   confirm the master receives a func-0x82 fragment.
-7. **Secure auth:** provision a matching Update Key on both ends, send an
-   OPERATE, confirm the g120v1 challenge / g120v2 reply handshake succeeds.
-8. **Controls:** with `controls.enabled` and a sink installed, SELECT then
-   OPERATE a CROB and confirm the echoed status octet is 0 (SUCCESS); repeat
-   with controls disabled and confirm it is 4 (NOT_SUPPORTED).
+The harness clones the final OpenDNP3 3.1.2 source at an immutable commit,
+builds its official `master-demo`, starts
+`test/conformance/dnp3/outstation-fixture.ts`, and fails unless the reference
+master proves all of the following:
 
-### Local equivalent (no opendnp3)
+- startup Disable-Unsolicited → Clear-Restart-IIN → integrity sequence completes
+  without error IIN bits;
+- Class 0 contains Binary Input, Analog Input, Counter, Binary Output Status,
+  and Analog Output Status values with parseable flags;
+- Class 1/2/3 polls contain timestamped binary, analog, and counter events;
+- OpenDNP3 receives and confirms an unsolicited response;
+- OpenDNP3 SELECT/OPERATE reports `State: SUCCESS Status: SUCCESS`; and
+- the command actually reaches the 0xSCADA control sink.
+
+`.github/workflows/dnp3-opendnp3-conformance.yml` runs the same harness whenever
+the protocol, fixture, harness, or workflow changes. It was also run directly
+against this implementation on 2026-07-28; that run exposed and led to the fix
+for reversed IIN1/IIN2 octets and then passed end to end.
+
+OpenDNP3 3.1.2 does not participate in this module's SAv5 test exchange. The
+HMAC challenge → verified reply → authorised-ASDU execution path remains covered
+by the deterministic `secure-auth.test.ts` and live-dispatch tests, including
+tampering, replay, wrong-user, wrong-key, and expiry rejection.
+
+### Protocol unit and live-socket suite
 
 The protocol logic is covered by `npm run test:unit`:
 

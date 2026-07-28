@@ -272,10 +272,10 @@ describe('live TCP round trip', () => {
     expect([...fragment]).toEqual([
       0xe0, // FIR|FIN|CON, sequence 0
       0x81, // RESPONSE
-      // IIN 0x8200 little-endian: CLASS1_EVENTS (0x0200) plus DEVICE_RESTART
-      // (0x8000), which a freshly started outstation must report until the
+      // IIN1 0x82: CLASS1_EVENTS (0x02) plus DEVICE_RESTART (0x80), which a
+      // freshly started outstation must report until the
       // master clears it.
-      0x00, 0x82,
+      0x82, 0x00,
       0x02, 0x02, 0x17, 0x01, // g2v2, qualifier 0x17, count 1
       0x03, // index 3
       0x81, // flags ONLINE|STATE

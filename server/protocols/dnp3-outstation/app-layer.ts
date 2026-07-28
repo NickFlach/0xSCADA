@@ -85,6 +85,12 @@ export interface ParsedObjectHeader {
    * than guessing at the octets.
    */
   items?: ParsedPrefixedObject[];
+  /**
+   * Decoded non-prefixed object data for the fixed-size objects this parser
+   * understands. Currently used by WRITE g80v1, whose range contains packed
+   * Internal Indication bits.
+   */
+  data?: Buffer;
 }
 
 /**
@@ -98,8 +104,9 @@ export interface ParsedObjectHeader {
  * object (g12v1, g41v1..v4). Anything else stops the scan rather than
  * misinterpreting octets.
  *
- * TODO: free-format qualifiers (0x5B) used by the group-120 objects, and
- * object data following a non-prefixed range header (e.g. WRITE g80v1).
+ * TODO: free-format qualifiers (0x5B) used by the group-120 objects. The one
+ * non-prefixed write object required for normal master startup, g80v1, is
+ * decoded explicitly below.
  */
 export function parseRequest(fragment: Buffer): ParsedRequest {
   if (fragment.length < 2) {
@@ -181,6 +188,20 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
         return finish();
       }
       header.items = items;
+    } else if (
+      prefixCode === 0 &&
+      group === DNP3_GROUP.INTERNAL_INDICATIONS &&
+      variation === 1 &&
+      count !== null
+    ) {
+      // g80v1 is a packed bit string. OpenDNP3 and other conforming masters
+      // write IIN1.7 = 0 after observing DEVICE_RESTART, so consuming this data
+      // is required to keep startup from retrying integrity polls forever.
+      if (count < 0) return finish();
+      const byteLength = Math.ceil(count / 8);
+      if (off + byteLength > fragment.length) return finish();
+      header.data = Buffer.from(fragment.subarray(off, off + byteLength));
+      off += byteLength;
     } else if (prefixCode !== 0) {
       // 4-octet index prefixes and the free-format/object-size prefixes are not
       // modelled; their object data length is unknown to us.

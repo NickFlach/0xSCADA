@@ -54,6 +54,20 @@ describe('parseRequest', () => {
   test('throws on a too-short fragment', () => {
     expect(() => parseRequest(Buffer.from([0xc0]))).toThrow();
   });
+
+  test('decodes the packed g80v1 restart-acknowledgement write', () => {
+    const req = parseRequest(
+      Buffer.from([0xc0, DNP3_FUNCTION.WRITE, DNP3_GROUP.INTERNAL_INDICATIONS, 1, 0x00, 7, 7, 0]),
+    );
+    expect(req.objects[0]).toEqual({
+      group: DNP3_GROUP.INTERNAL_INDICATIONS,
+      variation: 1,
+      qualifier: 0x00,
+      range: { start: 7, stop: 7 },
+      count: 1,
+      data: Buffer.from([0]),
+    });
+  });
 });
 
 describe('buildResponseHeader / buildIin', () => {
@@ -67,6 +81,12 @@ describe('buildResponseHeader / buildIin', () => {
     expect(hdr.readUInt16LE(2)).toBe(iin);
     expect(iin & DNP3_IIN.DEVICE_RESTART).toBe(DNP3_IIN.DEVICE_RESTART);
     expect(iin & DNP3_IIN.CLASS1_EVENTS).toBe(DNP3_IIN.CLASS1_EVENTS);
+    expect([...hdr.subarray(2)]).toEqual([0x82, 0x00]);
+  });
+
+  test('IIN2 error bits occupy the second wire octet', () => {
+    const hdr = buildResponseHeader({ seq: 0, iin: buildIin({ parameterError: true }) });
+    expect([...hdr.subarray(2)]).toEqual([0x00, 0x04]);
   });
 
   test('unsolicited header uses function 0x82', () => {
@@ -167,5 +187,43 @@ describe('handleApplicationRequest (pure)', () => {
     ctx.restartPending = true;
     const { response } = handleApplicationRequest(ctx, parseRequest(readClass0Fragment()));
     expect(response.readUInt16LE(2) & DNP3_IIN.DEVICE_RESTART).toBe(DNP3_IIN.DEVICE_RESTART);
+  });
+
+  test('WRITE g80v1 clears DEVICE_RESTART and acknowledges without an error IIN', () => {
+    const ctx = makeCtx();
+    ctx.restartPending = true;
+    const clearRestart = Buffer.from([
+      0xc5,
+      DNP3_FUNCTION.WRITE,
+      DNP3_GROUP.INTERNAL_INDICATIONS,
+      1,
+      0x00,
+      7,
+      7,
+      0,
+    ]);
+    const { response } = handleApplicationRequest(ctx, parseRequest(clearRestart));
+    expect(ctx.restartPending).toBe(false);
+    expect(response[0] & 0x0f).toBe(5);
+    expect(response.readUInt16LE(2)).toBe(0);
+  });
+
+  test('WRITE g80v1 cannot set DEVICE_RESTART from the master side', () => {
+    const ctx = makeCtx();
+    const setRestart = Buffer.from([
+      0xc0,
+      DNP3_FUNCTION.WRITE,
+      DNP3_GROUP.INTERNAL_INDICATIONS,
+      1,
+      0x00,
+      7,
+      7,
+      1,
+    ]);
+    const { response } = handleApplicationRequest(ctx, parseRequest(setRestart));
+    expect(response.readUInt16LE(2) & DNP3_IIN.PARAMETER_ERROR).toBe(
+      DNP3_IIN.PARAMETER_ERROR,
+    );
+    expect(ctx.restartPending).toBe(false);
   });
 });

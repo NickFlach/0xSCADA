@@ -148,22 +148,23 @@ export const DNP3_FLAG = {
 
 /** Internal Indication (IIN) bits — outstation status reported in every response. */
 export const DNP3_IIN = {
-  // IIN1 (first octet)
-  ALL_STATIONS: 0x0100,
-  CLASS1_EVENTS: 0x0200,
-  CLASS2_EVENTS: 0x0400,
-  CLASS3_EVENTS: 0x0800,
-  NEED_TIME: 0x1000,
-  LOCAL_CONTROL: 0x2000,
-  DEVICE_TROUBLE: 0x4000,
-  DEVICE_RESTART: 0x8000,
-  // IIN2 (second octet)
-  NO_FUNC_CODE_SUPPORT: 0x0001,
-  OBJECT_UNKNOWN: 0x0002,
-  PARAMETER_ERROR: 0x0004,
-  EVENT_BUFFER_OVERFLOW: 0x0008,
-  ALREADY_EXECUTING: 0x0010,
-  CONFIG_CORRUPT: 0x0020,
+  // IIN1 is the first octet on the wire, therefore the low byte of the
+  // little-endian word written by `buildResponseHeader`.
+  ALL_STATIONS: 0x0001,
+  CLASS1_EVENTS: 0x0002,
+  CLASS2_EVENTS: 0x0004,
+  CLASS3_EVENTS: 0x0008,
+  NEED_TIME: 0x0010,
+  LOCAL_CONTROL: 0x0020,
+  DEVICE_TROUBLE: 0x0040,
+  DEVICE_RESTART: 0x0080,
+  // IIN2 is the second octet on the wire (the high byte of the word).
+  NO_FUNC_CODE_SUPPORT: 0x0100,
+  OBJECT_UNKNOWN: 0x0200,
+  PARAMETER_ERROR: 0x0400,
+  EVENT_BUFFER_OVERFLOW: 0x0800,
+  ALREADY_EXECUTING: 0x1000,
+  CONFIG_CORRUPT: 0x2000,
 } as const;
 
 /**
