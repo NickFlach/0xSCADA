@@ -84,6 +84,12 @@ export { tuningService } from './tuning';
 export * from './marketplace';
 export { marketplaceService } from './marketplace';
 
+// ── NL Process Query Service (ADR-0013 [13.5], #216) ─────────────────────────
+// Exported by name rather than with `export *`: the module's public surface
+// includes generic bound names (MAX_RESULT_ITEMS, tokenize, ...) that would be
+// ambiguous re-exports from a barrel this wide.
+export { NLQueryService, nlQueryService } from './nlquery';
+
 /**
  * Initialize all services
  * 

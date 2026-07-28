@@ -1,7 +1,14 @@
 /**
  * Legacy /api/intelligence surface.
  *
- * Issue #216 (ADR-0013 [13.5]) review: this router shipped as a demo scaffold
+ * ADR-0013 [13.5] is docs/decisions/ADR-0013-autonomous-agent-architecture.md
+ * (Accepted, 2026-02-15). The #216 review reported it missing because it
+ * checked docs/adr/, which is not where this repository keeps it. The
+ * route-level contract for the nlquery pair below — read scope, bounds, data
+ * sources, and the decisions on the LLM seam and history durability — is
+ * docs/adr/ADR-0027-nl-query-read-scope-and-bounds.md.
+ *
+ * Issue #216 review: this router shipped as a demo scaffold
  * and every handler fabricated its payload — PRNG-generated risk and health
  * "scores" on a 0..100 scale, hardcoded maintenance recommendations, invented
  * 2024 failure dates, canned ML accuracy figures. It was mounted next to the real
@@ -11,14 +18,23 @@
  * measurement is a safety hazard, and it violates the repository integrity
  * rule ("NO shortcuts, fake data, or false claims").
  *
- * No handler here produces data any more. Each returns an explicit,
- * machine-readable refusal:
+ * Every handler here except the two natural-language query routes returns an
+ * explicit, machine-readable refusal:
  *
  *   410 Gone             `error: "endpoint_retired"` — the capability is
  *                        implemented, on another router. The body carries the
  *                        replacement endpoints and the scopes they require.
  *   501 Not Implemented  `error: "not_implemented"` — nothing on `main`
  *                        implements this capability at all.
+ *
+ * `POST /nlquery` and `GET /nlquery/history` are the exception: #216 built the
+ * capability, so they now serve real answers read from the historian, the live
+ * tag stream, and the alarm-correlation engine. Unlike the mock they replace,
+ * they carry a route-local `requireControlPlaneAccess({ scopes: ["nlquery.read"] })`
+ * guard — which is precisely the property whose absence is the reason the rest
+ * of this router refuses to proxy rather than delegating. Their execution is
+ * bounded (input length, wall-clock timeout, result and scan caps), and when
+ * they cannot reach data they say so instead of producing a number.
  *
  * Why refuse rather than proxy to the real engines: every handler on
  * `/api/predictive` and `/api/twin` carries a per-route
@@ -42,7 +58,20 @@
  */
 
 import { Router } from "express";
-import type { Response } from "express";
+import type { Request, RequestHandler, Response } from "express";
+import { z } from "zod";
+import { fromZodError } from "zod-validation-error/v3";
+import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
+import {
+  exampleQueries,
+  nlQueryService,
+  MAX_HISTORY_ENTRIES,
+  MAX_HISTORY_PAGE,
+  MAX_QUERY_LENGTH,
+  MAX_RESOLVER_CANDIDATE_TAGS,
+  MAX_RESULT_ITEMS,
+  QUERY_TIMEOUT_MS,
+} from "../services/nlquery";
 
 const router = Router();
 
@@ -110,29 +139,125 @@ const TWIN_REPLACEMENT: Replacement = {
 };
 
 // ── Natural-language query (ADR-0013 [13.5], #216) ─────────────────────────
-// Not implemented on main. The former handler echoed the request back as an
-// "interpretation", returned `results: []`, and appended two fixed
-// "suggestions" — it never reached a data source.
+//
+// These two routes are the one implemented surface on this router. They
+// replace the 501 stubs that stood here while the capability did not exist:
+// the engine now reads the historian (`historian_data`), the live tag stream,
+// and the alarm-correlation engine, and refuses to answer when it cannot.
+//
+// AUTHORIZATION (#576 pattern). Both routes require `nlquery.read`, a READ
+// scope. `POST /nlquery` is a POST for transport reasons only — the question
+// is free text that would otherwise sit in a URL, and therefore in access
+// logs, proxy logs, and browser history — and it mutates nothing. It must
+// therefore never require or imply write privilege: a key holding only
+// `nlquery.read` can ask questions, and a key holding `write` (but not
+// `nlquery.read`) cannot. That second half matters, because the gateway's
+// default mutation policy would otherwise treat this POST as a generic write;
+// `server/middleware/control-route-policy.ts` carries an explicit
+// `nl-query-read` entry so the gateway floor for this prefix is the read
+// scope rather than `write`.
+//
+// Rationale and the full bounds table: docs/adr/ADR-0027-nl-query-read-scope-and-bounds.md.
 
-router.post("/nlquery", (_req, res) => {
-  notImplemented(
-    res,
-    "Natural-language process query is not implemented. The previous handler "
-      + "echoed the submitted query back as an interpretation with an empty "
-      + "result set; it queried no tags, events, or historian data. Query the "
-      + "typed APIs directly (for example GET /api/predictive/alerts or "
-      + "GET /api/v2/events) until this is built.",
-  );
+const requireNlQueryRead = requireControlPlaneAccess({ scopes: ["nlquery.read"] });
+
+/** Express 4 does not catch async rejections — wrap every async handler. */
+function asyncHandler(
+  fn: (req: Request, res: Response) => Promise<unknown>,
+): RequestHandler {
+  return (req, res) => {
+    fn(req, res).catch((error) => {
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Internal error" });
+      }
+      console.error("[nlquery] handler error:", error);
+    });
+  };
+}
+
+/**
+ * Over-long input is REJECTED, not truncated. Answering a question the
+ * operator did not finish asking is the failure mode this surface must not
+ * have, so a 400 that names the limit is the only safe response.
+ */
+const NlQuerySchema = z.object({
+  query: z.string().min(1).max(MAX_QUERY_LENGTH),
 });
 
-router.get("/nlquery/history", (_req, res) => {
-  notImplemented(
-    res,
-    "Natural-language query history is not implemented. No query history is "
-      + "recorded anywhere in this service; the previous handler returned one "
-      + "hardcoded example row stamped with the current time.",
-  );
+const HistoryQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(MAX_HISTORY_PAGE).default(MAX_HISTORY_PAGE),
 });
+
+/** The bounds every response advertises, so a caller can see what shaped it. */
+const NLQUERY_LIMITS = Object.freeze({
+  maxQueryLength: MAX_QUERY_LENGTH,
+  queryTimeoutMs: QUERY_TIMEOUT_MS,
+  maxResolverCandidateTags: MAX_RESOLVER_CANDIDATE_TAGS,
+  maxResultItems: MAX_RESULT_ITEMS,
+  maxHistoryEntries: MAX_HISTORY_ENTRIES,
+});
+
+/**
+ * Stated on every history response and on each query result. History is a
+ * bounded in-process ring buffer: it is lost on restart and is not shared
+ * between replicas. Saying so is part of the contract — an operator must not
+ * mistake this for a durable audit trail (control-plane audit lives in
+ * `audit_logs`, and this surface performs no mutation to audit).
+ */
+const HISTORY_PERSISTENCE = "process-local" as const;
+const HISTORY_PERSISTENCE_NOTE =
+  "Query history is held in a bounded in-memory ring buffer in this process. "
+  + "It is lost on restart and is not shared across replicas or persisted to "
+  + "the database.";
+
+router.post(
+  "/nlquery",
+  requireNlQueryRead,
+  asyncHandler(async (req, res) => {
+    const parsed = NlQuerySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        detail: fromZodError(parsed.error).message,
+        limits: NLQUERY_LIMITS,
+        examples: exampleQueries(),
+      });
+      return;
+    }
+
+    const result = await nlQueryService.engine.execute(parsed.data.query);
+    res.json({
+      ...result,
+      limits: NLQUERY_LIMITS,
+      historyPersistence: HISTORY_PERSISTENCE,
+    });
+  }),
+);
+
+router.get(
+  "/nlquery/history",
+  requireNlQueryRead,
+  asyncHandler(async (req, res) => {
+    const parsed = HistoryQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({
+        error: "invalid_request",
+        detail: fromZodError(parsed.error).message,
+        limits: NLQUERY_LIMITS,
+      });
+      return;
+    }
+
+    const history = nlQueryService.engine.getHistory(parsed.data.limit);
+    res.json({
+      history,
+      count: history.length,
+      persistence: HISTORY_PERSISTENCE,
+      persistenceNote: HISTORY_PERSISTENCE_NOTE,
+      limits: NLQUERY_LIMITS,
+    });
+  }),
+);
 
 // ── Predictive maintenance — superseded by /api/predictive (#212) ──────────
 // The former handlers returned a PRNG draw scaled to 0..100 as `riskScore` and

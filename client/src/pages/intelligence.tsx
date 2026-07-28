@@ -28,8 +28,8 @@ interface TabDefinition {
 
 interface TabContent {
   heading: string;
-  /** Server contract for this capability: 501 unbuilt, 410 moved. */
-  status: 'not-implemented' | 'moved';
+  /** Server contract: 501 unbuilt, 410 moved, or served on this path. */
+  status: 'not-implemented' | 'moved' | 'implemented';
   /** What the legacy /api/intelligence path now returns. */
   legacyPath: string;
   summary: string;
@@ -46,14 +46,23 @@ const TABS: readonly TabDefinition[] = [
 const CONTENT: Record<TabKey, TabContent> = {
   'nl-query': {
     heading: 'Natural language query',
-    status: 'not-implemented',
+    status: 'implemented',
     legacyPath: 'POST /api/intelligence/nlquery',
     summary:
-      'Not implemented. No natural-language query engine is wired to this '
-      + 'service, so there is nothing to display here. The endpoint returns '
-      + '501 with { error: "not_implemented" } rather than a placeholder '
-      + 'answer.',
-    endpoints: [],
+      'Implemented (#216), and served on this path rather than moved. A regex '
+      + 'intent grammar resolves tag names against the historian, the live tag '
+      + 'stream, and the alarm-correlation engine; when it cannot identify a '
+      + 'tag or reach a store it says so instead of returning a number. Access '
+      + 'requires the nlquery.read control-plane scope — a read scope, because '
+      + 'the POST carries the question in the body but mutates nothing. '
+      + 'Execution is bounded (query length, wall-clock timeout, result and '
+      + 'scan caps) and any truncation is reported in the response. Query '
+      + 'history is process-local and lost on restart. This page issues no '
+      + 'query itself and displays no plant data.',
+    endpoints: [
+      'POST /api/intelligence/nlquery',
+      'GET /api/intelligence/nlquery/history',
+    ],
   },
   predictive: {
     heading: 'Predictive maintenance',
@@ -93,11 +102,13 @@ const CONTENT: Record<TabKey, TabContent> = {
 const STATUS_LABEL: Record<TabContent['status'], string> = {
   'not-implemented': 'Not implemented',
   moved: 'Moved — this path returns 410',
+  implemented: 'Implemented — requires nlquery.read',
 };
 
 const STATUS_COLOR: Record<TabContent['status'], string> = {
   'not-implemented': '#ef4444',
   moved: '#f59e0b',
+  implemented: '#86efac',
 };
 
 const Intelligence: React.FC = () => {
@@ -167,9 +178,16 @@ const Intelligence: React.FC = () => {
           }}
         >
           <h3 style={{ fontSize: 14, marginTop: 0, marginBottom: 8, color: '#888' }}>
-            Legacy path
+            {content.status === 'implemented' ? 'Served on this path' : 'Legacy path'}
           </h3>
-          <code style={{ fontSize: 13, color: '#f87171' }}>{content.legacyPath}</code>
+          <code
+            style={{
+              fontSize: 13,
+              color: content.status === 'implemented' ? '#86efac' : '#f87171',
+            }}
+          >
+            {content.legacyPath}
+          </code>
         </div>
 
         {content.endpoints.length > 0 && (

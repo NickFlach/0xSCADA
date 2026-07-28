@@ -27,6 +27,7 @@ import { tuningRoutes } from "./routes/tuning";
 import { tuningService } from "./services/tuning";
 import { marketplaceRoutes } from "./routes/marketplace";
 import { marketplaceService } from "./services/marketplace";
+import { nlQueryService } from "./services/nlquery";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
@@ -184,6 +185,16 @@ export async function registerRoutes(
   // publish path checks plugin ownership against the loaded registry, and an
   // ownership check against an unhydrated registry would authorize a hijack.
   await marketplaceService.initialize();
+
+  // Mark the NL query service live here — services/initializeServices() has no
+  // callers at startup (#216). There is nothing to subscribe or schedule: the
+  // engine reads the historian, the live tag stream, and the alarm-correlation
+  // engine at query time rather than keeping a shadow copy of process data, so
+  // initialize() only flips the health flag.
+  void nlQueryService.initialize();
+  httpServer.once("close", () => {
+    void nlQueryService.shutdown();
+  });
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).
