@@ -35,14 +35,16 @@ export const DNP3_FUNCTION = {
   WARM_RESTART: 0x0e,
   ENABLE_UNSOLICITED: 0x14,
   DISABLE_UNSOLICITED: 0x15,
+  AUTH_REQUEST: 0x20,
+  AUTH_REQUEST_NO_ACK: 0x21,
   // Responses (outstation -> master)
   RESPONSE: 0x81,
   UNSOLICITED_RESPONSE: 0x82,
-  // Secure Authentication v5 (group 120) carrier function code
-  AUTHENTICATE_RESP: 0x83,
+  AUTH_RESPONSE: 0x83,
 } as const;
 
-export type Dnp3FunctionCode = (typeof DNP3_FUNCTION)[keyof typeof DNP3_FUNCTION];
+export type Dnp3FunctionCode =
+  (typeof DNP3_FUNCTION)[keyof typeof DNP3_FUNCTION];
 
 /**
  * DNP3 object groups for the five static measurement classes + their event
@@ -148,22 +150,23 @@ export const DNP3_FLAG = {
 
 /** Internal Indication (IIN) bits — outstation status reported in every response. */
 export const DNP3_IIN = {
-  // IIN1 (first octet)
-  ALL_STATIONS: 0x0100,
-  CLASS1_EVENTS: 0x0200,
-  CLASS2_EVENTS: 0x0400,
-  CLASS3_EVENTS: 0x0800,
-  NEED_TIME: 0x1000,
-  LOCAL_CONTROL: 0x2000,
-  DEVICE_TROUBLE: 0x4000,
-  DEVICE_RESTART: 0x8000,
-  // IIN2 (second octet)
-  NO_FUNC_CODE_SUPPORT: 0x0001,
-  OBJECT_UNKNOWN: 0x0002,
-  PARAMETER_ERROR: 0x0004,
-  EVENT_BUFFER_OVERFLOW: 0x0008,
-  ALREADY_EXECUTING: 0x0010,
-  CONFIG_CORRUPT: 0x0020,
+  // IIN1 is the first octet on the wire, therefore the low byte of the
+  // little-endian word written by `buildResponseHeader`.
+  ALL_STATIONS: 0x0001,
+  CLASS1_EVENTS: 0x0002,
+  CLASS2_EVENTS: 0x0004,
+  CLASS3_EVENTS: 0x0008,
+  NEED_TIME: 0x0010,
+  LOCAL_CONTROL: 0x0020,
+  DEVICE_TROUBLE: 0x0040,
+  DEVICE_RESTART: 0x0080,
+  // IIN2 is the second octet on the wire (the high byte of the word).
+  NO_FUNC_CODE_SUPPORT: 0x0100,
+  OBJECT_UNKNOWN: 0x0200,
+  PARAMETER_ERROR: 0x0400,
+  EVENT_BUFFER_OVERFLOW: 0x0800,
+  ALREADY_EXECUTING: 0x1000,
+  CONFIG_CORRUPT: 0x2000,
 } as const;
 
 /**
@@ -187,7 +190,8 @@ export const DNP3_COMMAND_STATUS = {
   UNDEFINED: 127,
 } as const;
 
-export type Dnp3CommandStatus = (typeof DNP3_COMMAND_STATUS)[keyof typeof DNP3_COMMAND_STATUS];
+export type Dnp3CommandStatus =
+  (typeof DNP3_COMMAND_STATUS)[keyof typeof DNP3_COMMAND_STATUS];
 
 /** g12v1 control-code operation types (low nibble of the control-code octet). */
 export const DNP3_CONTROL_OP_TYPE = {
@@ -231,13 +235,13 @@ export function encodeDnp3Time(epochMs: number): Buffer {
 /** Decode a 6-octet little-endian DNP3 Time field into epoch milliseconds. */
 export function decodeDnp3Time(buf: Buffer, offset = 0): number {
   if (buf.length < offset + 6) {
-    throw new Error('DNP3 time field truncated');
+    throw new Error("DNP3 time field truncated");
   }
   return buf.readUIntLE(offset, 6);
 }
 
 /** Quality of a point as understood by the rest of 0xSCADA. */
-export type PointQuality = 'good' | 'bad' | 'uncertain';
+export type PointQuality = "good" | "bad" | "uncertain";
 
 export interface FlagOptions {
   online?: boolean;
@@ -284,13 +288,16 @@ export function buildBinaryFlags(opts: FlagOptions): number {
  * Map 0xSCADA point quality to the DNP3 flag option set. A `bad` quality clears
  * ONLINE and sets COMM_LOST; `uncertain` keeps ONLINE but marks local-forced.
  */
-export function qualityToFlags(quality: PointQuality, state?: boolean): FlagOptions {
+export function qualityToFlags(
+  quality: PointQuality,
+  state?: boolean,
+): FlagOptions {
   switch (quality) {
-    case 'good':
+    case "good":
       return { online: true, state };
-    case 'uncertain':
+    case "uncertain":
       return { online: true, localForced: true, state };
-    case 'bad':
+    case "bad":
     default:
       return { online: false, commLost: true, state };
   }
@@ -313,7 +320,10 @@ export function encodeAnalog32WithFlag(value: number, flags: number): Buffer {
 }
 
 /** Encode a single-precision float analog value with flag (group 30 var 5). */
-export function encodeAnalogFloatWithFlag(value: number, flags: number): Buffer {
+export function encodeAnalogFloatWithFlag(
+  value: number,
+  flags: number,
+): Buffer {
   const buf = Buffer.alloc(5);
   buf.writeUInt8(flags, 0);
   buf.writeFloatLE(value, 1);

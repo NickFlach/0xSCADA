@@ -18,19 +18,27 @@
  */
 import { describe, it, expect, afterEach } from "vitest";
 import net from "node:net";
-import {
-  startDnp3Outstation,
-  type Dnp3OutstationService,
-} from "../index";
+import { startDnp3Outstation, type Dnp3OutstationService } from "../index";
 import { Dnp3OutstationConfigError } from "../config";
 import { InMemoryDnp3TagStore } from "../tag-store-bridge";
 import { DNP3_COMMAND_STATUS, DNP3_FUNCTION } from "../app-objects";
-import { MasterConnection, classRead, crobRequest, freePort } from "./master-helpers";
+import {
+  MasterConnection,
+  classRead,
+  crobRequest,
+  freePort,
+} from "./master-helpers";
 
 const POINT_MAP = {
   points: [
     { tagId: "pump.run", type: "binaryInput", index: 0, eventClass: 1 },
-    { tagId: "tank.level", type: "analogInput", index: 0, eventClass: 2, encoding: "float32" },
+    {
+      tagId: "tank.level",
+      type: "analogInput",
+      index: 0,
+      eventClass: 2,
+      encoding: "float32",
+    },
     { tagId: "valve.cmd", type: "binaryOutput", index: 0, writable: true },
     { tagId: "vent.cmd", type: "binaryOutput", index: 1 },
   ],
@@ -42,7 +50,10 @@ const KEY = "00112233445566778899aabbccddeeff";
 let service: Dnp3OutstationService | null = null;
 const clients: MasterConnection[] = [];
 
-function baseEnv(port: number, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
+function baseEnv(
+  port: number,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
   return {
     DNP3_OUTSTATION_ENABLED: "true",
     DNP3_OUTSTATION_SITE_ID: "site-1",
@@ -58,13 +69,19 @@ async function start(
   env: NodeJS.ProcessEnv,
   tagStore?: InMemoryDnp3TagStore,
 ): Promise<Dnp3OutstationService> {
-  const started = await startDnp3Outstation({ env, readFile: readPointMap, tagStore });
+  const started = await startDnp3Outstation({
+    env,
+    readFile: readPointMap,
+    tagStore,
+  });
   if (!started) throw new Error("expected the outstation to start");
   service = started;
   return started;
 }
 
-async function connect(started: Dnp3OutstationService): Promise<MasterConnection> {
+async function connect(
+  started: Dnp3OutstationService,
+): Promise<MasterConnection> {
   const client = await MasterConnection.open(started.outstation.listeningPort!);
   clients.push(client);
   return client;
@@ -92,7 +109,10 @@ describe("startDnp3Outstation is off by default", () => {
   it("does nothing, and binds nothing, when the flag is absent", async () => {
     const port = await freePort();
     const started = await startDnp3Outstation({
-      env: { DNP3_OUTSTATION_SITE_ID: "site-1", DNP3_OUTSTATION_PORT: String(port) },
+      env: {
+        DNP3_OUTSTATION_SITE_ID: "site-1",
+        DNP3_OUTSTATION_PORT: String(port),
+      },
       readFile: readPointMap,
     });
     expect(started).toBeNull();
@@ -175,7 +195,9 @@ describe("a started outstation serves live data", () => {
     expect(fragment[1]).toBe(DNP3_FUNCTION.RESPONSE);
     const objects = fragment.subarray(4);
     // g1v2 binary input 0 — ONLINE|STATE, i.e. the seeded `true`.
-    expect([...objects.subarray(0, 6)]).toEqual([0x01, 0x02, 0x00, 0x00, 0x00, 0x81]);
+    expect([...objects.subarray(0, 6)]).toEqual([
+      0x01, 0x02, 0x00, 0x00, 0x00, 0x81,
+    ]);
     // g30v5 analog input 0 = 9.5.
     const analog = objects.subarray(objects.length - 10);
     expect([...analog.subarray(0, 5)]).toEqual([0x1e, 0x05, 0x00, 0x00, 0x00]);
@@ -211,7 +233,9 @@ describe("a started outstation serves live data", () => {
     client.send(classRead(1));
     const fragment = await client.next();
     // g2v2 binary input event, index 0, ONLINE|STATE, timestamp 2000.
-    expect([...fragment.subarray(4, 10)]).toEqual([0x02, 0x02, 0x17, 0x01, 0x00, 0x81]);
+    expect([...fragment.subarray(4, 10)]).toEqual([
+      0x02, 0x02, 0x17, 0x01, 0x00, 0x81,
+    ]);
     expect(fragment.readUIntLE(10, 6)).toBe(2_000);
   });
 });
@@ -226,7 +250,9 @@ describe("controls through the startup path", () => {
     const select = await client.next();
     expect(select[select.length - 1]).toBe(DNP3_COMMAND_STATUS.NOT_SUPPORTED);
 
-    client.send(crobRequest({ func: DNP3_FUNCTION.DIRECT_OPERATE, index: 0, seq: 1 }));
+    client.send(
+      crobRequest({ func: DNP3_FUNCTION.DIRECT_OPERATE, index: 0, seq: 1 }),
+    );
     const direct = await client.next();
     expect(direct[direct.length - 1]).toBe(DNP3_COMMAND_STATUS.NOT_SUPPORTED);
   });
@@ -263,14 +289,16 @@ describe("controls through the startup path", () => {
     const started = await start(
       baseEnv(await freePort(), {
         DNP3_OUTSTATION_ALLOW_CONTROLS: "true",
-        DNP3_OUTSTATION_SAV5_UPDATE_KEY: KEY,
+        DNP3_OUTSTATION_SAV5_CONTROL_KEY: KEY,
       }),
       store,
     );
     const client = await connect(started);
     // SAv5 is provisioned, so the critical function is challenged rather than
     // executed: the master gets a g120v1 challenge, and nothing is written.
-    client.send(crobRequest({ func: DNP3_FUNCTION.DIRECT_OPERATE, index: 1, seq: 0 }));
+    client.send(
+      crobRequest({ func: DNP3_FUNCTION.DIRECT_OPERATE, index: 1, seq: 0 }),
+    );
     const challenge = await client.next();
     expect(challenge[4]).toBe(0x78); // group 120
     expect(store.peek("vent.cmd")).toBeUndefined();

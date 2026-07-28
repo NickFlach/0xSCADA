@@ -19,19 +19,20 @@
  *                                              executed at all; even then only
  *                                              point-map entries marked
  *                                              `writable` can move a tag.
- *   5. Enabling controls additionally requires a Secure Authentication v5
- *      Update Key (`DNP3_OUTSTATION_SAV5_UPDATE_KEY`) unless the deployment
+ *   5. Enabling controls additionally requires the current Secure
+ *      Authentication v5 Control Direction Session Key
+ *      (`DNP3_OUTSTATION_SAV5_CONTROL_KEY`) unless the deployment
  *      *also* sets `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true` and so
  *      states, on the record, that it is running a plant-output write path with
  *      no cryptographic authentication in front of it.
  *
- * WHAT SAv5 DOES AND DOES NOT COVER. With an Update Key provisioned, the
+ * WHAT SAv5 DOES AND DOES NOT COVER. With a Control Direction Session Key provisioned, the
  * critical function codes (SELECT, OPERATE, DIRECT_OPERATE, WRITE, restarts,
  * (en|dis)able-unsolicited) are challenged and their MAC verified before the
  * ASDU executes — see `secure-auth.ts`. Nothing else is authenticated: READs are
  * not, the TCP peer is not, and there is no confidentiality anywhere. A peer
  * that clears the allowlist can read every mapped point. Plain DNP3 without an
- * Update Key has no authentication whatsoever.
+ * Control Direction Session Key has no authentication whatsoever.
  *
  * Validation is Zod-based and fails closed: a malformed value raises
  * `Dnp3OutstationConfigError` and no listener is created.
@@ -46,7 +47,10 @@ import {
   PeerRuleError,
 } from "../peer-allowlist";
 import { Dnp3PointMapConfigSchema, type Dnp3PointMapConfig } from "./point-map";
-import { DEFAULT_MAX_TX_QUEUE_BYTES, DNP3_MAX_LINK_FRAME_BYTES } from "./server";
+import {
+  DEFAULT_MAX_TX_QUEUE_BYTES,
+  DNP3_MAX_LINK_FRAME_BYTES,
+} from "./server";
 
 /** Raised when the deployment configuration cannot produce a safe listener. */
 export class Dnp3OutstationConfigError extends Error {
@@ -83,11 +87,10 @@ const csv = (raw: string | undefined): string[] | undefined => {
 const boolFlag = (raw: string | undefined): boolean => raw?.trim() === "true";
 
 /**
- * Minimum Update Key length. IEC 62351-5 / IEEE 1815 Update Keys are 128, 192 or
- * 256 bits; 16 octets is the floor, and a shorter key is refused rather than
- * silently accepted as "some authentication".
+ * Minimum Control Direction Session Key length. Sixteen octets is the floor;
+ * shorter input is refused rather than silently accepted as authentication.
  */
-const MIN_UPDATE_KEY_BYTES = 16;
+const MIN_CONTROL_KEY_BYTES = 16;
 
 export const dnp3OutstationDeploymentConfigSchema = z
   .object({
@@ -105,7 +108,7 @@ export const dnp3OutstationDeploymentConfigSchema = z
      */
     allowedPeers: z.array(z.string().trim().min(1)).min(1),
     /** Hard cap on simultaneous master associations. */
-    maxConnections: z.coerce.number().int().min(1).max(64).default(2),
+    maxConnections: z.coerce.number().int().min(1).max(64).default(1),
     /** Idle socket timeout in ms (0 disables). */
     socketTimeoutMs: z.coerce.number().int().min(0).default(60_000),
     /** Per-connection receive-buffer bound; must fit one maximum link frame. */
@@ -130,9 +133,14 @@ export const dnp3OutstationDeploymentConfigSchema = z
     /** Execute DNP3 controls at all. Separate, explicit opt-in. */
     allowControls: z.boolean().default(false),
     /** How long a SELECT stays armed before an OPERATE is refused with TIMEOUT. */
-    selectTimeoutMs: z.coerce.number().int().positive().max(600_000).default(5_000),
+    selectTimeoutMs: z.coerce
+      .number()
+      .int()
+      .positive()
+      .max(600_000)
+      .default(5_000),
     /**
-     * Run controls with no SAv5 Update Key. Only consulted when controls are
+     * Run controls with no SAv5 Control Direction Session Key. Only consulted when controls are
      * enabled; it exists so that choice has to be written down.
      */
     allowUnauthenticatedControls: z.boolean().default(false),
@@ -141,18 +149,26 @@ export const dnp3OutstationDeploymentConfigSchema = z
     /** Path to the JSON point map served by this outstation. */
     pointMapFile: z.string().trim().min(1),
     /** How often mapped tags are re-read from the tag store, in ms. */
-    pollIntervalMs: z.coerce.number().int().min(50).max(3_600_000).default(1_000),
-    /** SAv5 user number the Update Key belongs to. */
+    pollIntervalMs: z.coerce
+      .number()
+      .int()
+      .min(50)
+      .max(3_600_000)
+      .default(1_000),
+    /** SAv5 user number the Control Direction Session Key belongs to. */
     sav5UserNumber: z.coerce.number().int().min(1).max(0xffff).default(1),
-    /** SAv5 Update Key, hex-encoded. Absent means SAv5 is not provisioned. */
-    sav5UpdateKeyHex: z
+    /** Current SAv5 Control Direction Session Key, hex-encoded. */
+    sav5ControlKeyHex: z
       .string()
       .trim()
       .regex(/^[0-9a-fA-F]+$/, "must be hex-encoded")
-      .refine((hex) => hex.length % 2 === 0, "must have an even number of hex digits")
       .refine(
-        (hex) => hex.length / 2 >= MIN_UPDATE_KEY_BYTES,
-        `must be at least ${MIN_UPDATE_KEY_BYTES} octets`,
+        (hex) => hex.length % 2 === 0,
+        "must have an even number of hex digits",
+      )
+      .refine(
+        (hex) => hex.length / 2 >= MIN_CONTROL_KEY_BYTES,
+        `must be at least ${MIN_CONTROL_KEY_BYTES} octets`,
       )
       .optional(),
   })
@@ -174,18 +190,28 @@ export const dnp3OutstationDeploymentConfigSchema = z
     // so "controls on, no key" has to be an explicit, separate declaration.
     if (
       config.allowControls &&
-      config.sav5UpdateKeyHex === undefined &&
+      config.sav5ControlKeyHex === undefined &&
       !config.allowUnauthenticatedControls
     ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        path: ["sav5UpdateKeyHex"],
+        path: ["sav5ControlKeyHex"],
         message:
-          "DNP3_OUTSTATION_ALLOW_CONTROLS=true without DNP3_OUTSTATION_SAV5_UPDATE_KEY " +
+          "DNP3_OUTSTATION_ALLOW_CONTROLS=true without DNP3_OUTSTATION_SAV5_CONTROL_KEY " +
           "would execute plant-output commands from any allowlisted peer with no " +
-          "cryptographic authentication. Provision an SAv5 Update Key, or set " +
+          "cryptographic authentication. Provision the active SAv5 Control Direction Session Key, or set " +
           "DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true to accept that risk " +
           "explicitly.",
+      });
+    }
+    if (config.sav5ControlKeyHex !== undefined && config.maxConnections !== 1) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["maxConnections"],
+        message:
+          "SAv5 Control Direction Session Keys are association-scoped; this deployment " +
+          "supports one authenticated master association, so " +
+          "DNP3_OUTSTATION_MAX_CONNECTIONS must be 1 when a key is provisioned",
       });
     }
   });
@@ -248,7 +274,7 @@ export function loadDnp3OutstationConfig(
     pointMapFile: present(env.DNP3_OUTSTATION_POINT_MAP_FILE),
     pollIntervalMs: present(env.DNP3_OUTSTATION_POLL_INTERVAL_MS),
     sav5UserNumber: present(env.DNP3_OUTSTATION_SAV5_USER),
-    sav5UpdateKeyHex: present(env.DNP3_OUTSTATION_SAV5_UPDATE_KEY),
+    sav5ControlKeyHex: present(env.DNP3_OUTSTATION_SAV5_CONTROL_KEY),
   });
 
   if (!parsed.success) {
@@ -330,7 +356,7 @@ export function describeDnp3OutstationConfig(
     `site=${config.siteId} linkAddr=${config.localAddress} ` +
     `bind=${config.host}:${config.port} ` +
     `controls=${config.allowControls ? "ENABLED" : "disabled"} ` +
-    `sav5=${config.sav5UpdateKeyHex ? `user ${config.sav5UserNumber}` : "not provisioned"} ` +
+    `sav5=${config.sav5ControlKeyHex ? `user ${config.sav5UserNumber}` : "not provisioned"} ` +
     `maxConnections=${config.maxConnections} ` +
     `allowedPeers=[${config.allowedPeers.join(", ")}]`
   );

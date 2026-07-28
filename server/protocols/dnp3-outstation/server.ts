@@ -16,8 +16,8 @@
  *   - framing responses back onto the wire.
  *
  * SAFETY. DNP3 over TCP carries no authentication of its own. Secure
- * Authentication v5 authenticates *critical function codes* when an Update Key
- * is provisioned (see `secure-auth.ts`); it does not authenticate the TCP peer,
+ * Authentication v5 authenticates *critical function codes* when a Control
+ * Direction Session Key is provisioned (see `secure-auth.ts`); it does not authenticate the TCP peer,
  * and it does not protect reads. So anything that can open this socket can read
  * every mapped point. The compensations this class can apply are the deployment
  * ones, and each fails closed:
@@ -66,7 +66,7 @@ import {
 } from "./link-layer";
 import { segment, TransportReassembler, TRANSPORT_SEQ_MASK } from "./transport";
 import { parseRequest, type ParsedRequest } from "./app-layer";
-import { DNP3_FUNCTION, DNP3_GROUP } from "./app-objects";
+import { DNP3_FUNCTION } from "./app-objects";
 import {
   createSession,
   type Dnp3ResponseFragment,
@@ -104,7 +104,7 @@ export const DEFAULT_MAX_TX_QUEUE_BYTES = 1_048_576;
 export const DEFAULT_BIND_HOST = "127.0.0.1";
 /** IEEE 1815 registered DNP3 port. */
 export const DEFAULT_PORT = 20000;
-export const DEFAULT_MAX_CONNECTIONS = 2;
+export const DEFAULT_MAX_CONNECTIONS = 1;
 export const DEFAULT_SOCKET_TIMEOUT_MS = 60_000;
 
 /** What one `push()` produced. */
@@ -165,7 +165,9 @@ export class Dnp3LinkFrameReader {
       return { frames: [], overflow: true };
     }
     this.buffer =
-      this.buffer.length === 0 ? Buffer.from(chunk) : Buffer.concat([this.buffer, chunk]);
+      this.buffer.length === 0
+        ? Buffer.from(chunk)
+        : Buffer.concat([this.buffer, chunk]);
     return { frames: this.drain(), overflow: false };
   }
 
@@ -181,7 +183,10 @@ export class Dnp3LinkFrameReader {
       if (this.buffer.length < 2) {
         // A lone trailing 0x05 may be the first half of a split start pattern,
         // so it is kept; anything else at this point is not a frame start.
-        if (this.buffer.length === 1 && this.buffer[0] !== DNP3_START_BYTES[0]) {
+        if (
+          this.buffer.length === 1 &&
+          this.buffer[0] !== DNP3_START_BYTES[0]
+        ) {
           this.discarded += 1;
           this.buffer = Buffer.alloc(0);
         }
@@ -191,9 +196,13 @@ export class Dnp3LinkFrameReader {
       const start = this.buffer.indexOf(DNP3_START_BYTES);
       if (start === -1) {
         // No start pattern anywhere. Keep only a trailing 0x05.
-        const keep = this.buffer[this.buffer.length - 1] === DNP3_START_BYTES[0] ? 1 : 0;
+        const keep =
+          this.buffer[this.buffer.length - 1] === DNP3_START_BYTES[0] ? 1 : 0;
         this.discarded += this.buffer.length - keep;
-        this.buffer = keep === 1 ? this.buffer.subarray(this.buffer.length - 1) : Buffer.alloc(0);
+        this.buffer =
+          keep === 1
+            ? this.buffer.subarray(this.buffer.length - 1)
+            : Buffer.alloc(0);
         return frames;
       }
       if (start > 0) {
@@ -205,7 +214,9 @@ export class Dnp3LinkFrameReader {
         return frames; // header block not complete yet
       }
 
-      const header = parseLinkHeader(this.buffer.subarray(0, DNP3_LINK_HEADER_BYTES));
+      const header = parseLinkHeader(
+        this.buffer.subarray(0, DNP3_LINK_HEADER_BYTES),
+      );
       // `parseLinkHeader` returns null when the header CRC does not match, so a
       // LENGTH that survives here is one the sender genuinely wrote. LENGTH < 5
       // is still structurally impossible (it counts CONTROL+DEST+SRC and cannot
@@ -245,7 +256,10 @@ export interface Dnp3ApplicationDispatcher {
    * Handle a g120v2 Secure-Authentication reply. Returns the fragment octets to
    * transmit, or an empty buffer.
    */
-  dispatchSecureAuthReply(req: ParsedRequest, session: OutstationSession): Buffer;
+  dispatchSecureAuthReply(
+    req: ParsedRequest,
+    session: OutstationSession,
+  ): Buffer;
   /** Called once per association when its socket closes. */
   onAssociationClosed(session: OutstationSession): void;
 }
@@ -322,11 +336,14 @@ export class Dnp3TcpServer {
     this.localAddress = config.localAddress ?? 10;
     this.maxConnections = config.maxConnections ?? DEFAULT_MAX_CONNECTIONS;
     this.socketTimeoutMs = config.socketTimeoutMs ?? DEFAULT_SOCKET_TIMEOUT_MS;
-    this.maxRxBufferBytes = config.maxRxBufferBytes ?? DEFAULT_MAX_RX_BUFFER_BYTES;
+    this.maxRxBufferBytes =
+      config.maxRxBufferBytes ?? DEFAULT_MAX_RX_BUFFER_BYTES;
     this.maxTxQueueBytes = config.maxTxQueueBytes ?? DEFAULT_MAX_TX_QUEUE_BYTES;
     this.peerRules = parsePeerRules(config.allowedPeers ?? LOOPBACK_PEER_RULES);
     this.server = net.createServer((socket) => this.onConnection(socket));
-    this.server.on("error", (err) => logError(err, "DNP3 outstation socket error"));
+    this.server.on("error", (err) =>
+      logError(err, "DNP3 outstation socket error"),
+    );
   }
 
   /** Start listening. Resolves once the listen socket is bound. */
@@ -512,7 +529,10 @@ export class Dnp3TcpServer {
     if (!extracted) {
       // The header CRC already validated the length, so the failure is in a
       // user-data block: drop this frame only, no resynchronisation needed.
-      logWarn("DNP3 outstation: dropped frame with bad user-data CRC", LOG_SCOPE);
+      logWarn(
+        "DNP3 outstation: dropped frame with bad user-data CRC",
+        LOG_SCOPE,
+      );
       return;
     }
     conn.masterAddress = extracted.header.source;
@@ -538,11 +558,11 @@ export class Dnp3TcpServer {
 
     let response: Buffer;
     try {
-      // A WRITE carrying group-120 objects is the master's SAv5 reply, not a
-      // database write.
+      // Standard SAv5 challenge replies use AUTH_REQUEST (0x20). Function 0x21
+      // is reserved for no-ack authentication errors and never authorizes a
+      // g120v2 reply.
       response =
-        req.func === DNP3_FUNCTION.WRITE &&
-        req.objects.some((o) => o.group === DNP3_GROUP.SECURE_AUTH)
+        req.func === DNP3_FUNCTION.AUTH_REQUEST
           ? this.dispatcher.dispatchSecureAuthReply(req, conn.session)
           : this.dispatcher.dispatch(req, conn.session);
     } catch (err) {
@@ -558,9 +578,12 @@ export class Dnp3TcpServer {
   /** Frame + send one application response fragment to the master. */
   private sendFragment(conn: ConnectionState, appFragment: Buffer): void {
     const segments = segment(appFragment, conn.transportSeq);
-    conn.transportSeq = (conn.transportSeq + segments.length) & TRANSPORT_SEQ_MASK;
+    conn.transportSeq =
+      (conn.transportSeq + segments.length) & TRANSPORT_SEQ_MASK;
     for (const seg of segments) {
-      const control = buildResponseControl(DNP3_LINK_FUNCTION.UNCONFIRMED_USER_DATA);
+      const control = buildResponseControl(
+        DNP3_LINK_FUNCTION.UNCONFIRMED_USER_DATA,
+      );
       this.transmit(
         conn,
         buildLinkFrame({
