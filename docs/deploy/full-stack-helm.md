@@ -63,6 +63,22 @@ helm upgrade --install oxscada ./helm/oxscada-full \
   --set-string server.apiKeys.existingSecret=oxscada-api-keys
 ```
 
+### Optional-component dependency checks
+
+The chart rejects combinations that would render references to Services that
+do not exist:
+
+- an enabled gateway needs either the in-chart server or an explicit
+  `gateway.serverUrl`
+- the built-in Prometheus job needs the in-chart server
+- the built-in Grafana datasource needs the in-chart Prometheus instance
+- every configured ingress path must name an enabled chart component
+
+When disabling a component, also remove any ingress path that targets it.
+These checks fail during `helm lint` and `helm template`, before Kubernetes can
+accept a deployment with a dangling upstream, scrape target, datasource, or
+Ingress backend.
+
 Global authentication is on by default; rendering fails until the existing
 Secret name is supplied. The chart never ships a default credential.
 See [Control-Plane API Keys](../security/control-plane-api-keys.md) for secure

@@ -1,4 +1,7 @@
 {{- if .Values.gateway.enabled }}
+{{- if and (not .Values.server.enabled) (empty .Values.gateway.serverUrl) }}
+{{- fail "gateway.serverUrl is required when gateway.enabled=true and server.enabled=false" }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
