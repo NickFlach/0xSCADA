@@ -164,9 +164,21 @@ class NaiveBlueprintInterpreter {
 }
 
 const TAG_COUNT = 1000;
+const INSTRUCTION_COUNT = 800;
 
-export function runBaselineBench(): LatencyStats {
+export async function runBaselineBench(): Promise<LatencyStats> {
   const def = makeControlFarmBlueprint(TAG_COUNT);
+  if (def.tags.length !== TAG_COUNT) {
+    throw new Error(
+      `benchmark fixture must contain exactly ${TAG_COUNT} tags, got ${def.tags.length}`,
+    );
+  }
+  if (def.nodes.length !== INSTRUCTION_COUNT) {
+    throw new Error(
+      `benchmark fixture must contain exactly ${INSTRUCTION_COUNT} instructions, ` +
+        `got ${def.nodes.length}`,
+    );
+  }
   const interp = new NaiveBlueprintInterpreter(def);
 
   // Pre-build a few input vectors so beforeTick rotates inputs without Math.random.
@@ -192,11 +204,14 @@ export function runBaselineBench(): LatencyStats {
   });
 }
 
-function main(): void {
-  const stats = runBaselineBench();
+async function main(): Promise<void> {
+  const stats = await runBaselineBench();
   console.log(formatReport(stats));
 }
 
 if (isMain(import.meta.url)) {
-  main();
+  void main().catch((err: unknown) => {
+    console.error(err);
+    process.exitCode = 1;
+  });
 }
