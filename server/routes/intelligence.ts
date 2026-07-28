@@ -315,18 +315,19 @@ router.get("/digitaltwin/status/:assetId", (_req, res) => {
 });
 
 // ── ML pipeline ────────────────────────────────────────────────────────────
-// Not implemented on main. `server/services/ml` exists but is a simulation
-// harness — its inference path returns PRNG draws and "training" is a
-// setTimeout — so wiring these routes to it would relabel the same fabricated
-// numbers rather than remove them. It is deliberately left unexposed over HTTP.
+// Not implemented on main. The `server/services/ml` simulation harness that
+// used to sit behind these paths was deleted in #605 — its inference path
+// returned PRNG draws and its "training" was a setTimeout, so wiring these
+// routes to it would have relabelled fabricated numbers rather than removed
+// them. There is now no ML service in the process at all.
 
 router.post("/ml/pipeline", (_req, res) => {
   notImplemented(
     res,
     "ML pipeline execution is not implemented. The previous handler returned "
       + "pseudo-random values as predictions and fixed accuracy/loss/F1 figures "
-      + "for train and evaluate. No model runtime is wired to this service; "
-      + "server/services/ml is a simulation harness, not an inference backend.",
+      + "for train and evaluate. No model runtime exists in this process: the "
+      + "simulation harness that stood in for one was removed in #605.",
   );
 });
 
