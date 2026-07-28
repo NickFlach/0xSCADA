@@ -1,47 +1,81 @@
 # Scaling Runbook
 
-## When to Scale
+Use this runbook for sustained saturation, forecasted growth, or reduced
+failover reserve. Prefer horizontal scale-out. Scale-down and storage changes
+need explicit review because they can reduce redundancy or destroy data.
 
-| Indicator | Threshold | Action |
-|-----------|-----------|--------|
-| CPU utilization | > 70% sustained 15min | Add server instance |
-| Memory utilization | > 80% | Add server instance or increase instance size |
-| Tags per gateway | > 50,000 | Add gateway instance |
-| Event queue depth | > 10,000 | Add pipeline workers |
-| Query latency p95 | > 2s | Add historian replica |
-| WebSocket connections | > 10,000 per server | Add server instance |
+## Triggers
 
-## Horizontal Scale-Out
+| Signal | Trigger | Required duration/action |
+|---|---:|---|
+| Tags per gateway | 70% of planned limit | Plan another gateway before 80% |
+| CPU | 70% | Scale after 15 minutes if queue/latency agrees |
+| Memory | 75% | Scale after 15 minutes; investigate leak first |
+| Storage | 70% | Provision before 80%; do not wait for exhaustion |
+| Error budget | 50% consumed | Freeze nonessential load; review capacity |
+| Queue age/depth | Increasing for 10 minutes | Scale consumers if downstream is healthy |
 
-### Adding a Gateway
-1. Provision instance (see capacity-planning-guide.md for sizing)
-2. Install gateway package, configure certificates
-3. Register with shard manager: `POST /api/scaling/gateways`
-4. Shard manager auto-rebalances within 60s
-5. Verify tags migrating: `GET /api/scaling/shards?gateway={id}`
+A single hot metric is not sufficient. Confirm it correlates with queueing,
+latency, workload, or forecast growth.
 
-### Adding a Server Instance
-1. Provision instance behind load balancer
-2. Configure database connection, event pipeline consumer group
-3. Add to load balancer pool: update LB config
-4. Health check passes → traffic begins routing
-5. Monitor for 15min, verify even distribution
+## Build the plan
 
-### Adding Historian Capacity
-1. Add new storage partition or read replica
-2. Update partition config: `POST /api/historian/partitions`
-3. Future writes go to new partition; reads federate across all
+Send observed workload and history to
+`POST /api/governance/capacity/plan`. Review all three strategies and replace
+reference cloud rates with contracted rates before financial approval. For
+production, default to balanced; use performance for rapid/low-confidence
+growth, and cost-optimized only for stable, high-confidence demand.
 
-## Vertical Scale-Up
-1. Snapshot current state
-2. Drain connections: set node to `draining` in LB
-3. Resize instance
-4. Restore and restart
-5. Re-enable in LB
+## Automated scale-out
 
-## Scale-Down
-1. Set node to `draining` in load balancer
-2. Wait for drain timeout (default 30s)
-3. Verify all connections migrated
-4. Remove from shard manager / load balancer
-5. Terminate instance
+`createScaleOutAction` requires `component`, `desiredReplicas`, and
+`maximumReplicas`.
+
+1. Confirm current desired/ready replicas and per-instance load.
+2. Check quotas, placement capacity, database/event-bus connection limits, and
+   certificate/secret availability.
+3. Dry-run with a stable incident/change idempotency key.
+4. Verify desired replicas do not exceed the approved maximum.
+5. Apply with a distinct key.
+6. The action succeeds only when ready replicas reach desired state; otherwise
+   it restores the previous replica count.
+
+## Component checks
+
+### Gateway
+
+Register the new identity/certificate, prove device-network reachability, start
+drained, move a canary shard, then rebalance. Verify no tag has multiple active
+owners and no historian duplicates are introduced.
+
+### API/WebSocket
+
+Add the instance to the correct consumer group, start outside the load-balancer
+pool, pass readiness, then admit a small traffic percentage. Verify session
+reconnects, event ordering, p95/p99 latency, and connection distribution.
+
+### Historian
+
+Provision storage/partition/replica through the database platform. Verify
+backup policy, retention, query federation, integrity proofs, and IOPS before
+routing writes. Do not use application replica scaling as a substitute for
+database capacity.
+
+## Scale-down
+
+1. Confirm the 30-day forecast plus failover reserve still fits.
+2. Freeze rebalancing and capture current assignments.
+3. Drain one instance; wait for connections/partitions/shards to reach zero.
+4. Observe one full SLI interval.
+5. Remove the instance from discovery, then deprovision.
+6. Stop immediately if error budget, queue age, or per-instance utilization
+   crosses its trigger.
+
+Never scale below two gateway/API instances in an HA workload or remove the
+last verified database replica.
+
+## Completion
+
+Update the retained capacity plan with actual replica count and cost, verify all
+critical SLOs, restore alerting, and record plan/automation ids in the change or
+incident.

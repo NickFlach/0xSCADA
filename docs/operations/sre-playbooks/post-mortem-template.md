@@ -1,60 +1,110 @@
-# Post-Mortem: [INCIDENT TITLE]
+# Postmortem: [incident title]
 
-**Date:** YYYY-MM-DD  
-**Severity:** SEV-X  
-**Duration:** X hours Y minutes  
-**Author:** [Name]  
-**Reviewers:** [Names]
+- **Incident id:**
+- **Date/time (UTC):**
+- **Severity:**
+- **Incident commander:**
+- **Technical leads:**
+- **Site/operator liaison:**
+- **Authors/reviewers:**
+- **Status:** Draft / Reviewed / Actions accepted
 
-## Summary
-_One paragraph describing what happened, the impact, and the resolution._
+## Executive summary
 
-## Timeline (all times UTC)
-
-| Time | Event |
-|------|-------|
-| HH:MM | First alert fired |
-| HH:MM | On-call acknowledged |
-| HH:MM | Root cause identified |
-| HH:MM | Mitigation applied |
-| HH:MM | Service restored |
-| HH:MM | All-clear declared |
+In plain language: what happened, who/what was affected, duration, root cause,
+mitigation, and current risk. Do not assign individual blame.
 
 ## Impact
-- **Tags affected:** X
-- **Sites affected:** X
-- **Data loss:** Yes/No (duration if yes)
-- **SLO impact:** X% of monthly error budget consumed
 
-## Root Cause
-_Detailed technical explanation of why the incident occurred._
+- Sites/tags/subscribers affected:
+- Process-safety impact and operator action:
+- Data loss or unverified interval:
+- Customer/operator-visible symptoms:
+- Financial/compliance/security impact:
 
-## Detection
-- How was the incident detected? (Alert / Customer report / Manual observation)
-- Time to detect: X minutes
-- Could detection be improved?
+### SLO impact
 
-## Response
-- What remediation steps were taken?
-- Did auto-remediation trigger? Was it effective?
-- What manual steps were required?
+| SLO id | Window | Bad/total events | Burn rate | Budget consumed | Good/bad recovery event |
+|---|---|---:|---:|---:|---|
+| | | | | | |
 
-## Lessons Learned
+## Detection and response metrics
 
-### What went well
-1. 
+| Metric | UTC/duration |
+|---|---|
+| Failure began / earliest known impact | |
+| First detection | |
+| Page sent / acknowledged | |
+| IC assigned | |
+| Mitigation began | |
+| Service restored | |
+| Integrity/recovery verified | |
 
-### What went poorly
-1. 
+Explain any gap between failure, detection, page, mitigation, and verification.
 
-### Where we got lucky
-1. 
+## Timeline (UTC)
 
-## Action Items
+| Time | Actor/system | Observation, decision, or action | Evidence/result |
+|---|---|---|---|
+| | | | |
 
-| Action | Owner | Priority | Due Date | Status |
-|--------|-------|----------|----------|--------|
-| | | | | |
+Include deployment/config revisions and remediation idempotency/execution ids.
 
-## Supporting Data
-_Links to dashboards, logs, graphs, or other evidence._
+## Technical root cause
+
+Describe the failure mechanism and evidence. Distinguish:
+
+- triggering event;
+- direct technical cause;
+- conditions that allowed the cause to create impact;
+- why redundancy or controls did not prevent impact;
+- why detection/response took as long as it did.
+
+Avoid “human error” as a root cause; identify the system condition that made an
+error possible or harmful.
+
+## Recovery and verification
+
+- mitigation and why it was chosen;
+- dry-run/precondition/approval records;
+- rollback attempted and result;
+- tag freshness, database read/write, queue replay, and integrity verification;
+- achieved RTO/RPO;
+- how redundancy and alerting were restored.
+
+## What helped / what hindered / where risk remained
+
+### Helped
+
+-
+
+### Hindered
+
+-
+
+### Risk or luck
+
+-
+
+## Corrective actions
+
+| Action | Type (prevent/detect/mitigate) | Owner | Priority | Due | Verification/acceptance test | Status |
+|---|---|---|---|---|---|---|
+| | | | | | | |
+
+Every action needs one accountable owner and a testable completion condition.
+Track actions outside this document and link the records.
+
+## Evidence
+
+Link immutable dashboards/queries, logs, alert payloads, configuration and
+deployment revisions, capacity/compliance reports, audit records, and operator
+notes. Redact credentials and regulated personal data.
+
+## Review sign-off
+
+- Service owner:
+- Incident commander:
+- Site/operator representative (when applicable):
+- Security/compliance reviewer (when applicable):
+- Action tracker:

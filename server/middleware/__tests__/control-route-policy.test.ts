@@ -152,6 +152,7 @@ describe("control route policy inventory", () => {
       expect.arrayContaining([
         "anchor-backend-control",
         "safe-state-resume",
+        "sre-remediation-control",
         "tuning-proposal-decision",
         "tuning-control",
         "alarm-control",
@@ -163,6 +164,13 @@ describe("control route policy inventory", () => {
         "marketplace-control",
       ]),
     );
+  });
+
+  it("requires the dedicated SRE remediation scope", () => {
+    expect(mutationPolicyFor(
+      "POST",
+      "/api/governance/sre/remediations/execute",
+    )?.scopes).toEqual(["sre.remediate"]);
   });
 
   it("keeps agent-marketplace mutations off the generic write scope", () => {

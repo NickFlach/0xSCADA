@@ -1,55 +1,89 @@
-# Incident Response Playbook
+# Incident Response Runbook
 
-## Severity Levels
+Use this runbook for production alerts, operator reports, and exhausted critical
+SLO budgets. Process safety takes priority over service restoration. Site
+operators retain authority over physical control and safe-state decisions.
 
-| Level | Description | Response Time | Escalation |
-|-------|-------------|---------------|------------|
-| SEV-1 | Data loss, safety system failure | 5 min | Immediate page |
-| SEV-2 | Major functionality degraded | 15 min | On-call engineer |
-| SEV-3 | Minor functionality impacted | 1 hour | Next business day |
-| SEV-4 | Cosmetic / low impact | 4 hours | Backlog |
+## First five minutes
 
-## Response Steps
+1. Acknowledge the page and create an incident id.
+2. Record UTC start time, alert source, affected site(s), and current operator.
+3. If process safety may be affected, contact the site/operator liaison and
+   follow the site's safe-state procedure before changing software.
+4. Assign severity using the
+   [escalation policy](escalation-policy.md); page secondary at half the
+   acknowledgement target.
+5. Freeze deployments to affected components. Preserve logs and avoid restarts
+   until volatile evidence and current assignments are captured.
 
-### 1. Acknowledge
-- Claim the incident in the alerting system
-- Join the incident channel
-- Start the incident timer
+## Severity
 
-### 2. Assess
-- Check health dashboard: `/api/health`
-- Review recent deployments and changes
-- Identify affected components (gateway, server, historian, blockchain)
-- Determine blast radius (number of tags/sites affected)
+| Level | Impact | Acknowledge |
+|---|---|---:|
+| SEV-1 | Safety impact, confirmed data loss, integrity compromise, or multi-site control loss | 5 min |
+| SEV-2 | Critical path unavailable/degraded, exhausted SLO, or failed site failover | 15 min |
+| SEV-3 | Limited degradation with a safe workaround | 60 min |
+| SEV-4 | No production impact | 1 business day |
 
-### 3. Mitigate
-- Apply auto-remediation if available
-- If gateway: check shard manager status, fail over to healthy nodes
-- If database: initiate read-replica failover (see database-recovery.md)
-- If network: verify federation heartbeats, enable store-and-forward
+## Establish blast radius
 
-### 4. Communicate
-- Update status page every 15 minutes for SEV-1/2
-- Notify affected site operators
-- Keep incident channel updated
+Record:
 
-### 5. Resolve
-- Confirm metrics return to baseline
-- Verify no data loss (Merkle root comparison)
-- Stand down on-call escalation
+- sites, gateways, shards, tags, and subscribers affected;
+- earliest and latest known-good event timestamps;
+- store-and-forward queue depth and oldest queued event;
+- database read/write status and last verified backup;
+- relevant SLO id, SLI, burn rate, and remaining budget;
+- recent deploy/config/certificate/network changes;
+- whether telemetry itself is absent (`no-data` is not healthy).
 
-### 6. Post-Mortem
-- Schedule within 48 hours for SEV-1/2
-- Use post-mortem template (see post-mortem-template.md)
-- Track action items to completion
+Use `/api/health`, component metrics, and
+`GET /api/governance/sre/slos`. Evaluate known counter deltas with
+`POST /api/governance/sre/slos/:sloId/evaluate`.
 
-## SLO/SLI Definitions
+## Mitigate
 
-| Service | SLI | SLO |
-|---------|-----|-----|
-| Tag reads | Latency p99 | < 100ms |
-| Event ingestion | Availability | 99.9% |
-| Alarm delivery | Latency p95 | < 500ms |
-| Blockchain anchoring | Success rate | 99.5% |
-| WebSocket connections | Availability | 99.9% |
-| Historian queries | Latency p95 | < 2s |
+Choose the narrowest reversible action:
+
+- stale tags or gateway heartbeat loss:
+  [gateway failover](gateway-failover.md);
+- database write/read failure:
+  [database recovery](database-recovery.md);
+- sustained capacity saturation:
+  [scaling](scaling-runbook.md);
+- supported self-healing action:
+  [automated remediation](automated-remediation.md).
+
+Always dry-run automation first. A blocked precondition is a safety decision,
+not an obstacle to bypass. High-risk remediation requires an authenticated
+approver and IC acknowledgement.
+
+## Communicate
+
+Every update states:
+
+- UTC timestamp and incident severity;
+- user/operator impact and process-safety state;
+- affected scope;
+- mitigation completed and its verification;
+- current hypothesis, confidence, and next action;
+- next update time.
+
+SEV-1 updates are every 15 minutes; SEV-2 every 30 minutes. Never state that
+data is intact until historian reads and integrity proofs are verified.
+
+## Recovery and closure
+
+Do not resolve until:
+
+1. the affected SLI remains at baseline for one evaluation interval;
+2. all shards/tags are fresh and store-and-forward queues are draining;
+3. historian writes are readable and integrity-verifiable;
+4. rollback/failover state is documented and redundancy restored;
+5. the site operator confirms normal operating state;
+6. monitoring and paging are active;
+7. the IC records remaining risk and owns follow-up.
+
+Schedule a SEV-1/2 review within 48 hours using
+[the postmortem template](post-mortem-template.md). Attach remediation
+idempotency keys and audit results.
