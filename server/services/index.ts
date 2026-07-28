@@ -33,6 +33,10 @@ export { getRedisClient, isRedisHealthy } from './cache';
 export * from './compliance';
 export { complianceService } from './compliance';
 
+// ── Production SRE & Capacity Planning (ADR-0014, #226 / #228) ───────────────
+export * from './sre';
+export * from './capacity';
+
 // ── Flux Service ─────────────────────────────────────────────────────────────
 export * from './flux';
 
@@ -269,6 +273,8 @@ export async function getServicesHealthStatus(): Promise<{
 export const serviceRegistry = {
   cache: () => import('./cache'),
   compliance: () => import('./compliance'),
+  sre: () => import('./sre'),
+  capacity: () => import('./capacity'),
   flux: () => import('./flux'),
   geometry: () => import('./geometry'),
   ml: () => import('./ml'),

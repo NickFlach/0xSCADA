@@ -365,13 +365,13 @@ Bidirectional sync · Chiral network topology · Decentralized orchestration · 
 `0008` Zero-trust agents · `0009` Emergence guardrails · `0010` Agent certification · `0011` OT-IT convergence · `0012` End-to-end integration · `0013` Autonomous agents · `0014` Production scale · `0022` Constellation unification · `0023` Evolutionary paradox resolution · `0024` Sublinear decoherence prediction · `0025` Living Fano dashboard
 
 ### Compliance
-IEC 62443 mappings · NIST CSF framework · CFR 21 Part 11 recipes
+[IEC 62443 assessment](docs/compliance/iec-62443-mapping.md) · [NIST CSF framework](docs/compliance/nist-csf-mapping.md) · [evidence and audit reports](docs/compliance/assessment-guide.md) · CFR 21 Part 11 recipes
 
 ### Kubernetes (14 docs)
 Full production deployment guides — networking, storage, scheduling, security, GitOps
 
 ### Operations
-Capacity planning · Disaster recovery · SRE playbooks
+[Capacity planning and cloud costs](docs/operations/capacity-planning-guide.md) · [critical-path SLOs](docs/operations/slo-catalog.md) · [incident, recovery, scaling, and remediation playbooks](docs/operations/sre-playbooks/incident-response.md)
 
 ### Vendor Integration (10 docs + 5 vendor adapters)
 OPC UA · Edge gateways · Containerized edge · Identity hardening · Audit traceability · Rockwell · Siemens · ABB · Schneider · GE

@@ -29,6 +29,7 @@ import { marketplaceRoutes } from "./routes/marketplace";
 import { marketplaceService } from "./services/marketplace";
 import { nlQueryService } from "./services/nlquery";
 import { governanceRoutes } from "./routes/governance";
+import { productionReadinessRoutes } from "./routes/production-readiness";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
 import {
@@ -83,6 +84,9 @@ export async function registerRoutes(
   // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
   app.use("/api/tuning", tuningRoutes);
   app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
+  // Production readiness routes must precede the legacy governance router so
+  // real compliance/capacity results cannot fall through to old placeholders.
+  app.use("/api/governance", productionReadinessRoutes);
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
