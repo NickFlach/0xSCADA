@@ -197,9 +197,75 @@ export function parsePeerRule(entry: string): PeerRule {
   return { ...normalized, prefix, source };
 }
 
-/** Parse a whole allowlist. Throws on the first unusable entry. */
+/** Big-endian bytes -> unsigned integer. */
+function toBigInt(bytes: Uint8Array): bigint {
+  let value = 0n;
+  for (const byte of bytes) value = (value << 8n) | BigInt(byte);
+  return value;
+}
+
+/**
+ * True when `rules` between them admit every address of `family`.
+ *
+ * Rejecting `prefix === 0` per rule is not sufficient: `0.0.0.0/1,128.0.0.0/1`
+ * is two /1 rules that together cover the entire IPv4 space, and the same trick
+ * works at any depth (four /2s, eight /3s...). That is a wildcard spelled
+ * differently, so it has to be detected over the whole set rather than one
+ * entry at a time.
+ *
+ * Each rule is an aligned CIDR block, i.e. the contiguous range
+ * `[network, network + 2^(bits - prefix) - 1]`. Sorting those ranges by start
+ * and merging the ones that touch or overlap yields the exact union; the family
+ * is fully covered iff the merged union is the single range `[0, 2^bits - 1]`.
+ * This is exact — it never guesses at an "implausibly broad" prefix.
+ */
+function coversWholeFamily(rules: readonly PeerRule[], family: IpFamily): boolean {
+  const bits = family === 4 ? 32 : 128;
+  const ranges = rules
+    .filter((rule) => rule.family === family)
+    .map((rule) => {
+      const size = 1n << BigInt(bits - rule.prefix);
+      const start = toBigInt(rule.bytes) & ~(size - 1n);
+      return { start, end: start + size - 1n };
+    })
+    .sort((a, b) => (a.start < b.start ? -1 : a.start > b.start ? 1 : 0));
+
+  if (ranges.length === 0 || ranges[0].start !== 0n) return false;
+
+  // Walk the sorted ranges, extending the covered prefix of the space while the
+  // next range starts no later than one past what is already covered.
+  let covered = ranges[0].end;
+  for (const range of ranges.slice(1)) {
+    if (range.start > covered + 1n) return false;
+    if (range.end > covered) covered = range.end;
+  }
+
+  return covered === (1n << BigInt(bits)) - 1n;
+}
+
+/**
+ * Parse a whole allowlist. Throws on the first unusable entry, and then on a set
+ * that is a wildcard in disguise (see {@link coversWholeFamily}).
+ */
 export function parsePeerRules(entries: readonly string[]): PeerRule[] {
-  return entries.map(parsePeerRule);
+  const rules = entries.map(parsePeerRule);
+
+  for (const family of [4, 6] as const) {
+    if (coversWholeFamily(rules, family)) {
+      const covering = rules
+        .filter((rule) => rule.family === family)
+        .map((rule) => rule.source)
+        .join(", ");
+      throw new PeerRuleError(
+        `[${covering}] together allow every IPv${family} peer. This listener ` +
+          "serves a protocol with no client authentication, so a wildcard " +
+          "allowlist is refused however it is spelled; list the specific master " +
+          "IPs or subnets.",
+      );
+    }
+  }
+
+  return rules;
 }
 
 /** True if `addr` falls inside `rule`'s network. */
