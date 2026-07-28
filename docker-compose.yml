@@ -83,7 +83,9 @@ services:
 
   # Hardhat Local Blockchain (Development)
   hardhat:
-    image: node:18-alpine
+    # hardhat 3.x refuses to start below Node 22.13.0 (its CLI aborts with
+    # "not supported by Hardhat"), so this must stay on the 22 line.
+    image: node:22-alpine
     container_name: scada-hardhat
     restart: unless-stopped
     working_dir: /app

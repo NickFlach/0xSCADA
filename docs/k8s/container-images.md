@@ -6,12 +6,21 @@ Multi-stage Docker builds for all 0xSCADA components, optimized for size and sec
 ## Images
 | Image | Dockerfile | Base | Port |
 |-------|-----------|------|------|
-| `oxscada-server` | `docker/server/Dockerfile` | node:20-alpine | 5000 |
-| `oxscada-client` | `docker/client/Dockerfile` | nginx:1.25-alpine | 80 |
-| `oxscada-gateway` | `docker/gateway/Dockerfile` | node:20-alpine | 8080 |
-| `oxscada-validator` | `docker/validator/Dockerfile` | node:20-alpine | 8545 |
-| `oxscada-modbus-driver` | `services/modbus-driver/Dockerfile` | node:20-alpine | 5020 |
-| `oxscada-opcua-driver` | `services/opcua-driver/Dockerfile` | node:20-alpine | 4840 |
+| `oxscada-server` | `docker/server/Dockerfile` | node:22-alpine | 5000 |
+| `oxscada-client` | `docker/client/Dockerfile` | nginx:1.25-alpine (build stage: node:22-alpine) | 80 |
+| `oxscada-gateway` | `docker/gateway/Dockerfile` | node:22-alpine | 8080 |
+| `oxscada-validator` | `docker/validator/Dockerfile` | node:22-alpine | 8545 |
+| `oxscada-modbus-driver` | `services/modbus-driver/Dockerfile` | not implemented[^drivers] | 5020 |
+| `oxscada-opcua-driver` | `services/opcua-driver/Dockerfile` | not implemented[^drivers] | 4840 |
+
+[^drivers]: `oxscada container build` maps these two image names to
+    `services/modbus-driver/Dockerfile` and `services/opcua-driver/Dockerfile`,
+    but neither file exists in the repository yet, so the builds fail.
+
+Every Node base is pinned to the 22 line. Node 20 bundles npm 10.8.2, which
+rejects the lockfile format current npm (and Dependabot) emits with an EUSAGE
+error at `npm ci` — the same failure #598 fixed for the workflow `setup-node`
+pins. `test/ci/workflow-node-version.test.ts` asserts both surfaces.
 
 ## Building
 ```bash

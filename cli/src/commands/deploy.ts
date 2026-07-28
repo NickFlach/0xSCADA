@@ -30,6 +30,16 @@ export interface DeployOptions {
   color?: boolean;
 }
 
+/**
+ * Base image for the generated dev-only hardhat node.
+ *
+ * hardhat 3.x checks `process.versions.node` on startup and aborts below
+ * 22.13.0 ("You are using Node.js ... which is not supported by Hardhat"), so
+ * the emitted service is dead on arrival on any older major. Keep this on the
+ * same Node line as docker/validator/Dockerfile, which runs the same binary.
+ */
+const HARDHAT_DEV_IMAGE = "node:22-alpine";
+
 function generateDockerCompose(options: DeployOptions): string {
   const envConfig = {
     production: { nodeEnv: "production", replicas: options.replicas || 3, restartPolicy: "always" },
@@ -82,7 +92,7 @@ services:
     networks:
       - oxscada-network
 ${options.env === "dev" ? `  hardhat:
-    image: node:20-alpine
+    image: ${HARDHAT_DEV_IMAGE}
     container_name: oxscada-hardhat
     working_dir: /app
     volumes:

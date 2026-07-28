@@ -1,5 +1,8 @@
 # 0xSCADA Server - Multi-stage Node.js build
-FROM node:20-alpine AS base
+# Node 22: its bundled npm 10.9+ reads the lockfile format current npm and
+# Dependabot emit. Node 20 ships npm 10.8.2, which fails `npm ci` with EUSAGE
+# (#598, #604). Guarded by test/ci/workflow-node-version.test.ts.
+FROM node:22-alpine AS base
 WORKDIR /app
 RUN apk add --no-cache dumb-init
 

@@ -16,8 +16,10 @@ env:
   # 10.8.2 rejected those lockfiles with EUSAGE "package.json and
   # package-lock.json are in sync", so every Dependabot PR failed at `npm ci`
   # and needed a manual `npx npm@10.8.2 install --package-lock-only` rebase.
-  # Keep every CI setup-node pin in this repo on the same major (see
-  # test/ci/workflow-node-version.test.ts).
+  # Keep every CI setup-node pin AND every `FROM node:` base in the Dockerfiles
+  # the `docker` job builds on the same major — the image builds run `npm ci`
+  # too, so a Node 20 base reintroduces the identical failure (#604). Both
+  # surfaces are asserted by test/ci/workflow-node-version.test.ts.
   NODE_VERSION: '22'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/0xscada
