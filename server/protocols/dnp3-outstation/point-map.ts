@@ -67,6 +67,21 @@ export interface Dnp3PointDef {
   deadband?: number;
   /** Scale factor applied to the raw tag value before mapping (default 1). */
   scale?: number;
+  /**
+   * Opt this output point in as a control target (#464 listener wiring).
+   *
+   * Mapping a `binaryOutput`/`analogOutput` point only makes its STATUS
+   * readable. The production control sink
+   * (`tag-store-bridge.ts::createTagStoreControlSink`) refuses to write any
+   * point that is not explicitly `writable`, so the blast radius of enabling
+   * controls on a deployment is exactly the set of points somebody deliberately
+   * listed — the same rule the Modbus register map applies (#462).
+   *
+   * It has no effect on reads, and the pure `Dnp3ControlProcessor` does not
+   * consult it: a bespoke embedder that installs its own sink owns its own
+   * authorisation policy.
+   */
+  writable?: boolean;
 }
 
 export const Dnp3PointDefSchema = z.object({
@@ -78,6 +93,7 @@ export const Dnp3PointDefSchema = z.object({
   encoding: z.enum(['int32', 'float32']).optional(),
   deadband: z.number().nonnegative().optional(),
   scale: z.number().optional(),
+  writable: z.boolean().optional(),
 });
 
 export const Dnp3PointMapConfigSchema = z.object({
