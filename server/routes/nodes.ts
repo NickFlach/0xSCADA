@@ -1,5 +1,16 @@
 /**
- * Cross-Node State Query Routes (#454)
+ * Node / validator routes.
+ *
+ * Two independent operator surfaces share the `/api/nodes` prefix and are
+ * exported as two routers (both mounted in `server/routes.ts`):
+ *
+ *   - `nodeRoutes`  — cross-node signed state queries + the validator registry
+ *                     that backs them (#454). Documented immediately below.
+ *   - `nodesRoutes` — read-only validator attestation history for the Slashing
+ *                     & Liveness Visualizer (#456). Documented at the bottom of
+ *                     this file, next to its implementation.
+ *
+ * ── Cross-Node State Query Routes (#454) ────────────────────────────────────
  *
  * Operator endpoint to inspect a *specific* validator's view of a state key —
  * useful for divergence investigations ("what does validator 2 think about
@@ -97,6 +108,21 @@ import {
   type ValidatorPubkeyRecord,
   type ValidatorStateWatermarkRecord,
 } from "../storage";
+import type {
+  AttestationSourceUnavailableResponse,
+  SyntheticAttestationHistoryResponse,
+  TimelineWindow,
+  ValidatorHistory,
+} from "@shared/types/slashing";
+import {
+  SYNTHETIC_ATTESTATION_NOTICE,
+  SYNTHETIC_ATTESTATION_NOTICE_ASCII,
+  SYNTHETIC_GENERATOR_ID,
+} from "@shared/types/slashing";
+import {
+  DEFAULT_SYNTHETIC_SEED,
+  generateFleetHistory,
+} from "../demo/synthetic-attestations";
 
 const logger = pino({ name: "node-state-routes" });
 
@@ -717,6 +743,274 @@ function handleClientError(err: unknown, res: Response, nodeId: string, key: str
   logger.error({ err: (err as Error).message, nodeId, key }, "unexpected error proxying state query");
   return res.status(502).json({ error: "Failed to query validator state", code: "validator-error", nodeId });
 }
+
+// =============================================================================
+// Validator attestation history (issue #456)
+// =============================================================================
+
+/**
+ * Backs the Slashing & Liveness Visualizer. Read-only: this router never writes
+ * and never slashes anything.
+ *
+ * ── WHY THERE IS NO LIVE ATTESTATION FEED HERE ──────────────────────────────
+ *
+ * PR #514 originally served a seeded PRNG from `GET /api/nodes/history` as
+ * though it were attestation history. That was rejected, correctly: it violates
+ * the repository Integrity Rule ("NO fabricated data"). Before rewriting it the
+ * tree was searched for a real source, and there is none:
+ *
+ *   - `server/blockchain/validator-health.ts` is a real, tested monitor, but it
+ *     polls the oxscada node `GET /status` surface, whose schema
+ *     (height / peers / mempool / Kuramoto phase / uptime_ticks) carries no
+ *     per-slot attestation duty outcome at all. It also keeps only the latest
+ *     sample — there is no history — and it is not constructed anywhere in
+ *     production code, only in its own test.
+ *   - `server/blockchain.ts` is a declared stub: `isConnected()` returns false
+ *     and `getBlockchainHealth()` reports "Not implemented". Chain integration
+ *     is opt-in via ENABLE_BLOCKCHAIN and there is no attestation RPC behind it.
+ *   - The cross-node state surface above proxies a validator's view of a state
+ *     key. It is a point-in-time signed read, not a per-slot duty log, so it
+ *     cannot answer "did validator N attest in slot S?" either.
+ *   - Neither `shared/schema.ts` nor any migration has an attestations table,
+ *     and the batch-anchoring pipeline anchors Merkle roots of industrial
+ *     events — not validator duties.
+ *
+ * So this build genuinely cannot report attestation history. Rather than fake
+ * it, the endpoints are split by provenance:
+ *
+ *   GET /api/nodes/attestation-history
+ *       The live endpoint. Fails closed with HTTP 503 and a machine-readable
+ *       `attestation_source_unavailable` body while no feed exists. It never
+ *       falls back to synthetic records.
+ *
+ *   GET /api/nodes/attestation-history/demo
+ *       Explicitly-synthetic demo data for exercising the (real, unit-tested)
+ *       what-if simulator. OFF BY DEFAULT — 404 unless
+ *       SLASHING_DEMO_DATA=true. Every response is labelled `synthetic: true`,
+ *       carries the canonical notice string, and sets `X-Data-Provenance:
+ *       synthetic` plus an RFC 9111 `Warning: 199` header.
+ *
+ * When a real feed lands, register it with `registerLiveAttestationSource()`
+ * below and the live route serves it with `synthetic: false`. Do not point the
+ * live route at `server/demo/`.
+ */
+const attestationRouter = Router();
+
+/** Path of the synthetic demo endpoint, as advertised to clients. */
+export const DEMO_HISTORY_PATH = "/api/nodes/attestation-history/demo";
+/** Environment assignment that enables the synthetic demo endpoint. */
+export const DEMO_ENV_FLAG = "SLASHING_DEMO_DATA=true";
+
+// ---------------------------------------------------------------------------
+// Live attestation sources
+// ---------------------------------------------------------------------------
+
+/**
+ * A live per-validator attestation feed.
+ *
+ * `history` must return records that were OBSERVED. An implementation that
+ * computes, estimates, interpolates or randomises duty outcomes is not a live
+ * source and must not be registered here.
+ */
+export interface LiveAttestationSource {
+  /** Stable identifier reported to operators, e.g. "oxscada-rpc". */
+  readonly id: string;
+  history(
+    window: TimelineWindow,
+    validatorId?: string,
+  ): Promise<ValidatorHistory[]>;
+}
+
+/**
+ * The registered live source, if any.
+ *
+ * Nothing in this repository registers one today — see the section header — so
+ * the live route reports "unavailable". This is an empty registry, not a stub
+ * implementation: the moment a real feed calls
+ * `registerLiveAttestationSource()` at startup, the live route serves it.
+ */
+let liveAttestationSource: LiveAttestationSource | undefined;
+
+/**
+ * Wire a real observed-attestation feed into the live route. Intended to be
+ * called once during server startup by whatever module owns the feed.
+ */
+export function registerLiveAttestationSource(
+  source: LiveAttestationSource,
+): void {
+  liveAttestationSource = source;
+}
+
+/** Drop the registered live source (used by tests and by shutdown paths). */
+export function clearLiveAttestationSource(): void {
+  liveAttestationSource = undefined;
+}
+
+function resolveLiveAttestationSource(): LiveAttestationSource | undefined {
+  return liveAttestationSource;
+}
+
+/** Whether the synthetic demo endpoint is enabled. Off unless opted in. */
+export function isDemoDataEnabled(): boolean {
+  return process.env.SLASHING_DEMO_DATA === "true";
+}
+
+const NO_LIVE_SOURCE_REASON =
+  "No live attestation feed is compiled into this build. The oxscada node " +
+  "/status surface reports height, peers, mempool and Kuramoto phase but no " +
+  "per-slot attestation duty outcome, and nothing in this repository persists " +
+  "per-validator duty history.";
+
+function unavailableBody(): AttestationSourceUnavailableResponse {
+  return {
+    error: "attestation_source_unavailable",
+    synthetic: false,
+    provenance: "live",
+    message:
+      "No live attestation history is available. This endpoint fails closed " +
+      "rather than returning generated data.",
+    reason: NO_LIVE_SOURCE_REASON,
+    demo: {
+      available: isDemoDataEnabled(),
+      path: DEMO_HISTORY_PATH,
+      enabledBy: DEMO_ENV_FLAG,
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Validation
+// ---------------------------------------------------------------------------
+
+const HistoryQuerySchema = z.object({
+  /** Timeline window to return. */
+  window: z.enum(["1h", "24h", "7d"]).default("24h"),
+  /** Optional validator filter; when omitted, all known validators returned. */
+  validatorId: z.string().min(1).optional(),
+});
+
+const DemoHistoryQuerySchema = HistoryQuerySchema.extend({
+  /** Optional PRNG seed override, for reproducible demonstrations. */
+  seed: z.coerce.number().int().optional(),
+});
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+/**
+ * GET /api/nodes/attestation-history?window=24h[&validatorId=...]
+ *
+ * Live per-validator attestation history. Read-only. Returns 503 while no live
+ * source is wired — never synthetic records.
+ */
+attestationRouter.get(
+  "/attestation-history",
+  requireControlPlaneAccess({ roles: ["operator"] }),
+  async (req, res) => {
+    const parsed = HistoryQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid history query",
+        details: parsed.error.flatten(),
+      });
+    }
+
+    const source = resolveLiveAttestationSource();
+    if (!source) {
+      return res.status(503).json(unavailableBody());
+    }
+
+    const { window, validatorId } = parsed.data;
+    try {
+      const validators = await source.history(window, validatorId);
+      return res.json({
+        synthetic: false,
+        demo: false,
+        provenance: "live",
+        source: source.id,
+        window,
+        validators,
+      });
+    } catch (err) {
+      // A failing feed must surface as a failure, never as substituted data.
+      return res.status(502).json({
+        error: "attestation_source_error",
+        synthetic: false,
+        provenance: "live",
+        source: source.id,
+        message: err instanceof Error ? err.message : String(err),
+      });
+    }
+  },
+);
+
+/**
+ * GET /api/nodes/attestation-history/demo?window=24h[&validatorId=...][&seed=...]
+ *
+ * SYNTHETIC demo data. Disabled unless SLASHING_DEMO_DATA=true, in which case
+ * every response is labelled synthetic in the body and in response headers.
+ */
+attestationRouter.get(
+  "/attestation-history/demo",
+  requireControlPlaneAccess({ roles: ["operator"] }),
+  (req, res) => {
+    if (!isDemoDataEnabled()) {
+      return res.status(404).json({
+        error: "demo_data_disabled",
+        message:
+          "Synthetic slashing demo data is disabled. It is opt-in because it " +
+          "is fabricated, not measured.",
+        enabledBy: DEMO_ENV_FLAG,
+      });
+    }
+
+    const parsed = DemoHistoryQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      return res.status(400).json({
+        error: "Invalid demo history query",
+        details: parsed.error.flatten(),
+      });
+    }
+    const { window, validatorId, seed } = parsed.data;
+    const effectiveSeed = seed ?? DEFAULT_SYNTHETIC_SEED;
+    const anchorMs = Date.now();
+    const validators = generateFleetHistory(
+      window,
+      anchorMs,
+      effectiveSeed,
+      validatorId,
+    );
+
+    if (validatorId && validators.length === 0) {
+      return res.status(404).json({
+        error: `Unknown demo validator: ${validatorId}`,
+        synthetic: true,
+      });
+    }
+
+    // Provenance survives even if the body is truncated, proxied or logged.
+    // Header values must be ASCII, hence the plain restatement of the notice.
+    res.setHeader("X-Data-Provenance", "synthetic");
+    res.setHeader("Warning", `199 - "${SYNTHETIC_ATTESTATION_NOTICE_ASCII}"`);
+
+    const body: SyntheticAttestationHistoryResponse = {
+      synthetic: true,
+      demo: true,
+      provenance: "synthetic",
+      generator: SYNTHETIC_GENERATOR_ID,
+      notice: SYNTHETIC_ATTESTATION_NOTICE,
+      seed: effectiveSeed,
+      window,
+      anchorMs,
+      validators,
+    };
+    return res.json(body);
+  },
+);
+
+/** Attestation-history router (#456), mounted alongside `nodeRoutes`. */
+export { attestationRouter as nodesRoutes };
 
 /** Default router instance for mounting in `server/routes.ts`. */
 export const nodeRoutes = createNodeRoutes();

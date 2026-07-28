@@ -161,6 +161,26 @@ POST /api/alarms/:id/clear
 
 ---
 
+## Validator Attestation History
+
+```
+GET /api/nodes/attestation-history?window=24h
+GET /api/nodes/attestation-history/demo?window=24h   # synthetic, opt-in
+```
+
+Read-only history behind the Slashing & Liveness Visualizer. Both routes require
+an operator `X-API-Key`.
+
+This build has **no live attestation feed**, so the live route fails closed with
+`503 attestation_source_unavailable` and never substitutes generated records. The
+`/demo` route serves clearly-labelled synthetic PRNG output and is disabled
+unless the server runs with `SLASHING_DEMO_DATA=true`.
+
+See [attestation-history.md](./attestation-history.md) for the full contract and
+for how to register a real feed.
+
+---
+
 ## Example Clients
 
 ### curl
