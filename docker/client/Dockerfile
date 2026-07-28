@@ -1,5 +1,8 @@
 # 0xSCADA Client - React app with nginx
-FROM node:20-alpine AS build
+# Node 22: its bundled npm 10.9+ reads the lockfile format current npm and
+# Dependabot emit. Node 20 ships npm 10.8.2, which fails `npm ci` with EUSAGE
+# (#598, #604). Guarded by test/ci/workflow-node-version.test.ts.
+FROM node:22-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci

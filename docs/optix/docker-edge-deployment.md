@@ -17,7 +17,7 @@ See `docker/edge/Dockerfile` for the production-ready image.
 
 ```dockerfile
 # Stage 1: Build
-FROM node:20-alpine AS builder
+FROM node:22-alpine AS builder
 WORKDIR /app
 COPY package*.json ./
 RUN npm ci
@@ -25,7 +25,7 @@ COPY . .
 RUN npm run build
 
 # Stage 2: Production
-FROM node:20-alpine
+FROM node:22-alpine
 WORKDIR /app
 COPY --from=builder /app/dist ./dist
 COPY --from=builder /app/node_modules ./node_modules
@@ -96,7 +96,9 @@ For managing many edge devices:
 
 ## Image Optimization
 
-- Use `node:20-alpine` (130 MB vs 1 GB for full Debian)
+- Use `node:22-alpine` — far smaller than the Debian-based `node:22`, and on
+  the Node major whose bundled npm reads current lockfiles (see
+  `test/ci/workflow-node-version.test.ts`)
 - Multi-stage builds eliminate dev dependencies
 - `.dockerignore` excludes node_modules, .git, docs, tests
 - Pin exact versions in package-lock.json for reproducibility
