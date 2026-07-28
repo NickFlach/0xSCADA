@@ -169,6 +169,18 @@ export interface CorrelationMetrics {
   trackedAlarms: number;
 }
 
+/**
+ * `process-local` — correlation state lives only in this process's heap. It is
+ *   lost on restart and a second replica may hold a different view, so
+ *   suppression stays off unless an operator opts into a single-process
+ *   evaluation.
+ * `durable` — correlation state is projected from the shared journal
+ *   (`alarm_correlation_*`, migration 0015). Every replica applies the same
+ *   totally-ordered entries, so membership, root cause and suppression agree
+ *   across replicas and survive restart.
+ */
+export type CorrelationCoordinationMode = 'process-local' | 'durable';
+
 /** Stable correlation metadata attached to each live alarm snapshot. */
 export interface AlarmCorrelationSnapshot {
   groupId: string | null;
@@ -176,8 +188,14 @@ export interface AlarmCorrelationSnapshot {
   rootCauseAlarmId: string | null;
   suppressed: boolean;
   isRootCause: boolean;
-  /** Correlation state is process-local until the durable coordination issue lands. */
-  coordinationMode: 'process-local';
+  coordinationMode: CorrelationCoordinationMode;
+  /**
+   * Journal sequence of the operation that produced this state, when running
+   * durably. Monotonic per alarm and shared by all replicas, so a consumer
+   * receiving the same alarm from two instances keeps the higher seq and drops
+   * the echo. `null` in process-local mode, where no shared order exists.
+   */
+  seq: number | null;
 }
 
 /** Canonical alarm payload emitted to live WebSocket consumers. */
@@ -185,4 +203,62 @@ export interface AlarmWireSnapshot extends CorrelatedAlarm {
   triggeredAt: string;
   tagValue?: number | string;
   correlation: AlarmCorrelationSnapshot;
+}
+
+// ── Durable coordination ──────────────────────────────────────────────────
+
+/** Operations the shared journal orders. */
+export type CorrelationJournalOp =
+  | 'ingest'
+  | 'acknowledge'
+  | 'clear'
+  | 'rule-upsert'
+  | 'rule-remove'
+  | 'rule-enabled'
+  | 'topology-upsert'
+  | 'topology-remove'
+  | 'policy-set'
+  /**
+   * Idle-group housekeeping. Journaled rather than run per replica: closing an
+   * idle group un-suppresses its members, so a sweep that ran on one replica
+   * and not another would leave the two disagreeing about which alarms an
+   * operator can see. The entry carries the sweep clock so every replica
+   * applies the identical decision.
+   */
+  | 'sweep';
+
+/** One durable, totally-ordered correlation operation. */
+export interface CorrelationJournalEntry {
+  seq: number;
+  idempotencyKey: string;
+  op: CorrelationJournalOp;
+  payload: Record<string, unknown>;
+  /** Authenticated control-plane principal — never taken from a request body. */
+  principal: string;
+  originInstance: string;
+  recordedAt: number;
+}
+
+/**
+ * Observable coordination health. `healthy: false` is not advisory: the
+ * runtime has already forced suppression off and restored every suppressed
+ * alarm by the time this reports degraded.
+ */
+export interface CorrelationCoordinationHealth {
+  healthy: boolean;
+  mode: CorrelationCoordinationMode;
+  backend: 'postgres' | 'sqlite' | 'unopened' | 'none';
+  /** Highest journal seq this replica has applied to its own engine. */
+  appliedSeq: number;
+  /** Watermark of the shared materialised projection. */
+  materializedSeq: number;
+  /** Operator's persisted intent, independent of whether it is being honoured. */
+  policyEnabledIntent: boolean;
+  /** Whether suppression is actually active in the engine right now. */
+  suppressionActive: boolean;
+  /** True when a coordination failure, not the operator, turned suppression off. */
+  suppressionDisabledByHealth: boolean;
+  lastError: string | null;
+  lastHealthyAt: number | null;
+  instanceId: string;
 }

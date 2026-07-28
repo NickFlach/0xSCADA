@@ -51,11 +51,30 @@ configuration authority:
 <generated-ingest-key>:alarm-ingester:alarms.ingest
 ```
 
-Correlation state is process-local until
-[#573](https://github.com/NickFlach/0xSCADA/issues/573) lands, so suppression
-defaults off. Enabling it also requires the explicit
-`ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION=true` startup flag; use that
-escape hatch only for a single-process evaluation.
+Suppression defaults off, and `alarms.configure` alone is not enough to turn it
+on. `PUT /api/alarm-correlation/suppression-policy` with `enabled: true` is
+refused with `409` unless one of the following holds:
+
+- **Durable coordination is healthy.** Start the server with
+  `ALARM_CORRELATION_DURABLE=true` and a reachable database (migration 0015).
+  Correlation state is then persisted and ordered through a shared journal, so
+  every replica agrees and the state survives restart.
+  `GET /api/alarm-correlation/coordination` reports the live health, and the
+  policy route reads the same value rather than trusting the flag.
+- **An explicit single-process evaluation** via
+  `ALARM_CORRELATION_ALLOW_EPHEMERAL_SUPPRESSION=true`. Use that escape hatch
+  only for a single-process evaluation; state is lost on restart and a second
+  replica may hold a different view.
+
+If durable coordination later fails, the server disables suppression on its own,
+restores every suppressed alarm, re-broadcasts them, and reports
+`coordinationMode: "process-local"`. Losing coordination can only reveal more
+alarms, never fewer.
+
+Configuration mutations (`rules`, `topology`, `suppression-policy`) accept an
+optional `Idempotency-Key` header so a retry is applied once. Without it each
+request is a distinct operation, because setting a rule to A, then B, then back
+to A is genuinely three changes.
 
 ## Docker Compose
 

@@ -473,6 +473,50 @@ export const predictiveTagThresholds = sqliteTable("predictive_tag_thresholds", 
     .$defaultFn(() => new Date()),
 });
 
+// ─── Alarm Correlation Coordination (ADR-0026 / ADR-0013 [13.2], #573) ───────
+// Dev-mode parity with `shared/schema.ts`, whose block comment carries the full
+// ordering / identifier / idempotency / fail-safe rationale. Production DDL is
+// migrations/0015_alarm_correlation_coordination.sql; the physical SQLite DDL
+// lives in server/services/alarm-correlation/store.ts. Dialect mappings follow
+// this file's conventions: jsonb → text(mode json), timestamptz → integer
+// timestamp_ms, bigint → integer, boolean → integer(mode boolean).
+//
+// These tables are safety state, not a dev convenience: on either dialect they
+// are what makes a suppressed alarm restorable. Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+
+// `seq` is INTEGER PRIMARY KEY AUTOINCREMENT in the physical DDL, which is
+// SQLite's monotonic-never-reused rowid — the same guarantee Postgres gives
+// with BIGSERIAL, and the reason group ids derived from it can never collide.
+export const alarmCorrelationJournal = sqliteTable("alarm_correlation_journal", {
+  seq: integer("seq").primaryKey({ autoIncrement: true }),
+  idempotencyKey: text("idempotency_key").notNull().unique(),
+  op: text("op").notNull(),
+  payload: text("payload", { mode: "json" }).notNull(),
+  principal: text("principal").notNull(),
+  originInstance: text("origin_instance").notNull(),
+  recordedAt: integer("recorded_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const alarmCorrelationGroups = sqliteTable("alarm_correlation_groups", {
+  id: text("id").primaryKey(),
+  state: text("state").notNull(),
+  rootCauseAlarmId: text("root_cause_alarm_id").notNull(),
+  formedByRuleId: text("formed_by_rule_id").notNull(),
+  joinedVia: text("joined_via", { mode: "json" }).notNull(),
+  maxSeverity: text("max_severity").notNull(),
+  createdAtMs: integer("created_at_ms").notNull(),
+  lastAlarmAtMs: integer("last_alarm_at_ms").notNull(),
+  closedAtMs: integer("closed_at_ms"),
+  closeReason: text("close_reason"),
+  updatedSeq: integer("updated_seq").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 // No `status` column, matching Postgres: a restored simulation is always idle.
 export const twinCheckpoints = sqliteTable("twin_checkpoints", {
   modelId: text("model_id")
@@ -505,6 +549,81 @@ export const predictiveAlerts = sqliteTable("predictive_alerts", {
   acknowledged: integer("acknowledged", { mode: "boolean" }).notNull().default(false),
   acknowledgedBy: text("acknowledged_by"),
   acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
+});
+
+export const alarmCorrelationAlarms = sqliteTable("alarm_correlation_alarms", {
+  id: text("id").primaryKey(),
+  groupId: text("group_id"),
+  name: text("name").notNull(),
+  tagId: text("tag_id").notNull(),
+  equipmentId: text("equipment_id"),
+  siteId: text("site_id"),
+  processArea: text("process_area"),
+  severity: text("severity").notNull(),
+  state: text("state").notNull(),
+  message: text("message").notNull(),
+  eventTimeMs: integer("event_time_ms").notNull(),
+  alarmValue: text("alarm_value", { mode: "json" }),
+  alarmLimit: text("alarm_limit", { mode: "json" }),
+  source: text("source"),
+  acknowledgedBy: text("acknowledged_by"),
+  clearedBy: text("cleared_by"),
+  suppressed: integer("suppressed", { mode: "boolean" }).default(false).notNull(),
+  isRootCause: integer("is_root_cause", { mode: "boolean" }).default(false).notNull(),
+  joinedViaRuleId: text("joined_via_rule_id"),
+  ingestSeq: integer("ingest_seq").notNull(),
+  updatedSeq: integer("updated_seq").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const alarmCorrelationRules = sqliteTable("alarm_correlation_rules", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  type: text("type").notNull(),
+  enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+  priority: integer("priority").notNull(),
+  config: text("config", { mode: "json" }).notNull(),
+  updatedBy: text("updated_by").notNull(),
+  updatedSeq: integer("updated_seq").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const alarmCorrelationEquipment = sqliteTable("alarm_correlation_equipment", {
+  equipmentId: text("equipment_id").primaryKey(),
+  name: text("name"),
+  parentId: text("parent_id"),
+  causalDownstream: text("causal_downstream", { mode: "json" }).notNull(),
+  siteId: text("site_id"),
+  processArea: text("process_area"),
+  updatedBy: text("updated_by").notNull(),
+  updatedSeq: integer("updated_seq").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+export const alarmCorrelationState = sqliteTable("alarm_correlation_state", {
+  id: text("id").primaryKey(),
+  appliedSeq: integer("applied_seq").default(0).notNull(),
+  suppressionEnabled: integer("suppression_enabled", { mode: "boolean" })
+    .default(false).notNull(),
+  neverSuppressAtOrAbove: text("never_suppress_at_or_above")
+    .default("critical").notNull(),
+  unsuppressOnRootClear: integer("unsuppress_on_root_clear", { mode: "boolean" })
+    .default(true).notNull(),
+  alarmsIngested: integer("alarms_ingested").default(0).notNull(),
+  groupsCreated: integer("groups_created").default(0).notNull(),
+  groupsClosed: integer("groups_closed").default(0).notNull(),
+  alarmsSuppressed: integer("alarms_suppressed").default(0).notNull(),
+  alarmsUnsuppressed: integer("alarms_unsuppressed").default(0).notNull(),
+  updatedBy: text("updated_by").default("system").notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 // Basic exports for compatibility
