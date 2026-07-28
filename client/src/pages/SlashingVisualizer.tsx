@@ -1,8 +1,10 @@
 /**
  * Slashing & Liveness Visualizer (issue #456).
  *
- * Per-validator attestation participation timeline (hits / misses / late) over a
- * selectable window (1h / 24h / 7d), with consecutive-miss "liveness fault" runs
+ * Per-validator participation timeline (hits / misses / late) over a selectable
+ * window (1h / 24h / 7d) — of whatever the loaded source measured, which in this
+ * build is observed liveness, not consensus attestation duties — with
+ * consecutive-miss "liveness fault" runs
  * highlighted, plus a "what-if" slashing-rule simulator. The operator types a
  * proposed rule (e.g. "slash 1% per miss after 10 in 1h"); the UI projects the
  * hypothetical penalties against the loaded history.
@@ -11,12 +13,19 @@
  * server state. All penalty math is delegated to the pure simulator in
  * ../lib/slashing-simulator so it can be unit-tested independently of the UI.
  *
- * PROVENANCE. There is no live attestation feed in this build (see
- * server/routes/nodes.ts). The page therefore starts by asking the LIVE
- * endpoint, and when that fails closed it says so plainly instead of drawing a
- * chart. Synthetic demo data must be requested deliberately, and whenever it is
- * loaded the page is covered in unmistakable "SYNTHETIC" markings: a sticky
- * banner, a per-validator badge, a watermarked timeline and a modified heading.
+ * PROVENANCE. The page starts by asking the LIVE endpoint, and when that fails
+ * closed it says so plainly instead of drawing a chart. Synthetic demo data
+ * must be requested deliberately, and whenever it is loaded the page is covered
+ * in unmistakable "SYNTHETIC" markings: a sticky banner, a per-validator badge,
+ * a watermarked timeline and a modified heading.
+ *
+ * SEMANTICS. Consensus attestation duty history is unavailable in this build.
+ * The live source it can serve is OBSERVED LIVENESS — whether each configured
+ * node answered a poll round and whether the height it reported advanced — so
+ * every live response carries a descriptor and this page renders it above the
+ * timelines. `hit` / `miss` / `late` are ambiguous words on their own, and an
+ * operator must never read "the node did not answer this poll round" as a
+ * missed consensus duty.
  */
 
 import React from "react";
@@ -27,7 +36,9 @@ import {
   type TimelineBucket,
 } from "../lib/slashing-simulator";
 import type {
+  AttestationSourceDescriptor,
   AttestationSourceUnavailableResponse,
+  LiveAttestationHistoryResponse,
   SimulationResult,
   SlashingRule,
   SyntheticAttestationHistoryResponse,
@@ -54,19 +65,16 @@ const C = {
 const LIVE_HISTORY_PATH = "/api/nodes/attestation-history";
 const DEMO_HISTORY_PATH = "/api/nodes/attestation-history/demo";
 
-/** Live payload shape (served only once a real feed is registered server-side). */
-interface LiveHistoryResponse {
-  synthetic: false;
-  demo: false;
-  provenance: "live";
-  source: string;
-  window: TimelineWindow;
-  validators: ValidatorHistory[];
-}
-
 /** What the page currently holds, discriminated by provenance. */
 type LoadedHistory =
-  | { kind: "live"; window: TimelineWindow; anchorMs: number; validators: ValidatorHistory[]; source: string }
+  | {
+      kind: "live";
+      window: TimelineWindow;
+      anchorMs: number;
+      validators: ValidatorHistory[];
+      source: string;
+      observation: AttestationSourceDescriptor;
+    }
   | {
       kind: "synthetic";
       window: TimelineWindow;
@@ -168,6 +176,99 @@ const SyntheticBanner: React.FC<{ notice: string; generator: string; seed: numbe
   </div>
 );
 
+/** Human-friendly cadence/retention rendering, e.g. "60s" / "7d". */
+function formatMs(ms: number | null): string {
+  if (ms === null) return "event-driven";
+  if (ms >= 24 * 60 * 60 * 1000) return `${(ms / (24 * 60 * 60 * 1000)).toFixed(0)}d`;
+  if (ms >= 60 * 60 * 1000) return `${(ms / (60 * 60 * 1000)).toFixed(0)}h`;
+  if (ms >= 1000) return `${(ms / 1000).toFixed(0)}s`;
+  return `${ms}ms`;
+}
+
+/**
+ * What the live source actually measured, and what each status means for it.
+ *
+ * This panel is not decoration. `miss` from the observed-liveness source means
+ * "the node did not answer this poll round" — it is NOT a missed consensus
+ * attestation duty, and nothing else on the page would tell an operator that.
+ */
+const ObservationSemantics: React.FC<{ descriptor: AttestationSourceDescriptor }> = ({
+  descriptor,
+}) => {
+  const isConsensus = descriptor.kind === "consensus-attestation";
+  return (
+    <div
+      data-testid="observation-descriptor"
+      style={{
+        backgroundColor: C.panel,
+        border: `1px solid ${isConsensus ? C.border : C.accent}`,
+        borderRadius: 8,
+        padding: 16,
+        marginBottom: 20,
+      }}
+    >
+      <div style={{ fontSize: 15, fontWeight: "bold", marginBottom: 6 }}>
+        Data source: <code>{descriptor.sourceId}</code> — {descriptor.kind}
+      </div>
+      <p style={{ color: C.muted, fontSize: 13, margin: "0 0 10px", lineHeight: 1.6 }}>
+        {descriptor.summary}
+      </p>
+      <div style={{ fontSize: 12, color: C.muted, marginBottom: 10 }}>
+        Measured by <code>{descriptor.method.transport}</code>{" "}
+        <code>{descriptor.method.endpoint}</code> every{" "}
+        <strong style={{ color: C.text }}>{formatMs(descriptor.method.pollIntervalMs)}</strong>
+        {" · "}fields <code>{descriptor.method.fields.join(", ")}</code>
+        {" · "}retained {formatMs(descriptor.method.retentionMs)}
+        {" · "}{descriptor.roundIdentifier.meaning}
+      </div>
+      <dl style={{ margin: 0, fontSize: 13, lineHeight: 1.6 }}>
+        {(
+          [
+            ["Hit", descriptor.statusSemantics.hit, C.hit],
+            ["Late", descriptor.statusSemantics.late, C.late],
+            ["Miss", descriptor.statusSemantics.miss, C.miss],
+          ] as const
+        ).map(([term, definition, color]) => (
+          <div key={term} style={{ display: "flex", gap: 10, marginBottom: 4 }}>
+            <dt
+              style={{
+                color,
+                fontWeight: "bold",
+                minWidth: 44,
+                flexShrink: 0,
+              }}
+            >
+              {term}
+            </dt>
+            <dd style={{ margin: 0, color: C.muted }}>{definition}</dd>
+          </div>
+        ))}
+      </dl>
+      {!descriptor.consensusAttestation.available && (
+        <div
+          data-testid="no-consensus-attestation"
+          style={{
+            marginTop: 10,
+            paddingTop: 10,
+            borderTop: `1px solid ${C.border}`,
+            fontSize: 12,
+            color: C.late,
+            lineHeight: 1.6,
+          }}
+        >
+          <strong>Consensus attestation duty history is not available.</strong>{" "}
+          {descriptor.consensusAttestation.note}
+        </div>
+      )}
+      {!descriptor.stake.available && (
+        <div style={{ marginTop: 8, fontSize: 12, color: C.muted, lineHeight: 1.6 }}>
+          {descriptor.stake.note}
+        </div>
+      )}
+    </div>
+  );
+};
+
 // --- per-validator card --------------------------------------------------------
 
 const ValidatorCard: React.FC<{
@@ -176,7 +277,22 @@ const ValidatorCard: React.FC<{
   rule: SlashingRule;
   anchorMs: number;
   synthetic: boolean;
-}> = ({ history, window, rule, anchorMs, synthetic }) => {
+  /**
+   * Whether `history.stake` is a measured value. The observed-liveness source
+   * has no stake to read, so absolute penalty amounts are suppressed rather
+   * than rendered as a confident "≈ 0 stake".
+   */
+  stakeAvailable: boolean;
+  /**
+   * True when the live source declared `kind: "observed-liveness"`.
+   *
+   * "Duties" and "slots" are CONSENSUS vocabulary. Applying them to poll
+   * observations would re-introduce, one line below the descriptor panel, the
+   * exact confusion that panel exists to prevent — so the card counts poll
+   * rounds when that is what the records are.
+   */
+  observedLiveness: boolean;
+}> = ({ history, window, rule, anchorMs, synthetic, stakeAvailable, observedLiveness }) => {
   // Restrict to the selected window, then project the rule (pure).
   const result: SimulationResult = React.useMemo(
     () => simulateRule(history, rule, window, anchorMs),
@@ -229,15 +345,23 @@ const ValidatorCard: React.FC<{
           )}
         </div>
         <div style={{ fontSize: 13, color: C.muted }}>
-          {synthetic ? "Notional stake" : "Stake"}:{" "}
-          <strong style={{ color: C.text }}>{history.stake.toLocaleString()}</strong>
+          {stakeAvailable ? (
+            <>
+              {synthetic ? "Notional stake" : "Stake"}:{" "}
+              <strong style={{ color: C.text }}>{history.stake.toLocaleString()}</strong>
+            </>
+          ) : (
+            <span data-testid="stake-not-observed">Stake: not observed</span>
+          )}
         </div>
       </div>
 
       {/* participation stats */}
       <div style={{ display: "flex", gap: 24, fontSize: 13, marginBottom: 12 }}>
         <span>Participation: <strong style={{ color: rateColor }}>{ratePct}%</strong></span>
-        <span style={{ color: C.muted }}>Duties: {summary.total}</span>
+        <span style={{ color: C.muted }}>
+          {observedLiveness ? "Poll rounds" : "Duties"}: {summary.total}
+        </span>
         <span style={{ color: C.hit }}>Hits: {summary.hits}</span>
         <span style={{ color: C.late }}>Late: {summary.late}</span>
         <span style={{ color: C.miss }}>Misses: {summary.misses}</span>
@@ -280,7 +404,8 @@ const ValidatorCard: React.FC<{
                 marginBottom: 4,
               }}
             >
-              {run.length} consecutive misses — slots {run.startSlot}…{run.endSlot}
+              {run.length} consecutive misses — {observedLiveness ? "poll rounds" : "slots"}{" "}
+              {run.startSlot}…{run.endSlot}
               {"  "}
               <span style={{ color: C.muted }}>
                 ({new Date(run.startTimestamp).toLocaleTimeString()} → {new Date(run.endTimestamp).toLocaleTimeString()})
@@ -306,9 +431,15 @@ const ValidatorCard: React.FC<{
           <span style={{ fontSize: 28, fontWeight: "bold", color: result.totalPenaltyPct > 0 ? C.miss : C.hit }}>
             {result.totalPenaltyPct.toFixed(2)}%
           </span>
-          <span style={{ fontSize: 14, color: C.muted }}>
-            ≈ {result.totalPenaltyAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} stake
-          </span>
+          {stakeAvailable ? (
+            <span style={{ fontSize: 14, color: C.muted }}>
+              ≈ {result.totalPenaltyAmount.toLocaleString(undefined, { maximumFractionDigits: 2 })} stake
+            </span>
+          ) : (
+            <span style={{ fontSize: 13, color: C.muted, fontStyle: "italic" }}>
+              absolute amount not computed — no stake was observed
+            </span>
+          )}
           <span style={{ fontSize: 13, color: C.muted }}>
             {result.penalties.filter((p) => p.penaltyPct > 0).length} penalised miss(es)
           </span>
@@ -384,7 +515,7 @@ const SlashingVisualizer: React.FC = () => {
           return;
         }
 
-        const body = (await res.json()) as LiveHistoryResponse;
+        const body = (await res.json()) as LiveAttestationHistoryResponse;
         if (cancelled) return;
         setUnavailable(null);
         setHistory({
@@ -397,6 +528,7 @@ const SlashingVisualizer: React.FC = () => {
           }, 0) || Date.now(),
           validators: body.validators,
           source: body.source,
+          observation: body.observation,
         });
       } catch (e: unknown) {
         if (!cancelled) {
@@ -429,6 +561,13 @@ const SlashingVisualizer: React.FC = () => {
 
   const isSynthetic = history?.kind === "synthetic";
   const anchorMs = history?.anchorMs ?? Date.now();
+  const descriptor = history?.kind === "live" ? history.observation : null;
+  // Synthetic profiles carry a notional stake; a live source only has one if it
+  // says so. Absent a claim, absolute amounts are not rendered.
+  const stakeAvailable = isSynthetic || (descriptor?.stake.available ?? false);
+  // Only an observed-liveness source counts poll rounds; a real duty feed (or
+  // the synthetic profiles, which imitate one) keeps the consensus wording.
+  const observedLiveness = descriptor?.kind === "observed-liveness";
 
   return (
     <div style={{ padding: 24, backgroundColor: C.bg, color: C.text, minHeight: "100vh" }}>
@@ -450,8 +589,9 @@ const SlashingVisualizer: React.FC = () => {
           )}
         </h1>
         <p style={{ color: C.muted, fontSize: 15, margin: 0 }}>
-          Per-validator attestation participation, liveness-fault detection, and a what-if
-          slashing-rule simulator. Read-only — nothing is slashed.
+          {descriptor && descriptor.kind === "observed-liveness"
+            ? "Per-validator OBSERVED LIVENESS, liveness-fault detection, and a what-if slashing-rule simulator. These records are poll observations, not consensus attestation duties. Read-only — nothing is slashed."
+            : "Per-validator attestation participation, liveness-fault detection, and a what-if slashing-rule simulator. Read-only — nothing is slashed."}
         </p>
       </div>
 
@@ -599,6 +739,9 @@ const SlashingVisualizer: React.FC = () => {
         </div>
       )}
 
+      {/* What the live source measured, and what each status means for it. */}
+      {!loading && !error && descriptor && <ObservationSemantics descriptor={descriptor} />}
+
       {!loading && !error && history && history.validators.length === 0 && (
         <div style={{ color: C.muted }}>No validators reported.</div>
       )}
@@ -614,6 +757,8 @@ const SlashingVisualizer: React.FC = () => {
             rule={rule}
             anchorMs={anchorMs}
             synthetic={isSynthetic}
+            stakeAvailable={stakeAvailable}
+            observedLiveness={observedLiveness}
           />
         ))}
 

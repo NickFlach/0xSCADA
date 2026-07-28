@@ -332,6 +332,36 @@ export const validatorStateWatermarks = sqliteTable("validator_state_watermarks"
   updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// ─── Observed Liveness Observations (#456) ───────────────────────────────────
+// Dev-mode parity with the Postgres table in `shared/schema.ts`, created in
+// production by migrations/0012_validator_liveness_observations.sql. The
+// physical SQLite DDL lives in `validatorLivenessSqliteSchema` (server/storage.ts)
+// and is applied on every open. Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+//
+// This table records OBSERVED LIVENESS — whether each configured node answered
+// a poll round and whether the chain height it reported advanced. It does NOT
+// record consensus attestation duty outcomes; this build has no source for
+// those. See the Postgres definition for the full per-status semantics.
+//
+// timestamptz → integer timestamp, bigint → integer, double precision → real.
+export const validatorLivenessObservations = sqliteTable("validator_liveness_observations", {
+  id: text("id").primaryKey(),
+  validatorId: text("validator_id").notNull(),
+  observedAt: integer("observed_at", { mode: "timestamp" }).notNull(),
+  roundSeq: integer("round_seq").notNull(),
+  status: text("status").notNull(),
+  sourceNodeUrl: text("source_node_url").notNull(),
+  observedHeight: integer("observed_height"),
+  previousHeight: integer("previous_height"),
+  observedUptimeTicks: integer("observed_uptime_ticks"),
+  reportedNodeId: text("reported_node_id"),
+  localPhase: real("local_phase"),
+  meanPhase: real("mean_phase"),
+  detail: text("detail"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
 // ─── Blueprint Safe-State audit trail (#459) ─────────────────────────────────
 // Dev-mode parity with the Postgres table in `shared/schema.ts`, which is
 // created in production by migrations/0009_blueprint_safe_state_log.sql. The

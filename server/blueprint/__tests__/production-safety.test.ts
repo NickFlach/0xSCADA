@@ -63,6 +63,7 @@ describe("safe-state audit migration alignment", () => {
       { idx: 6, tag: "0009_blueprint_safe_state_log" },
       { idx: 7, tag: "0010_pid_tuning_audit" },
       { idx: 8, tag: "0011_agent_marketplace" },
+      { idx: 9, tag: "0012_validator_liveness_observations" },
     ]);
     // `when` must stay monotonic so drizzle-kit orders the journal correctly.
     const timestamps = journal.entries.map((e) => e.when);

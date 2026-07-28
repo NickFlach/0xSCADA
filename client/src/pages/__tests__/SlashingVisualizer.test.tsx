@@ -2,9 +2,13 @@
  * UI provenance tests for the Slashing & Liveness Visualizer (issue #456).
  *
  * The rejected implementation drew a chart from PRNG output with nothing in the
- * UI to say so. These tests assert the two user-visible halves of the fix:
+ * UI to say so. These tests assert the user-visible halves of the fix:
  *  - when the live source is unavailable the page says so and draws no chart,
- *  - when synthetic demo data is loaded the page is unmistakably marked.
+ *  - when synthetic demo data is loaded the page is unmistakably marked,
+ *  - when a live OBSERVED-LIVENESS source is served, the page states what was
+ *    measured and what `miss` means for it. That last one is not cosmetic: an
+ *    operator must never read "the node did not answer this poll round" as a
+ *    missed consensus attestation duty.
  */
 
 import React from "react";
@@ -14,6 +18,7 @@ import SlashingVisualizer from "../SlashingVisualizer";
 import {
   SYNTHETIC_ATTESTATION_NOTICE,
   type AttestationSourceUnavailableResponse,
+  type LiveAttestationHistoryResponse,
   type SyntheticAttestationHistoryResponse,
 } from "@shared/types/slashing";
 
@@ -69,6 +74,60 @@ function jsonResponse(body: unknown, status: number): Response {
   } as unknown as Response;
 }
 
+function liveBody(): LiveAttestationHistoryResponse {
+  return {
+    synthetic: false,
+    demo: false,
+    provenance: "live",
+    source: "oxscada-observed-liveness",
+    window: "24h",
+    observation: {
+      kind: "observed-liveness",
+      sourceId: "oxscada-observed-liveness",
+      summary:
+        "Observed liveness of each configured oxscada node: whether it answered " +
+        "each poll round, and whether the chain height it reported advanced.",
+      method: {
+        transport: "http-get",
+        endpoint: "/status",
+        fields: ["height", "uptime_ticks"],
+        pollIntervalMs: 60_000,
+        retentionMs: 7 * 24 * 60 * 60 * 1000,
+        maxRecordsPerQuery: 100_000,
+      },
+      statusSemantics: {
+        hit: "The node answered this poll round and the height it reported advanced.",
+        miss: "The node did not answer this poll round.",
+        late: "The node answered but the height it reported did not advance.",
+      },
+      roundIdentifier: {
+        field: "slot",
+        meaning: "Monotonic ordinal of the poll round — not a consensus slot.",
+      },
+      stake: {
+        available: false,
+        note: "No stake source exists in this build, so stake is reported as 0.",
+      },
+      consensusAttestation: {
+        available: false,
+        note: "The oxscada /status surface exposes no per-slot duty outcome.",
+      },
+    },
+    validators: [
+      {
+        validatorId: "10.0.0.11:9090",
+        label: "10.0.0.11:9090 (observed liveness)",
+        stake: 0,
+        records: [
+          { slot: 1, timestamp: ANCHOR - 120_000, status: "late", observedHeight: 900 },
+          { slot: 2, timestamp: ANCHOR - 60_000, status: "miss", observedHeight: null },
+          { slot: 3, timestamp: ANCHOR, status: "hit", observedHeight: 901 },
+        ],
+      },
+    ],
+  };
+}
+
 /** Route the page's two endpoints to canned responses. */
 function stubFetch(demoAvailable: boolean): void {
   vi.stubGlobal(
@@ -81,6 +140,11 @@ function stubFetch(demoAvailable: boolean): void {
       return jsonResponse(unavailableBody(demoAvailable), 503);
     }),
   );
+}
+
+/** Serve the live endpoint an observed-liveness payload. */
+function stubLiveFetch(): void {
+  vi.stubGlobal("fetch", vi.fn(async () => jsonResponse(liveBody(), 200)));
 }
 
 afterEach(() => {
@@ -131,5 +195,58 @@ describe("SlashingVisualizer provenance", () => {
     // The unavailable panel is gone, and the simulator actually ran.
     expect(screen.queryByTestId("no-live-source")).toBeNull();
     expect(screen.getByText(/Aurora \(demo\)/)).toBeTruthy();
+  });
+});
+
+describe("SlashingVisualizer live observed-liveness semantics", () => {
+  it("states what was measured and what each status means", async () => {
+    stubLiveFetch();
+    render(<SlashingVisualizer />);
+
+    const panel = await screen.findByTestId("observation-descriptor");
+
+    // Which source, and what class of thing it measured.
+    expect(panel.textContent).toContain("oxscada-observed-liveness");
+    expect(panel.textContent).toContain("observed-liveness");
+    // How it was measured, and how often.
+    expect(panel.textContent).toContain("/status");
+    expect(panel.textContent).toContain("60s");
+    // The status definitions verbatim from the server — this is the line that
+    // stops a "miss" being read as a missed consensus duty.
+    expect(panel.textContent).toContain("The node did not answer this poll round.");
+    expect(panel.textContent).toContain("the height it reported did not advance");
+    // And the plain statement that duty history is still unavailable.
+    expect(
+      screen.getByTestId("no-consensus-attestation").textContent,
+    ).toContain("Consensus attestation duty history is not available");
+  });
+
+  it("counts poll rounds rather than consensus duties", async () => {
+    stubLiveFetch();
+    render(<SlashingVisualizer />);
+
+    await screen.findByTestId("observation-descriptor");
+
+    // "Duties" is consensus vocabulary. These records are poll observations, and
+    // saying "Duties" one line below the descriptor panel would re-introduce the
+    // exact confusion that panel exists to prevent.
+    expect(screen.getByText(/Poll rounds: 3/)).toBeTruthy();
+    expect(screen.queryByText(/Duties:/)).toBeNull();
+  });
+
+  it("renders the projection without a fabricated stake amount", async () => {
+    stubLiveFetch();
+    render(<SlashingVisualizer />);
+
+    await screen.findByTestId("observation-descriptor");
+
+    expect(screen.getByTestId("stake-not-observed").textContent).toBe("Stake: not observed");
+    expect(screen.getByText(/absolute amount not computed/)).toBeTruthy();
+    // The simulator still ran over the real records...
+    expect(screen.getByText(/10\.0\.0\.11:9090 \(observed liveness\)/)).toBeTruthy();
+    // ...and nothing is marked synthetic, because nothing here is.
+    expect(screen.queryByTestId("synthetic-data-banner")).toBeNull();
+    expect(screen.queryByTestId("synthetic-badge")).toBeNull();
+    expect(screen.queryByTestId("no-live-source")).toBeNull();
   });
 });

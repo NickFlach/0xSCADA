@@ -64,6 +64,13 @@
       "when": 1784780408000,
       "tag": "0011_agent_marketplace",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1784780409000,
+      "tag": "0012_validator_liveness_observations",
+      "breakpoints": true
     }
   ]
 }

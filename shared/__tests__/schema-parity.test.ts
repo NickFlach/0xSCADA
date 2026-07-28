@@ -7,6 +7,7 @@ import {
   validatorNodes as pgValidatorNodes,
   validatorPubkeys as pgValidatorPubkeys,
   validatorStateWatermarks as pgValidatorStateWatermarks,
+  validatorLivenessObservations as pgValidatorLivenessObservations,
   blueprintSafeStateLog as pgBlueprintSafeStateLog,
   pidTuningAudit as pgPidTuningAudit,
 } from '../schema';
@@ -16,6 +17,7 @@ import {
   validatorNodes as sqliteValidatorNodes,
   validatorPubkeys as sqliteValidatorPubkeys,
   validatorStateWatermarks as sqliteValidatorStateWatermarks,
+  validatorLivenessObservations as sqliteValidatorLivenessObservations,
   blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
   pidTuningAudit as sqlitePidTuningAudit,
 } from '../schema-sqlite';
@@ -55,6 +57,15 @@ const cases = [
     name: 'validator_state_watermarks',
     pg: pgValidatorStateWatermarks,
     sqlite: sqliteValidatorStateWatermarks,
+  },
+  // #456: the observed-liveness history the what-if slashing simulator replays
+  // rules against. A column present on only one dialect would silently drop
+  // part of an observation record — and an observation that cannot be audited
+  // is indistinguishable from an invented one.
+  {
+    name: 'validator_liveness_observations',
+    pg: pgValidatorLivenessObservations,
+    sqlite: sqliteValidatorLivenessObservations,
   },
   {
     name: 'blueprint_safe_state_log',
