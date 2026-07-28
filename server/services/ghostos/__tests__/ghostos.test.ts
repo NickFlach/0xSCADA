@@ -361,4 +361,129 @@ describe("Emergence safety gates", () => {
     expect(executor).not.toHaveBeenCalled();
     expect(orchestrator.getDecision(decision.id)?.status).toBe("failed");
   });
+
+  it("serializes approvals so one principal cannot satisfy a two-person threshold", async () => {
+    const { orchestrator, pattern } = setup();
+    orchestrator.updateEnvelope("agent-a", {
+      ...CONTROL_ENVELOPE,
+      requiredApprovals: 2,
+    });
+    const decision = await orchestrator.proposeDecision({
+      patternId: pattern.id,
+      agentId: "agent-a",
+      confidence: 0.95,
+      action: {
+        kind: "control",
+        target: "asset:pump-7",
+        summary: "Small safe movement",
+        setpointDeltaPercent: 1,
+      },
+    });
+    const principal = { id: "operator-1", authenticated: true as const };
+
+    const results = await Promise.allSettled([
+      orchestrator.approveDecision(decision.id, principal),
+      orchestrator.approveDecision(decision.id, principal),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(orchestrator.getDecision(decision.id)).toMatchObject({
+      status: "pending-approval",
+      approvals: [{ principalId: "operator-1" }],
+    });
+  });
+
+  it("allows at most one physical execution of the same approved decision", async () => {
+    const { orchestrator, executor, pattern } = setup();
+    const decision = await orchestrator.proposeDecision({
+      patternId: pattern.id,
+      agentId: "agent-a",
+      confidence: 0.95,
+      action: {
+        kind: "control",
+        target: "asset:pump-7",
+        summary: "Small safe movement",
+        setpointDeltaPercent: 1,
+      },
+    });
+    await orchestrator.approveDecision(decision.id, {
+      id: "operator-1",
+      authenticated: true,
+    });
+
+    const results = await Promise.allSettled([
+      orchestrator.executeDecision(decision.id),
+      orchestrator.executeDecision(decision.id),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(executor).toHaveBeenCalledTimes(1);
+    expect(orchestrator.getDecision(decision.id)?.status).toBe("executed");
+  });
+
+  it("serializes an agent's decisions so the execution-rate envelope cannot race", async () => {
+    const { orchestrator, executor, pattern } = setup();
+    const propose = (target: string) =>
+      orchestrator.proposeDecision({
+        patternId: pattern.id,
+        agentId: "agent-a",
+        confidence: 0.95,
+        action: {
+          kind: "control" as const,
+          target,
+          summary: "Small safe movement",
+          setpointDeltaPercent: 1,
+        },
+      });
+    const [first, second] = await Promise.all([
+      propose("asset:pump-7"),
+      propose("asset:pump-8"),
+    ]);
+    for (const decision of [first, second]) {
+      await orchestrator.approveDecision(decision.id, {
+        id: "operator-1",
+        authenticated: true,
+      });
+    }
+
+    const results = await Promise.allSettled([
+      orchestrator.executeDecision(first.id),
+      orchestrator.executeDecision(second.id),
+    ]);
+
+    expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+    expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
+    expect(executor).toHaveBeenCalledTimes(1);
+    expect(
+      [first.id, second.id]
+        .map((id) => orchestrator.getDecision(id)?.status)
+        .sort(),
+    ).toEqual(["executed", "failed"]);
+  });
+
+  it("deep-clones action payloads at the orchestration boundary", async () => {
+    const { orchestrator, pattern } = setup();
+    const payload = { limits: { delta: 1 } };
+    const decision = await orchestrator.proposeDecision({
+      patternId: pattern.id,
+      agentId: "agent-a",
+      confidence: 0.95,
+      action: {
+        kind: "control",
+        target: "asset:pump-7",
+        summary: "Small safe movement",
+        setpointDeltaPercent: 1,
+        payload,
+      },
+    });
+    payload.limits.delta = 99;
+    const firstRead = orchestrator.getDecision(decision.id)!;
+    (firstRead.action.payload as { limits: { delta: number } }).limits.delta = 77;
+
+    expect(orchestrator.getDecision(decision.id)?.action.payload).toEqual({
+      limits: { delta: 1 },
+    });
+  });
 });

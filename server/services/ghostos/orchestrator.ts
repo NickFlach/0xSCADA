@@ -66,6 +66,8 @@ export class GhostOSOrchestrator extends EventEmitter {
   private readonly decisions = new Map<string, EmergentDecision>();
   private readonly audit: GhostAuditEvent[] = [];
   private readonly executionHistory = new Map<string, number[]>();
+  private readonly decisionOperations = new Map<string, Promise<void>>();
+  private readonly agentExecutionOperations = new Map<string, Promise<void>>();
   private decisionCounter = 0;
   private auditCounter = 0;
 
@@ -265,6 +267,7 @@ export class GhostOSOrchestrator extends EventEmitter {
     comment?: string,
   ): Promise<EmergentDecision> {
     assertAuthenticated(principal);
+    return this.withDecisionLock(decisionId, async () => {
     const decision = this.requireDecision(decisionId);
     if (
       decision.status !== "pending-approval" &&
@@ -329,6 +332,7 @@ export class GhostOSOrchestrator extends EventEmitter {
     );
     this.emit("decision", cloneDecision(decision));
     return cloneDecision(decision);
+    });
   }
 
   async rejectDecision(
@@ -338,6 +342,7 @@ export class GhostOSOrchestrator extends EventEmitter {
   ): Promise<EmergentDecision> {
     assertAuthenticated(principal);
     if (!reason.trim()) throw new Error("A rejection reason is required");
+    return this.withDecisionLock(decisionId, async () => {
     const decision = this.requireDecision(decisionId);
     if (
       decision.status !== "pending-approval" &&
@@ -374,10 +379,13 @@ export class GhostOSOrchestrator extends EventEmitter {
     );
     this.emit("decision", cloneDecision(decision));
     return cloneDecision(decision);
+    });
   }
 
   async executeDecision(decisionId: string): Promise<EmergentDecision> {
+    return this.withDecisionLock(decisionId, async () => {
     const decision = this.requireDecision(decisionId);
+    return this.withAgentExecutionLock(decision.agentId, async () => {
     if (decision.status !== "approved") {
       throw new Error(`Decision ${decisionId} is not approved`);
     }
@@ -455,6 +463,8 @@ export class GhostOSOrchestrator extends EventEmitter {
       this.failDecision(decision, message);
       throw error;
     }
+    });
+    });
   }
 
   getDecision(decisionId: string): EmergentDecision | undefined {
@@ -564,6 +574,20 @@ export class GhostOSOrchestrator extends EventEmitter {
       decision.agentId,
       decision.id,
     );
+  }
+
+  private withDecisionLock<T>(
+    decisionId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    return serializeByKey(this.decisionOperations, decisionId, work);
+  }
+
+  private withAgentExecutionLock<T>(
+    agentId: string,
+    work: () => Promise<T>,
+  ): Promise<T> {
+    return serializeByKey(this.agentExecutionOperations, agentId, work);
   }
 
   private record(
@@ -775,10 +799,7 @@ function assertAuthenticated(principal: AuthenticatedPrincipal): void {
 }
 
 function cloneAction(action: EmergentAction): EmergentAction {
-  return {
-    ...action,
-    payload: action.payload ? { ...action.payload } : undefined,
-  };
+  return structuredClone(action);
 }
 
 function cloneDecision(decision: EmergentDecision): EmergentDecision {
@@ -791,7 +812,34 @@ function cloneDecision(decision: EmergentDecision): EmergentDecision {
       reasons: [...decision.envelopeCheck.reasons],
     },
     rejection: decision.rejection ? { ...decision.rejection } : undefined,
+    result:
+      decision.result === undefined
+        ? undefined
+        : structuredClone(decision.result),
   };
+}
+
+async function serializeByKey<T>(
+  operations: Map<string, Promise<void>>,
+  key: string,
+  work: () => Promise<T>,
+): Promise<T> {
+  const previous = operations.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const tail = previous.then(() => gate);
+  operations.set(key, tail);
+  await previous;
+  try {
+    return await work();
+  } finally {
+    release();
+    if (operations.get(key) === tail) {
+      operations.delete(key);
+    }
+  }
 }
 
 function targetMatches(scope: string, target: string): boolean {
