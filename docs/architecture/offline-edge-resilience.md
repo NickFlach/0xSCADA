@@ -33,12 +33,26 @@ degraded health while local durability remains available; queue corruption,
 capacity exhaustion, failed initialization, and persistence errors are hard
 health failures.
 
+`server/gateway/store-and-forward-runtime.ts` is the production composition
+root. Set `EDGE_STORE_FORWARD_ENABLED=true` and
+`EDGE_STORE_FORWARD_BINDINGS_MODULE=/absolute/path/to/edge-bindings.js`. The
+module must export `createEdgeStoreAndForwardBindings`,
+`edgeStoreAndForwardBindings`, or a default binding with a real `transport`.
+The factory form receives `JsonFileEdgeQueue` for deployment composition.
+Startup installs the binding before the shared service initializes and fails
+closed for missing, incomplete, or `EnvironmentEdgeTransport` bindings.
+
+The readiness check reports the actual queue status, production-binding state,
+pending records, retry state, storage errors, and divergence count. A lost
+upstream is explicitly `degraded`; failed durability or initialization is
+`unhealthy`.
+
 ## Verification
 
 Run:
 
 ```bash
-npx vitest run server/gateway/__tests__/store-and-forward.test.ts
+npx vitest run server/gateway/__tests__/store-and-forward.test.ts server/gateway/__tests__/store-and-forward-runtime.test.ts server/__tests__/startup-singleton-imports.test.ts
 npm run typecheck
 npm run build
 ```

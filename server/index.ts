@@ -14,6 +14,7 @@ import { initializeDatabase } from "./storage";
 import { fieldSimulator } from "./simulator";
 import { initializeDefaultAgents, startDefaultAgents } from "./agents";
 import { storeAndForwardService } from "./gateway/store-and-forward";
+import { edgeStoreAndForwardRuntime } from "./gateway/store-and-forward-runtime";
 import { initializeBridges } from "./bridge";
 import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
@@ -90,6 +91,13 @@ registerSwaggerRoutes(app, gatewayConfig);
   await initializeDefaultAgents();
   await startDefaultAgents();
   
+  // Install a real upstream transport before the shared queue singleton starts.
+  // Explicit production enablement without bindings fails startup closed.
+  await edgeStoreAndForwardRuntime.initialize();
+  if (edgeStoreAndForwardRuntime.isEnabled()) {
+    log("Production edge store-and-forward bindings initialized");
+  }
+
   // Initialize edge store-and-forward service
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");

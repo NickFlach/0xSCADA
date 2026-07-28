@@ -14,6 +14,7 @@ import { blockchainService } from '../blockchain';
 import { registry, collectProcessMetrics } from '../metrics';
 import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
+import { edgeStoreAndForwardRuntime } from '../gateway/store-and-forward-runtime';
 import { getBridgeHealthStatus } from '../bridge';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
@@ -125,19 +126,40 @@ healthManager.registerSimple(
   false,
 );
 
-// 7. Edge store-and-forward service (required for edge deployments)
-healthManager.registerSimple(
-  'store-and-forward',
-  async () => {
+// 7. Edge store-and-forward service. Upstream loss is degraded, not unready:
+// the durable local queue is specifically required to operate through it.
+healthManager.register({
+  name: 'store-and-forward',
+  required: true,
+  check: async () => {
     try {
       const status = await storeAndForwardService.healthCheck();
-      return status.healthy;
-    } catch {
-      return false;
+      return {
+        name: 'store-and-forward',
+        status: status.healthy
+          ? status.degraded
+            ? 'degraded'
+            : 'healthy'
+          : 'unhealthy',
+        lastCheck: new Date(),
+        message: status.message,
+        details: {
+          productionBindingsEnabled: edgeStoreAndForwardRuntime.isEnabled(),
+          productionBindingsInitialized:
+            edgeStoreAndForwardRuntime.isInitialized(),
+          ...storeAndForwardService.getStatus(),
+        },
+      };
+    } catch (error) {
+      return {
+        name: 'store-and-forward',
+        status: 'unhealthy',
+        lastCheck: new Date(),
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   },
-  true, // Required for edge deployments
-);
+});
 
 // 8. Bridge modules (event-anchor, state-sync)
 healthManager.registerSimple(
