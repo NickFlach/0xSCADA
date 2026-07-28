@@ -6,7 +6,13 @@
 
 import { describe, it, expect, afterEach } from "vitest";
 import { loadGooseServiceConfig, loadGooseSubscriptionsFile } from "../config.js";
-import { startGooseSubscriber, stopGooseSubscriber, getGooseSubscriber } from "../index.js";
+import {
+  createGooseCaptureBackend,
+  startGooseSubscriber,
+  stopGooseSubscriber,
+  getGooseSubscriber,
+} from "../index.js";
+import { GooseLiveCaptureBackend, GOOSE_BPF_FILTER } from "../live-backend.js";
 import { REPLAY_APP_ID, REPLAY_GOCB_REF } from "./fixtures.js";
 import { REPLAY_PCAP_PATH } from "./generate-replay-pcap.js";
 
@@ -29,12 +35,18 @@ afterEach(async () => {
 });
 
 describe("loadGooseServiceConfig", () => {
-  it("defaults to no subscriptions, no capture file and eth0", () => {
+  it("defaults to no subscriptions, no capture at all and eth0", () => {
     const config = loadGooseServiceConfig({});
     expect(config.subscriptions).toEqual([]);
     expect(config.pcapPath).toBeUndefined();
     expect(config.iface).toBe("eth0");
     expect(config.pcapRealtime).toBe(true);
+    // Capture is opt-in: an unconfigured environment must never start one.
+    expect(config.capture).toBe("none");
+    expect(config.captureTool).toBe("auto");
+    expect(config.captureToolPath).toBeUndefined();
+    expect(config.captureSnapLen).toBe(65535);
+    expect(config.captureFilter).toBeUndefined();
   });
 
   it("reads subscriptions from GOOSE_SUBSCRIPTIONS_FILE", () => {
@@ -60,6 +72,64 @@ describe("loadGooseServiceConfig", () => {
     );
     expect(config.pcapPath).toBe("trace.pcap");
     expect(config.pcapRealtime).toBe(false);
+    // GOOSE_PCAP_FILE alone still selects replay — unchanged behaviour.
+    expect(config.capture).toBe("pcap");
+  });
+
+  it("only selects live capture when it is asked for explicitly", () => {
+    expect(loadGooseServiceConfig({ GOOSE_IFACE: "eth4" }).capture).toBe("none");
+    expect(loadGooseServiceConfig({ GOOSE_CAPTURE_TOOL: "tcpdump" }).capture).toBe("none");
+    expect(loadGooseServiceConfig({ GOOSE_CAPTURE_SNAPLEN: "1500" }).capture).toBe("none");
+    expect(loadGooseServiceConfig({ GOOSE_CAPTURE: "live" }).capture).toBe("live");
+  });
+
+  it("lets GOOSE_CAPTURE=none override a configured capture file", () => {
+    const config = loadGooseServiceConfig({
+      GOOSE_CAPTURE: "none",
+      GOOSE_PCAP_FILE: "trace.pcap",
+    });
+    expect(config.capture).toBe("none");
+  });
+
+  it("reads the live-capture settings", () => {
+    const config = loadGooseServiceConfig({
+      GOOSE_CAPTURE: "live",
+      GOOSE_IFACE: "ens1f0",
+      GOOSE_CAPTURE_TOOL: "tcpdump",
+      GOOSE_CAPTURE_TOOL_PATH: "/usr/sbin/tcpdump",
+      GOOSE_CAPTURE_SNAPLEN: "1500",
+      GOOSE_CAPTURE_FILTER: "ether proto 0x88b8",
+    });
+    expect(config.capture).toBe("live");
+    expect(config.iface).toBe("ens1f0");
+    expect(config.captureTool).toBe("tcpdump");
+    expect(config.captureToolPath).toBe("/usr/sbin/tcpdump");
+    expect(config.captureSnapLen).toBe(1500);
+    expect(config.captureFilter).toBe("ether proto 0x88b8");
+  });
+
+  it("rejects an unknown capture mode", () => {
+    expect(() => loadGooseServiceConfig({ GOOSE_CAPTURE: "sniff" })).toThrow();
+  });
+
+  it("rejects GOOSE_CAPTURE=pcap without a capture file", () => {
+    expect(() => loadGooseServiceConfig({ GOOSE_CAPTURE: "pcap" })).toThrow(/GOOSE_PCAP_FILE/);
+  });
+
+  it("rejects a tool path without an explicit tool, because argv differs per tool", () => {
+    expect(() =>
+      loadGooseServiceConfig({
+        GOOSE_CAPTURE: "live",
+        GOOSE_CAPTURE_TOOL_PATH: "/usr/sbin/tcpdump",
+      }),
+    ).toThrow(/GOOSE_CAPTURE_TOOL/);
+  });
+
+  it("rejects a non-integer or out-of-range snapshot length", () => {
+    expect(() => loadGooseServiceConfig({ GOOSE_CAPTURE_SNAPLEN: "big" })).toThrow(
+      /GOOSE_CAPTURE_SNAPLEN must be an integer/,
+    );
+    expect(() => loadGooseServiceConfig({ GOOSE_CAPTURE_SNAPLEN: "4" })).toThrow();
   });
 
   it("rejects a subscription list that fails schema validation", () => {
@@ -87,6 +157,49 @@ describe("loadGooseServiceConfig", () => {
         throw new Error("ENOENT");
       }),
     ).toThrow(/missing\.json/);
+  });
+});
+
+describe("createGooseCaptureBackend", () => {
+  it("builds the null backend when no capture is configured", () => {
+    const backend = createGooseCaptureBackend(loadGooseServiceConfig({}));
+    expect(backend.name).toBe("null");
+    expect(backend.availability().available).toBe(false);
+  });
+
+  it("builds the replay backend for a configured capture file", () => {
+    const backend = createGooseCaptureBackend(
+      loadGooseServiceConfig({ GOOSE_PCAP_FILE: REPLAY_PCAP_PATH }),
+    );
+    expect(backend.name).toBe("pcap-replay");
+  });
+
+  it("builds the live backend on the configured interface and filter", () => {
+    const backend = createGooseCaptureBackend(
+      loadGooseServiceConfig({ GOOSE_CAPTURE: "live", GOOSE_IFACE: "ens1f0" }),
+    );
+    expect(backend.name).toBe("live-pcap");
+    expect(backend).toBeInstanceOf(GooseLiveCaptureBackend);
+    const live = backend as GooseLiveCaptureBackend;
+    expect(live.getInterface()).toBe("ens1f0");
+    expect(live.getFilter()).toBe(GOOSE_BPF_FILTER);
+  });
+
+  it("defaults the live backend to eth0, per the acceptance criterion", () => {
+    const backend = createGooseCaptureBackend(loadGooseServiceConfig({ GOOSE_CAPTURE: "live" }));
+    expect((backend as GooseLiveCaptureBackend).getInterface()).toBe("eth0");
+  });
+
+  it("passes a filter override through to the live backend", () => {
+    const backend = createGooseCaptureBackend(
+      loadGooseServiceConfig({
+        GOOSE_CAPTURE: "live",
+        GOOSE_CAPTURE_FILTER: "ether proto 0x88b8 and vlan 100",
+      }),
+    );
+    expect((backend as GooseLiveCaptureBackend).getFilter()).toBe(
+      "ether proto 0x88b8 and vlan 100",
+    );
   });
 });
 

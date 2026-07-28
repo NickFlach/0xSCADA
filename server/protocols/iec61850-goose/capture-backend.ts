@@ -13,13 +13,16 @@
  *
  *   - {@link NullGooseCaptureBackend} — the default. Delivers nothing and says
  *     so. It never throws at import and never reports itself as running.
- *   - `GoosePcapReplayBackend` (pcap-backend.ts) — fully working: replays a
- *     captured `.pcap` offline, honouring recorded inter-frame timing.
+ *   - `GoosePcapReplayBackend` (pcap-backend.ts) — replays a captured `.pcap`
+ *     offline, honouring recorded inter-frame timing.
+ *   - `GooseLiveCaptureBackend` (live-backend.ts) — live capture, by spawning a
+ *     libpcap tool (`dumpcap`/`tcpdump`) that streams pcap on stdout. Opt-in
+ *     via `GOOSE_CAPTURE=live`; needs a Linux/BSD/macOS host and CAP_NET_RAW.
  *
- * NOT shipped: a live AF_PACKET / native-addon backend. See
- * {@link detectRawSocketCapability} and docs/protocols/iec61850-goose.md for
- * what such a backend must do; implement this interface and pass it to
- * `new GooseSubscriber({ backend })`.
+ * NOT shipped: an in-process AF_PACKET binding. Node has none and this
+ * repository adds no native addon — see {@link detectRawSocketCapability}. Any
+ * other frame source can be added by implementing this interface and passing it
+ * to `new GooseSubscriber({ backend })`.
  *
  * Issue: #465
  */
@@ -108,13 +111,15 @@ export function isGooseFrame(frame: Buffer): boolean {
 }
 
 /**
- * Determine whether a raw AF_PACKET capture socket could be opened in this
- * environment. Pure / side-effect-free so it can be unit tested.
+ * Determine whether an IN-PROCESS raw AF_PACKET capture socket could be opened
+ * here. Pure / side-effect-free so it can be unit tested.
  *
  * This never returns `available: true`: even on Linux as root, Node has no
  * AF_PACKET binding, and this repository intentionally ships no native capture
- * addon. The function exists to produce an accurate, host-specific explanation
- * of what is missing rather than a generic "disabled".
+ * addon. Live capture is instead done out-of-process by
+ * `GooseLiveCaptureBackend`. The function exists to produce an accurate,
+ * host-specific explanation of what the DEFAULT backend is missing rather than
+ * a generic "disabled".
  */
 export function detectRawSocketCapability(
   platform: NodeJS.Platform = process.platform,
@@ -139,7 +144,8 @@ export function detectRawSocketCapability(
     available: false,
     reason:
       "no native L2 capture binding is present — Node cannot open AF_PACKET; " +
-      "inject a backend implementing GooseCaptureBackend to enable live capture",
+      "set GOOSE_CAPTURE=live to capture through a libpcap tool instead, or " +
+      "inject a backend implementing GooseCaptureBackend",
   };
 }
 

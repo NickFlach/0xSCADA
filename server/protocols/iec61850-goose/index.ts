@@ -8,18 +8,23 @@
  *
  * WHAT THIS CAN AND CANNOT DO
  * ---------------------------
- * GOOSE is Layer-2 multicast. Node cannot receive those frames without a
- * native addon, and this repository ships none. Therefore:
+ * GOOSE is Layer-2 multicast; Node cannot receive those frames from a socket,
+ * and this repository ships no native addon. Three backends exist:
  *
- *   - LIVE capture is NOT provided. The default {@link NullGooseCaptureBackend}
- *     delivers nothing, `start()` resolves to "unavailable", and it says why in
- *     a log line. It does not throw and it never reports itself as running.
- *   - OFFLINE replay IS provided and fully works: point
- *     {@link GoosePcapReplayBackend} at a captured `.pcap` and the decoder,
- *     validator, tag-update emission and metrics all run on real frames.
- *   - A live backend is an injection point: implement
- *     {@link GooseCaptureBackend} against a native binding and pass it as
- *     `options.backend`. Nothing else in this module needs to change.
+ *   - {@link NullGooseCaptureBackend} — the default. Delivers nothing,
+ *     `start()` resolves to "unavailable", and it says why in a log line. It
+ *     does not throw and it never reports itself as running.
+ *   - {@link GoosePcapReplayBackend} — offline replay of a captured `.pcap`.
+ *     The decoder, validator, tag-update emission and metrics all run on real
+ *     frames, in the capture's own time base.
+ *   - {@link GooseLiveCaptureBackend} — LIVE capture, opt-in via
+ *     `GOOSE_CAPTURE=live`. It spawns a libpcap CLI tool (`dumpcap`/`tcpdump`)
+ *     that streams pcap on stdout, so frames come off the wire through libpcap
+ *     with no native addon. It needs a Linux/BSD/macOS host, the tool
+ *     installed, and CAP_NET_RAW. It has NOT been run against a real substation
+ *     bus in this repository — see live-backend.ts.
+ *
+ * Any other frame source can be injected as `options.backend`.
  *
  * Issue: #465
  */
@@ -35,6 +40,7 @@ import {
   type GooseCaptureBackend,
 } from "./capture-backend.js";
 import { GoosePcapReplayBackend } from "./pcap-backend.js";
+import { GooseLiveCaptureBackend } from "./live-backend.js";
 import { loadGooseServiceConfig, type GooseServiceConfig } from "./config.js";
 import {
   gooseFramesReceivedTotal,
@@ -139,7 +145,8 @@ export class GooseSubscriber {
       logWarn(
         `[goose] capture backend "${this.backend.name}" cannot receive frames: ` +
           `${availability.reason}. Decode/validation stay available via handleFrame(); ` +
-          "replay a capture with GOOSE_PCAP_FILE or inject a live GooseCaptureBackend.",
+          "capture live with GOOSE_CAPTURE=live, replay a capture with GOOSE_PCAP_FILE, " +
+          "or inject your own GooseCaptureBackend.",
       );
       return this.state;
     }
@@ -282,6 +289,35 @@ export class GooseSubscriber {
 let _subscriber: GooseSubscriber | null = null;
 
 /**
+ * Construct the capture backend the configuration selects.
+ *
+ * The selection is explicit (`GOOSE_CAPTURE`), and "none" — no capture at all —
+ * is the default, so no configuration change can start a capture process by
+ * accident.
+ */
+export function createGooseCaptureBackend(config: GooseServiceConfig): GooseCaptureBackend {
+  switch (config.capture) {
+    case "pcap":
+      // The schema guarantees pcapPath is set when capture === "pcap".
+      return new GoosePcapReplayBackend({
+        path: config.pcapPath as string,
+        realtime: config.pcapRealtime,
+      });
+    case "live":
+      return new GooseLiveCaptureBackend({
+        iface: config.iface,
+        tool: config.captureTool,
+        toolPath: config.captureToolPath,
+        snapLen: config.captureSnapLen,
+        filter: config.captureFilter,
+      });
+    case "none":
+    default:
+      return new NullGooseCaptureBackend({ iface: config.iface });
+  }
+}
+
+/**
  * Build a subscriber from the environment and start it.
  *
  * Returns null when no subscriptions are configured — the service stays off
@@ -305,9 +341,7 @@ export async function startGooseSubscriber(
     return null;
   }
 
-  const backend: GooseCaptureBackend = config.pcapPath
-    ? new GoosePcapReplayBackend({ path: config.pcapPath, realtime: config.pcapRealtime })
-    : new NullGooseCaptureBackend({ iface: config.iface });
+  const backend = createGooseCaptureBackend(config);
 
   const subscriber = new GooseSubscriber({
     backend,
@@ -359,19 +393,51 @@ export type {
 export { GoosePcapReplayBackend } from "./pcap-backend.js";
 export type { GoosePcapReplayOptions, GoosePcapReplayStats } from "./pcap-backend.js";
 export {
+  GooseLiveCaptureBackend,
+  buildCaptureCommand,
+  buildDumpcapArgs,
+  buildTcpdumpArgs,
+  resolveExecutable,
+  DEFAULT_GOOSE_IFACE,
+  DEFAULT_GOOSE_SNAPLEN,
+  GOOSE_BPF_FILTER,
+} from "./live-backend.js";
+export type {
+  GooseCaptureCommand,
+  GooseCaptureToolName,
+  GooseCaptureToolSelection,
+  GooseLiveCaptureOptions,
+  GooseLiveCaptureStats,
+} from "./live-backend.js";
+export {
   parsePcap,
   encodePcap,
   readPcapGlobalHeader,
+  decodePcapRecordHeader,
+  subSecondsPerSecond,
   PcapParseError,
   LINKTYPE_ETHERNET,
   PCAP_MAGIC_MICROSECONDS,
   PCAP_MAGIC_NANOSECONDS,
 } from "./pcap.js";
-export type { PcapFile, PcapPacket, PcapGlobalHeader } from "./pcap.js";
+export type { PcapFile, PcapPacket, PcapGlobalHeader, PcapRecordHeader } from "./pcap.js";
+export {
+  PcapStreamDecoder,
+  PcapStreamOverflowError,
+  DEFAULT_MAX_RECORD_BYTES,
+  DEFAULT_MAX_BUFFERED_BYTES,
+} from "./pcap-stream.js";
+export type { StreamedPcapPacket, PcapStreamDecoderOptions } from "./pcap-stream.js";
 export {
   loadGooseServiceConfig,
   gooseServiceConfigSchema,
+  gooseCaptureModeSchema,
+  gooseCaptureToolSchema,
   loadGooseSubscriptionsFile,
 } from "./config.js";
-export type { GooseServiceConfig } from "./config.js";
+export type {
+  GooseServiceConfig,
+  GooseCaptureMode,
+  GooseCaptureToolConfig,
+} from "./config.js";
 export * from "./types.js";
