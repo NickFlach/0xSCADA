@@ -54,6 +54,7 @@ describe("startup singleton module identity", () => {
         "./gateway/store-and-forward",
         "./gateway/store-and-forward-runtime",
         "./bridge",
+        "./scaling/federation-runtime",
         "./gateway",
         "./services/flux",
         "./services/nats",
@@ -64,6 +65,7 @@ describe("startup singleton module identity", () => {
       file: "server/health/index.ts",
       modules: [
         "../simulator",
+        "../scaling/federation-runtime",
         "../gateway/store-and-forward",
         "../gateway/store-and-forward-runtime",
         "../bridge",

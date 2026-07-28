@@ -16,6 +16,7 @@ import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
 import { edgeStoreAndForwardRuntime } from '../gateway/store-and-forward-runtime';
 import { getBridgeHealthStatus } from '../bridge';
+import { federationRuntime } from '../scaling/federation-runtime';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
 import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
@@ -174,6 +175,25 @@ healthManager.registerSimple(
   },
   false, // Optional, depends on configuration
 );
+
+healthManager.register({
+  name: 'multi-site-federation',
+  required: federationRuntime.isRequired(),
+  check: async () => {
+    const health = await federationRuntime.health();
+    return {
+      name: 'multi-site-federation',
+      status: health.healthy
+        ? health.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: health.message,
+      details: health.details ? { ...health.details } : undefined,
+    };
+  },
+});
 
 // 9. Deterministic blueprint control loop (#457).
 //    Optional and OFF by default. "Disabled" is reported as healthy — an

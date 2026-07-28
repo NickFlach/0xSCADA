@@ -18,6 +18,7 @@ import { edgeStoreAndForwardRuntime } from "./gateway/store-and-forward-runtime"
 import { initializeBridges } from "./bridge";
 import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
+import { federationRuntime } from "./scaling/federation-runtime";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
 import { startBlueprintControlLoop } from "./blueprint/control-loop";
@@ -85,6 +86,13 @@ registerSwaggerRoutes(app, gatewayConfig);
   // depend on an established connection (SQLite fallback in development).
   await initializeDatabase();
   log("Database initialized");
+
+  // Bind authenticated discovery, federated query, and replicated
+  // configuration adapters before accepting traffic.
+  await federationRuntime.initialize();
+  if (federationRuntime.isEnabled()) {
+    log("Multi-site federation runtime initialized");
+  }
 
   await fieldSimulator.initialize();
   

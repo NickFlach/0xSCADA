@@ -28,12 +28,27 @@ Discovery adapters receive an `AbortSignal`. Production registry and mDNS
 bindings must return certificate identity observed by the authenticated mTLS
 transport, not metadata supplied only by an unauthenticated advertisement.
 
+`server/scaling/federation-runtime.ts` makes the federation services reachable
+from the running server. Enable it with:
+
+```text
+MULTI_SITE_FEDERATION_ENABLED=true
+MULTI_SITE_FEDERATION_REQUIRED=true
+MULTI_SITE_FEDERATION_BINDINGS_MODULE=/absolute/path/to/federation-bindings.mjs
+```
+
+The module may export `createFederationBindings`, `federationBindings`, or a
+default bindings object. Enabled startup validates discovery, alarm, reporting,
+configuration, and health services and fails closed when any is missing.
+`/health` exposes the deployment probe and can make it readiness-critical.
+
 ## Verification
 
 Run:
 
 ```bash
 npx vitest run server/scaling/__tests__/federation.test.ts
+npx vitest run server/scaling/__tests__/federation-runtime.test.ts
 npm run typecheck
 npm run build
 ```
