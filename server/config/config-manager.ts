@@ -185,7 +185,10 @@ function setNested(obj: Record<string, any>, path: string, value: unknown): void
     const key = parts[i];
     if (FORBIDDEN_KEYS.has(key)) return; // Guard against prototype pollution
     if (!Object.prototype.hasOwnProperty.call(current, key) || !current[key] || typeof current[key] !== 'object') {
-      current[key] = {};
+      // Null-prototype: the FORBIDDEN_KEYS denylist above already rejects
+      // __proto__/constructor/prototype, but an intermediate created here has no
+      // prototype chain to pollute even if that denylist is ever weakened.
+      current[key] = Object.create(null);
     }
     current = current[key];
   }
