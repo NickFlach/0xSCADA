@@ -52,6 +52,7 @@ describe("startup singleton module identity", () => {
         "./simulator",
         "./agents",
         "./gateway/store-and-forward",
+        "./gateway/store-and-forward-runtime",
         "./bridge",
         "./gateway",
         "./services/flux",
@@ -64,6 +65,7 @@ describe("startup singleton module identity", () => {
       modules: [
         "../simulator",
         "../gateway/store-and-forward",
+        "../gateway/store-and-forward-runtime",
         "../bridge",
       ],
     },
