@@ -23,6 +23,9 @@ import { startBlueprintControlLoop } from "./blueprint/control-loop";
 // Blueprint watchdog / safe-state composition root (#459). Off unless the
 // deployment supplies BLUEPRINT_SAFETY_BINDINGS[_FILE].
 import { blueprintSafetyHost } from "./blueprint/safety-host";
+// Observed-liveness collector (#456). Off unless
+// VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and ANCHOR_NODE_URLS is set.
+import { startValidatorLivenessCollector } from "./blockchain/liveness-collector";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -232,6 +235,24 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "Modbus TCP Server Mode not started (failed closed)");
       }
 
+      // Start DNP3 Outstation Mode (Issue #464) — no-op unless
+      // DNP3_OUTSTATION_ENABLED=true. DNP3 does not authenticate the TCP peer
+      // and does not authenticate reads at all, so the listener defaults to
+      // loopback, refuses peers outside its allowlist, and executes
+      // SELECT/OPERATE only when separately opted in (which additionally
+      // requires an SAv5 Update Key unless the deployment explicitly declares
+      // it is running controls unauthenticated). A configuration or point-map
+      // failure is terminal for the listener: it is logged and no socket is
+      // bound, never downgraded to defaults.
+      try {
+        const { startDnp3Outstation } = await import(
+          "./protocols/dnp3-outstation"
+        );
+        await startDnp3Outstation();
+      } catch (err) {
+        logError(err, "DNP3 Outstation Mode not started (failed closed)");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 
@@ -251,6 +272,26 @@ registerSwaggerRoutes(app, gatewayConfig);
       // the resulting state is always reported by /api/blueprint-safe-state.
       const safetyStatus = blueprintSafetyHost.start();
       log(`Blueprint safety host: ${safetyStatus.state} — ${safetyStatus.reason}`);
+
+      // Observed-liveness collector (#456) — OFF unless
+      // VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and ANCHOR_NODE_URLS names at
+      // least one node. It polls each node's /status on a cadence and persists
+      // whether the node answered and whether the height it reported advanced.
+      // That is observed liveness, NOT consensus attestation duty history —
+      // which this build still cannot report. When it starts, it registers the
+      // live source behind GET /api/nodes/attestation-history; when it does
+      // not, that route keeps failing closed with 503.
+      try {
+        const livenessStatus = await startValidatorLivenessCollector();
+        log(
+          `Observed-liveness collector: ${livenessStatus.reason}` +
+            (livenessStatus.enabled
+              ? ` (source ${livenessStatus.sourceId}; observed liveness only, not consensus attestation)`
+              : ""),
+        );
+      } catch (err) {
+        logError(err, "Observed-liveness collector failed to start — no source registered");
+      }
 
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);

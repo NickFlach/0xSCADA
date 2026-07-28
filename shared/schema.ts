@@ -26,6 +26,7 @@ import {
   integer,
   bigint,
   real,
+  doublePrecision,
   jsonb,
   pgEnum,
   index,
@@ -615,6 +616,75 @@ export const validatorStateWatermarks = pgTable("validator_state_watermarks", {
   nodeKeyIdx: uniqueIndex("idx_validator_state_watermarks_node_key").on(table.nodeId, table.stateKey),
 }));
 
+// ─── Observed Liveness Observations (#456) ───────────────────────────────────
+//
+// One row per configured node per poll round of the observed-liveness collector
+// (`server/blockchain/liveness-collector.ts`). This is the durable history the
+// Slashing & Liveness Visualizer's what-if simulator replays a proposed rule
+// against.
+//
+// READ THE COLUMN NAMES LITERALLY. This table records LIVENESS OBSERVATIONS, not
+// consensus attestation duty outcomes. The oxscada `/status` surface reports
+// height / peers / mempool / Kuramoto phase / uptime_ticks and carries no
+// per-slot duty outcome whatsoever, so no such outcome can be stored here. What
+// each row asserts is exactly:
+//
+//   miss — the collector polled `source_node_url` at `observed_at` and the node
+//          did not answer (transport failure, non-2xx, oversized body, or an
+//          unparseable /status shape). `detail` carries the bounded reason.
+//   hit  — the node answered and `observed_height` was strictly greater than
+//          `previous_height` (the height stored by the previous observation).
+//   late — the node answered but `observed_height` did not advance, OR this is
+//          the first observation for the validator and there is no previous
+//          height to compare against (`detail` distinguishes the two).
+//
+// Nothing is interpolated. When the node did not answer, `observed_height`,
+// `observed_uptime_ticks`, `reported_node_id`, `local_phase` and `mean_phase`
+// are NULL — never carried forward from an earlier round.
+//
+// SINGLE WRITER. `round_seq` is a per-collector monotonic ordinal (see the
+// column comment) and the unique index below assumes one collector process
+// writes this table. Running two would conflict on (validator_id, round_seq);
+// inserts use ON CONFLICT DO NOTHING so the loser is dropped rather than
+// corrupting the ordering.
+export const validatorLivenessObservations = pgTable("validator_liveness_observations", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  // Stable identity of the polled endpoint: `host[:port][/path]` of the
+  // configured URL, derived WITHOUT contacting the node. It has to be derivable
+  // offline because the most important rows are the ones where the node did not
+  // answer and therefore reported no node_id of its own.
+  validatorId: varchar("validator_id", { length: 128 }).notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  // Monotonic ordinal of the poll round that produced this row. Deliberately
+  // NOT the chain height: height is per-node (so it cannot identify a
+  // fleet-wide round), it is absent exactly when the node did not answer (the
+  // rows that matter most for slashing), and it can regress. `round_seq` counts
+  // poll rounds that actually happened and is resumed from MAX(round_seq) at
+  // startup so it stays monotonic across restarts. The real height is kept in
+  // `observed_height` so no information is lost.
+  roundSeq: bigint("round_seq", { mode: "number" }).notNull(),
+  // 'hit' | 'miss' | 'late', with the meanings spelled out in the block above.
+  status: varchar("status", { length: 8 }).notNull(),
+  // Exact URL polled, for audit. Not returned to the browser.
+  sourceNodeUrl: varchar("source_node_url", { length: 512 }).notNull(),
+  observedHeight: bigint("observed_height", { mode: "number" }),
+  previousHeight: bigint("previous_height", { mode: "number" }),
+  observedUptimeTicks: bigint("observed_uptime_ticks", { mode: "number" }),
+  reportedNodeId: varchar("reported_node_id", { length: 128 }),
+  localPhase: doublePrecision("local_phase"),
+  meanPhase: doublePrecision("mean_phase"),
+  // Bounded, human-readable reason for the recorded status.
+  detail: text("detail"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  validatorRoundIdx: uniqueIndex("idx_validator_liveness_validator_round")
+    .on(table.validatorId, table.roundSeq),
+  // Window queries (1h / 24h / 7d) and retention pruning both scan by time.
+  observedAtIdx: index("idx_validator_liveness_observed_at").on(table.observedAt),
+  validatorObservedAtIdx: index("idx_validator_liveness_validator_observed_at")
+    .on(table.validatorId, table.observedAt),
+}));
+
 // ─── Modbus Register Map (Issue #462: Modbus TCP Server Mode) ────────────────
 //
 // Per-site mapping of 0xSCADA tags to Modbus addresses so standard Modbus
@@ -811,6 +881,7 @@ export const insertControllerSchema = createInsertSchema(controllers);
 export const insertValidatorNodeSchema = createInsertSchema(validatorNodes);
 export const insertValidatorPubkeySchema = createInsertSchema(validatorPubkeys);
 export const insertValidatorStateWatermarkSchema = createInsertSchema(validatorStateWatermarks);
+export const insertValidatorLivenessObservationSchema = createInsertSchema(validatorLivenessObservations);
 export const insertModbusRegisterMapSchema = createInsertSchema(modbusRegisterMap);
 
 // Type exports
@@ -852,6 +923,8 @@ export type ValidatorStateWatermark = typeof validatorStateWatermarks.$inferSele
 export type InsertValidatorNode = typeof validatorNodes.$inferInsert;
 export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
 export type InsertValidatorStateWatermark = typeof validatorStateWatermarks.$inferInsert;
+export type ValidatorLivenessObservationRow = typeof validatorLivenessObservations.$inferSelect;
+export type InsertValidatorLivenessObservationRow = typeof validatorLivenessObservations.$inferInsert;
 export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
 export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
 export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;

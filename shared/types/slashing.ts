@@ -6,33 +6,62 @@
  * that BOTH the server endpoints and the client simulator/UI share a single
  * source of truth.
  *
- * PROVENANCE IS PART OF THE CONTRACT. This repository has NO live per-validator
- * attestation feed (see server/routes/nodes.ts for the full investigation), so
- * the only history this build can produce is explicitly-requested synthetic demo
- * data. Every transport envelope therefore carries a `synthetic` discriminant
- * and, when synthetic, a human-readable `notice`. Consumers must branch on
- * `synthetic` before presenting anything to an operator.
+ * PROVENANCE IS PART OF THE CONTRACT. Every transport envelope carries a
+ * `synthetic` discriminant and, when synthetic, a human-readable `notice`.
+ * Consumers must branch on `synthetic` before presenting anything to an
+ * operator.
+ *
+ * SEMANTICS ARE ALSO PART OF THE CONTRACT. `hit` / `miss` / `late` are generic
+ * words, and what they actually mean depends entirely on what the source
+ * measured. This build has NO consensus attestation duty feed — the oxscada
+ * node exposes no per-slot duty outcome (see server/routes/nodes.ts). The live
+ * source it *can* offer is an observed-liveness feed: whether each configured
+ * node answered a poll round and whether the chain height it reported advanced.
+ * That is real observed data, but it is NOT consensus attestation, so every
+ * live envelope carries an {@link AttestationSourceDescriptor} stating exactly
+ * what was measured and exactly what each status means for that source. An
+ * operator must never be able to read one of these `miss` values as a missed
+ * consensus duty.
  */
 
 /**
- * Outcome of a single attestation duty for one validator at one slot.
- * - `hit`     : the validator attested correctly and on time.
- * - `miss`    : the validator failed to attest (liveness fault contributor).
- * - `late`    : the validator attested but outside the inclusion window. Treated
- *               as a participation hit but flagged so the UI can distinguish it.
+ * Outcome recorded for one validator at one point in a source's record series.
+ *
+ * The canonical consensus reading is:
+ * - `hit`  : the validator attested correctly and on time.
+ * - `miss` : the validator failed to attest (liveness fault contributor).
+ * - `late` : the validator attested but outside the inclusion window. Treated
+ *            as a participation hit but flagged so the UI can distinguish it.
+ *
+ * NO SOURCE IN THIS BUILD MEASURES THAT. A source must declare its own mapping
+ * in {@link AttestationSourceDescriptor.statusSemantics}; the three labels above
+ * describe the *slashing model's* treatment of each status (only `miss` is
+ * slashable; `late` counts as participation), not a claim about what any
+ * particular feed observed.
  */
 export type AttestationStatus = "hit" | "miss" | "late";
 
 /**
- * A single attestation duty record. One per assigned slot per validator.
+ * A single record. One per validator per round of whatever the source measures.
  */
 export interface AttestationRecord {
-  /** Slot index this duty was assigned for (monotonically increasing). */
+  /**
+   * Round identifier. Monotonically increasing per validator and consistent
+   * with `timestamp` ordering. Its meaning is source-specific and is declared
+   * in {@link AttestationSourceDescriptor.roundIdentifier}.
+   */
   slot: number;
-  /** Unix epoch milliseconds at which the slot occurred. */
+  /** Unix epoch milliseconds at which the round occurred. */
   timestamp: number;
-  /** Outcome of the duty. */
+  /** Outcome of the round. */
   status: AttestationStatus;
+  /**
+   * Chain height the source actually read for this record, when it has one.
+   * `null` means the source had no answer this round (so no height exists);
+   * omitted entirely by sources that do not read a height at all. Never
+   * carried forward from a previous round — an absent observation stays absent.
+   */
+  observedHeight?: number | null;
 }
 
 /**
@@ -111,6 +140,98 @@ export interface SyntheticAttestationHistoryResponse {
   /** Wall-clock anchor (ms) the synthetic slots were laid out backwards from. */
   readonly anchorMs: number;
   readonly validators: SyntheticValidatorHistory[];
+}
+
+// ---------------------------------------------------------------------------
+// Live source semantics
+// ---------------------------------------------------------------------------
+
+/**
+ * What a live source actually measured.
+ *
+ * - `consensus-attestation` : per-slot validator duty outcomes from consensus.
+ *                             NOTHING IN THIS BUILD PRODUCES THIS.
+ * - `observed-liveness`     : whether the node answered a poll and whether the
+ *                             chain height it reported advanced. Real observed
+ *                             data about node availability and progress; it is
+ *                             not a duty log and cannot be read as one.
+ */
+export type ObservationKind = "consensus-attestation" | "observed-liveness";
+
+/** Plain-language definition of each status, as produced by ONE source. */
+export interface ObservationStatusSemantics {
+  readonly hit: string;
+  readonly miss: string;
+  readonly late: string;
+}
+
+/**
+ * Machine-readable declaration of a live source's semantics. Mandatory: a
+ * source may not be served without stating what it measured, because `miss` is
+ * otherwise indistinguishable from a missed consensus duty.
+ */
+export interface AttestationSourceDescriptor {
+  /** What class of thing was measured. */
+  readonly kind: ObservationKind;
+  /** Stable id of the source that produced the records. */
+  readonly sourceId: string;
+  /** One-sentence operator-readable statement of what was measured. */
+  readonly summary: string;
+  /** How the measurement was taken. */
+  readonly method: {
+    /** e.g. "http-get". */
+    readonly transport: string;
+    /** Endpoint polled, e.g. "/status". */
+    readonly endpoint: string;
+    /** Response fields the source reads and records. */
+    readonly fields: readonly string[];
+    /** Poll cadence in ms; `null` for event-driven sources. */
+    readonly pollIntervalMs: number | null;
+    /** How long records are retained before pruning, in ms. */
+    readonly retentionMs: number;
+    /**
+     * Hard cap on records returned for one query. When a window holds more
+     * than this, the NEWEST records are returned and the older part of the
+     * window is absent rather than summarised.
+     */
+    readonly maxRecordsPerQuery: number;
+  };
+  /** Exactly what `hit` / `miss` / `late` mean for THIS source. */
+  readonly statusSemantics: ObservationStatusSemantics;
+  /** What `AttestationRecord.slot` identifies for this source. */
+  readonly roundIdentifier: {
+    readonly field: string;
+    readonly meaning: string;
+  };
+  /**
+   * Whether `ValidatorHistory.stake` is a measured value. When `false` the
+   * stake figure is a placeholder and absolute penalty amounts are meaningless;
+   * consumers must show the percentage only.
+   */
+  readonly stake: {
+    readonly available: boolean;
+    readonly note: string;
+  };
+  /**
+   * Whether the records are consensus attestation duty outcomes. `false` for
+   * every source this build ships; `note` says so in operator-readable terms.
+   */
+  readonly consensusAttestation: {
+    readonly available: boolean;
+    readonly note: string;
+  };
+}
+
+/** Envelope returned by the live attestation-history endpoint when a source is registered. */
+export interface LiveAttestationHistoryResponse {
+  readonly synthetic: false;
+  readonly demo: false;
+  readonly provenance: "live";
+  readonly source: string;
+  readonly window: TimelineWindow;
+  /** Mandatory semantics declaration — see {@link AttestationSourceDescriptor}. */
+  readonly observation: AttestationSourceDescriptor;
+  readonly validators: ValidatorHistory[];
 }
 
 /**

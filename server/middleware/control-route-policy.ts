@@ -112,6 +112,20 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
     description: "Change classification rules or trigger recalibration.",
   },
   {
+    id: "nl-query-read",
+    pathPrefix: "/api/intelligence/nlquery",
+    scopes: Object.freeze(["nlquery.read"]),
+    description:
+      "Ask a natural-language process question (#216). This is a POST for "
+      + "transport reasons only — the question is free text that must not land "
+      + "in a URL, and therefore in access logs, proxy logs, and browser "
+      + "history — but it is semantically a READ and mutates nothing. Without "
+      + "this entry the default mutation policy would demand `write`, which "
+      + "would both lock read-only operators out of a read surface and imply a "
+      + "control privilege the route neither needs nor exercises. The "
+      + "route-local guard enforces the same `nlquery.read` scope.",
+  },
+  {
     id: "digital-twin-control",
     pathPrefix: "/api/intelligence/digitaltwin/operate",
     scopes: Object.freeze(["control.write"]),

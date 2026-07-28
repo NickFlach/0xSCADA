@@ -109,7 +109,9 @@ import {
   type ValidatorStateWatermarkRecord,
 } from "../storage";
 import type {
+  AttestationSourceDescriptor,
   AttestationSourceUnavailableResponse,
+  LiveAttestationHistoryResponse,
   SyntheticAttestationHistoryResponse,
   TimelineWindow,
   ValidatorHistory,
@@ -752,36 +754,50 @@ function handleClientError(err: unknown, res: Response, nodeId: string, key: str
  * Backs the Slashing & Liveness Visualizer. Read-only: this router never writes
  * and never slashes anything.
  *
- * ── WHY THERE IS NO LIVE ATTESTATION FEED HERE ──────────────────────────────
+ * ── CONSENSUS ATTESTATION DUTY HISTORY REMAINS UNAVAILABLE ──────────────────
  *
  * PR #514 originally served a seeded PRNG from `GET /api/nodes/history` as
  * though it were attestation history. That was rejected, correctly: it violates
- * the repository Integrity Rule ("NO fabricated data"). Before rewriting it the
- * tree was searched for a real source, and there is none:
+ * the repository Integrity Rule ("NO fabricated data"). The tree was searched
+ * for a real per-slot duty source, and there is still none:
  *
  *   - `server/blockchain/validator-health.ts` is a real, tested monitor, but it
  *     polls the oxscada node `GET /status` surface, whose schema
  *     (height / peers / mempool / Kuramoto phase / uptime_ticks) carries no
  *     per-slot attestation duty outcome at all. It also keeps only the latest
- *     sample — there is no history — and it is not constructed anywhere in
- *     production code, only in its own test.
+ *     sample — there is no history.
  *   - `server/blockchain.ts` is a declared stub: `isConnected()` returns false
  *     and `getBlockchainHealth()` reports "Not implemented". Chain integration
  *     is opt-in via ENABLE_BLOCKCHAIN and there is no attestation RPC behind it.
  *   - The cross-node state surface above proxies a validator's view of a state
  *     key. It is a point-in-time signed read, not a per-slot duty log, so it
  *     cannot answer "did validator N attest in slot S?" either.
- *   - Neither `shared/schema.ts` nor any migration has an attestations table,
- *     and the batch-anchoring pipeline anchors Merkle roots of industrial
- *     events — not validator duties.
+ *   - The batch-anchoring pipeline anchors Merkle roots of industrial events —
+ *     not validator duties.
  *
- * So this build genuinely cannot report attestation history. Rather than fake
- * it, the endpoints are split by provenance:
+ * That has not changed and is not papered over anywhere.
+ *
+ * ── WHAT THIS BUILD *CAN* OBSERVE, AND DOES ─────────────────────────────────
+ *
+ * `server/blockchain/liveness-collector.ts` polls each configured node's
+ * `/status` on a cadence and persists the result of every round: whether the
+ * node answered, and whether the height it reported advanced. That is real
+ * observed data about a validator at a real moment in time, so it satisfies the
+ * `LiveAttestationSource` contract below and is served with `synthetic: false`.
+ * It is NOT consensus attestation, so it is named "observed liveness"
+ * everywhere and every response carries a mandatory descriptor stating exactly
+ * what `hit` / `miss` / `late` mean for it. The collector is OFF unless
+ * `VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true`; with no source registered this
+ * route behaves exactly as it did before — 503, never generated records.
+ *
+ * The endpoints are split by provenance:
  *
  *   GET /api/nodes/attestation-history
- *       The live endpoint. Fails closed with HTTP 503 and a machine-readable
- *       `attestation_source_unavailable` body while no feed exists. It never
- *       falls back to synthetic records.
+ *       The live endpoint. Serves a registered observed source with
+ *       `synthetic: false` plus its semantics descriptor. With no registered
+ *       source it fails closed with HTTP 503 and a machine-readable
+ *       `attestation_source_unavailable` body. It never falls back to
+ *       synthetic records, and a failing source surfaces as 502.
  *
  *   GET /api/nodes/attestation-history/demo
  *       Explicitly-synthetic demo data for exercising the (real, unit-tested)
@@ -790,9 +806,7 @@ function handleClientError(err: unknown, res: Response, nodeId: string, key: str
  *       carries the canonical notice string, and sets `X-Data-Provenance:
  *       synthetic` plus an RFC 9111 `Warning: 199` header.
  *
- * When a real feed lands, register it with `registerLiveAttestationSource()`
- * below and the live route serves it with `synthetic: false`. Do not point the
- * live route at `server/demo/`.
+ * Do not point the live route at `server/demo/`.
  */
 const attestationRouter = Router();
 
@@ -806,15 +820,23 @@ export const DEMO_ENV_FLAG = "SLASHING_DEMO_DATA=true";
 // ---------------------------------------------------------------------------
 
 /**
- * A live per-validator attestation feed.
+ * A live per-validator feed.
  *
  * `history` must return records that were OBSERVED. An implementation that
  * computes, estimates, interpolates or randomises duty outcomes is not a live
  * source and must not be registered here.
+ *
+ * `descriptor` is MANDATORY. `hit` / `miss` / `late` are generic words whose
+ * meaning depends entirely on what the source measured, and an operator must
+ * never be able to read an observed-liveness `miss` ("the node did not answer
+ * this poll round") as a missed consensus duty. A source that will not state
+ * its own semantics cannot be served.
  */
 export interface LiveAttestationSource {
-  /** Stable identifier reported to operators, e.g. "oxscada-rpc". */
+  /** Stable identifier reported to operators, e.g. "oxscada-observed-liveness". */
   readonly id: string;
+  /** Machine-readable declaration of what was measured and what each status means. */
+  readonly descriptor: AttestationSourceDescriptor;
   history(
     window: TimelineWindow,
     validatorId?: string,
@@ -824,16 +846,16 @@ export interface LiveAttestationSource {
 /**
  * The registered live source, if any.
  *
- * Nothing in this repository registers one today — see the section header — so
- * the live route reports "unavailable". This is an empty registry, not a stub
- * implementation: the moment a real feed calls
- * `registerLiveAttestationSource()` at startup, the live route serves it.
+ * This is an empty registry, not a stub implementation. On a default
+ * deployment nothing registers a source and the live route reports
+ * "unavailable"; the observed-liveness collector registers one at startup when
+ * it is explicitly enabled.
  */
 let liveAttestationSource: LiveAttestationSource | undefined;
 
 /**
- * Wire a real observed-attestation feed into the live route. Intended to be
- * called once during server startup by whatever module owns the feed.
+ * Wire an observed feed into the live route. Intended to be called once during
+ * server startup by whatever module owns the feed.
  */
 export function registerLiveAttestationSource(
   source: LiveAttestationSource,
@@ -855,11 +877,27 @@ export function isDemoDataEnabled(): boolean {
   return process.env.SLASHING_DEMO_DATA === "true";
 }
 
+/**
+ * Why the live route is answering 503 on THIS deployment.
+ *
+ * Two separate facts, kept separate on purpose:
+ *   1. Consensus attestation duty history is unavailable in this build, full
+ *      stop. The oxscada /status surface exposes no per-slot duty outcome and
+ *      nothing else records one. That is a property of the build.
+ *   2. The observed-liveness source that this build *can* serve is not running
+ *      here, because it is opt-in. That is a property of the deployment, and it
+ *      is the one an operator can act on.
+ */
 const NO_LIVE_SOURCE_REASON =
-  "No live attestation feed is compiled into this build. The oxscada node " +
-  "/status surface reports height, peers, mempool and Kuramoto phase but no " +
-  "per-slot attestation duty outcome, and nothing in this repository persists " +
-  "per-validator duty history.";
+  "No live source is registered on this deployment. Consensus attestation duty " +
+  "history is unavailable in this build at all: the oxscada node /status " +
+  "surface reports height, peers, mempool, uptime ticks and Kuramoto phase but " +
+  "no per-slot attestation duty outcome, and nothing in this repository records " +
+  "one. An observed-liveness feed IS available — it records, per poll round, " +
+  "whether each configured node answered and whether the height it reported " +
+  "advanced — but it is opt-in: set VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true " +
+  "and configure ANCHOR_NODE_URLS. Observed liveness is not consensus " +
+  "attestation and is labelled as such wherever it is served.";
 
 function unavailableBody(): AttestationSourceUnavailableResponse {
   return {
@@ -901,8 +939,12 @@ const DemoHistoryQuerySchema = HistoryQuerySchema.extend({
 /**
  * GET /api/nodes/attestation-history?window=24h[&validatorId=...]
  *
- * Live per-validator attestation history. Read-only. Returns 503 while no live
- * source is wired — never synthetic records.
+ * Live per-validator history from the registered observed source. Read-only.
+ * Returns 503 while no live source is wired — never synthetic records.
+ *
+ * The response always carries the source's `observation` descriptor, so a
+ * consumer can tell an observed-liveness `miss` ("the node did not answer this
+ * poll round") from a consensus duty miss without out-of-band knowledge.
  */
 attestationRouter.get(
   "/attestation-history",
@@ -924,14 +966,21 @@ attestationRouter.get(
     const { window, validatorId } = parsed.data;
     try {
       const validators = await source.history(window, validatorId);
-      return res.json({
+      const descriptor: AttestationSourceDescriptor = source.descriptor;
+      const body: LiveAttestationHistoryResponse = {
         synthetic: false,
         demo: false,
         provenance: "live",
         source: source.id,
         window,
+        observation: descriptor,
         validators,
-      });
+      };
+      // Provenance survives body truncation, proxying and logging. `live` here
+      // means observed — it does not mean consensus attestation, which the
+      // descriptor's `kind` states explicitly.
+      res.setHeader("X-Data-Provenance", `live:${descriptor.kind}`);
+      return res.json(body);
     } catch (err) {
       // A failing feed must surface as a failure, never as substituted data.
       return res.status(502).json({
