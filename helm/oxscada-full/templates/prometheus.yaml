@@ -1,4 +1,7 @@
 {{- if and .Values.observability.enabled .Values.observability.prometheus.enabled }}
+{{- if not .Values.server.enabled }}
+{{- fail "server.enabled must be true when the built-in Prometheus scrape target is enabled" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

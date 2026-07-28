@@ -27,7 +27,8 @@ export {
   // Express integration
   metricsMiddleware,
   metricsHandler,
-  
+  collectProcessMetrics,
+
   // HTTP metrics
   httpRequestsTotal,
   httpRequestDuration,

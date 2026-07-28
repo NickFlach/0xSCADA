@@ -1,3 +1,6 @@
 
 # Use bd merge for beads JSONL files
 .beads/issues.jsonl merge=beads
+
+# Packet captures are binary fixtures — never apply EOL conversion (#465)
+*.pcap binary

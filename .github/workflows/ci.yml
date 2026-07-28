@@ -11,7 +11,14 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  NODE_VERSION: '20'
+  # Node 22 ships npm 10.9+, which accepts the package-lock.json format that
+  # current npm (and therefore Dependabot) generates. Node 20's bundled npm
+  # 10.8.2 rejected those lockfiles with EUSAGE "package.json and
+  # package-lock.json are in sync", so every Dependabot PR failed at `npm ci`
+  # and needed a manual `npx npm@10.8.2 install --package-lock-only` rebase.
+  # Keep every CI setup-node pin in this repo on the same major (see
+  # test/ci/workflow-node-version.test.ts).
+  NODE_VERSION: '22'
   REGISTRY: ghcr.io
   IMAGE_PREFIX: ghcr.io/${{ github.repository_owner }}/0xscada
 

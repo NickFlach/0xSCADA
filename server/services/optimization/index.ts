@@ -15,7 +15,7 @@ export * from './correlation';
 
 import { EventEmitter } from 'events';
 import { PIDController, PIDControllerConfig } from './pid-controller';
-import { PIDAutoTuner, AutoTuneMode } from './pid-autotuner';
+import { PIDAutoTuner } from './pid-autotuner';
 import { DecoherenceScheduler } from './decoherence-scheduler';
 
 export class OptimizationService extends EventEmitter {
@@ -47,10 +47,12 @@ export class OptimizationService extends EventEmitter {
     return this.controllers.get(id);
   }
 
-  createAutoTuner(controllerId: string, mode: AutoTuneMode = 'suggest'): PIDAutoTuner | undefined {
+  /** Auto-tuners only ever recommend; applying a recommendation is the
+   *  approval-gated job of `server/services/tuning` (#215). */
+  createAutoTuner(controllerId: string): PIDAutoTuner | undefined {
     const controller = this.controllers.get(controllerId);
     if (!controller) return undefined;
-    const tuner = new PIDAutoTuner(controller, mode);
+    const tuner = new PIDAutoTuner(controller);
     this.autoTuners.set(controllerId, tuner);
     return tuner;
   }

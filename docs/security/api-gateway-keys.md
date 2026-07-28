@@ -45,6 +45,7 @@ narrower control-route policy applies:
 | `safety.resume` | Blueprint safe-state resume |
 | `tuning.write`, `tuning.approve` | Tuning changes and human approvals |
 | `control.write` | Digital-twin control operations |
+| `validators.read` | Validator Dashboard proxy (`GET /api/validators`); read-only aggregate of the `ANCHOR_NODE_URLS` fleet |
 | `security.admin` | HSM control operations |
 | `websocket.admin` | Streaming-client administration |
 

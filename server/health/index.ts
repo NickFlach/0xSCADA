@@ -11,10 +11,31 @@
 import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewayCheck } from './health-manager';
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
-import { registry, metricsHandler } from '../metrics';
+import { registry, collectProcessMetrics } from '../metrics';
 import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
 import { getBridgeHealthStatus } from '../bridge';
+import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
+import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
+import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
+import type { Response } from 'express';
+// Tick-aware scheduler (#458): surface schedulingMode in /health and append
+// blueprint tick telemetry to /metrics.
+//
+// This module only READS the scheduling posture. Applying real-time scheduling
+// is deliberately NOT a health-module import side effect: pinning the process
+// that serves Express/WebSocket to SCHED_FIFO can starve the box. Scheduling is
+// applied only by an explicit `applyScheduler()` call from a composition root
+// that owns a dedicated control process (see server/blueprint/scheduler.ts).
+import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
+
+// Control-loop latency telemetry (#460): publish the sentinel probe's liveness
+// gauge as part of normal server composition so `scada_control_loop_probe_up`
+// is a real series on every scrape — 0 while the (opt-in) probe is not running,
+// 1 once it is. Without this the "probe absent" alert could never fire because
+// the series would simply not exist. This only publishes the current status; it
+// never starts a probe (server/bridge/index.ts owns that, behind its opt-in).
+publishControlLoopProbeStatus();
 
 // ── Prometheus health gauges ─────────────────────────────────────────────────
 // These gauges let Prometheus scrape health status as numeric metrics.
@@ -79,8 +100,10 @@ healthManager.registerSimple(
   'agent-runtime',
   async () => {
     try {
+      // Report whether the runtime can actually serve agents, not merely
+      // whether the module resolves (#217).
       const { agentRuntime } = await import('../agents/runtime');
-      return agentRuntime != null;
+      return await agentRuntime.isRunning();
     } catch {
       return false;
     }
@@ -130,6 +153,57 @@ healthManager.registerSimple(
   false, // Optional, depends on configuration
 );
 
+// 9. Deterministic blueprint control loop (#457).
+//    Optional and OFF by default. "Disabled" is reported as healthy — an
+//    intentionally-off subsystem is not a fault — while a fail-closed load error
+//    is reported as unhealthy with the reason attached.
+healthManager.register({
+  name: 'blueprint-control-loop',
+  required: false,
+  check: async () => {
+    const status = getBlueprintControlLoop().status();
+    const health = describeBlueprintControlLoopHealth(status);
+    return {
+      name: 'blueprint-control-loop',
+      status: health.status,
+      lastCheck: new Date(),
+      message: health.message,
+      details: status,
+    };
+  },
+});
+
+// 10. Blueprint safe-state binding (#459). Optional for general API readiness.
+// Reports the real binding state: `healthy` when nothing is configured (nothing
+// is loaded, so nothing is being guarded and nothing is being claimed),
+// `healthy` when every armed blueprint is running, and `degraded` when a binding
+// was refused or an armed blueprint is not RUNNING. The `message`/`details`
+// always say which of those it is.
+healthManager.register({
+  name: 'blueprint-safety-runtime',
+  required: false,
+  check: async () => {
+    const status = getBlueprintProductionSafetyStatus();
+    return {
+      name: 'blueprint-safety-runtime',
+      status: status.state === 'DEGRADED' ? 'degraded' : 'healthy',
+      lastCheck: new Date(),
+      message: status.reason,
+      details: {
+        state: status.state,
+        capabilities: status.capabilities,
+        registeredBlueprintIds: status.registeredBlueprintIds,
+        rejected: status.rejected,
+      },
+    };
+  },
+});
+// 11. Tick-aware scheduler (#458) — REPORTS schedulingMode (realtime|fallback).
+//     Read-only by construction: the check calls healthSummary(), which never
+//     probes the kernel and never applies a policy. Real-time scheduling stays
+//     off unless a dedicated control process opts in via OXSCADA_RT_ENABLED.
+healthManager.register(createSchedulerCheck());
+
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
   healthStatusGauge.set(result.healthy ? 1 : 0);
@@ -144,5 +218,13 @@ healthManager.onCheckComplete((result) => {
 // ── Export the pre-built router ──────────────────────────────────────────────
 export const healthRouter = healthManager.createRouter();
 
-// Expose Prometheus metrics alongside health routes so /metrics works
-healthRouter.get('/metrics', metricsHandler);
+// Expose Prometheus metrics alongside health routes so /metrics works.
+// Blueprint tick telemetry (#458) is appended to the same scrape: the shared
+// metrics use the `scada_` prefix while the blueprint tick gauges/histogram
+// carry their authoritative un-prefixed / `oxscada_` names, so both coexist in
+// one exposition document.
+healthRouter.get('/metrics', (_req, res: Response) => {
+  collectProcessMetrics();
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(`${registry.metrics()}\n${exposeBlueprintMetrics()}`);
+});

@@ -203,3 +203,187 @@ export function canonicalFrame(
   });
   return buildFrame(pdu, frameOpts);
 }
+
+// ── Non-GOOSE background traffic ─────────────────────────────────────────────
+
+/**
+ * A well-formed ARP request (EtherType 0x0806), padded to the 60-byte Ethernet
+ * minimum. Substation LANs carry this alongside GOOSE, so the replay fixture
+ * contains one to prove the backend's EtherType filter actually filters.
+ */
+export function buildArpRequestFrame(
+  senderMac = "00:11:22:33:44:66",
+  senderIp = [10, 0, 0, 1],
+  targetIp = [10, 0, 0, 2],
+): Buffer {
+  const sha = macBytes(senderMac);
+  const arp = Buffer.concat([
+    u16(0x0001), // htype: Ethernet
+    u16(0x0800), // ptype: IPv4
+    Buffer.from([6, 4]), // hlen, plen
+    u16(0x0001), // oper: request
+    sha,
+    Buffer.from(senderIp),
+    Buffer.alloc(6), // tha: unknown
+    Buffer.from(targetIp),
+  ]);
+  const frame = Buffer.concat([
+    macBytes("ff:ff:ff:ff:ff:ff"),
+    sha,
+    u16(0x0806),
+    arp,
+  ]);
+  // Ethernet minimum payload padding (14 + 28 = 42 → 60).
+  return Buffer.concat([frame, Buffer.alloc(Math.max(0, 60 - frame.length))]);
+}
+
+// ── Replay capture scenario ──────────────────────────────────────────────────
+
+/** Control block published by the replay scenario. */
+export const REPLAY_GOCB_REF = "IED1LD0/LLN0$GO$gcb01";
+export const REPLAY_DAT_SET = "IED1LD0/LLN0$DataSet1";
+export const REPLAY_APP_ID = 0x3001;
+export const REPLAY_DEST_MAC = "01:0c:cd:01:00:01";
+export const REPLAY_SRC_MAC = "00:11:22:33:44:55";
+export const REPLAY_TIME_ALLOWED_TO_LIVE = 2000;
+export const REPLAY_CONF_REV = 1;
+/** Absolute capture time of the first packet. */
+export const REPLAY_START_MS = 1_700_000_000_000;
+/**
+ * Publish→capture latency baked into every frame: each PDU's `t` is 2 ms before
+ * the packet's capture timestamp, so `goose_round_trip_us` observes ~2000 µs —
+ * inside the sub-4 ms GOOSE budget the issue asks to verify.
+ */
+export const REPLAY_PUBLISH_LATENCY_MS = 2;
+
+export interface ReplayScenarioPacket {
+  /** Absolute capture timestamp (ms since epoch). */
+  timestampMs: number;
+  /** Link-layer bytes. */
+  data: Buffer;
+  /** What this packet is for, mirrored into the generator's console output. */
+  description: string;
+}
+
+function replayFrame(
+  offsetMs: number,
+  description: string,
+  pdu: Partial<PduFields>,
+  frameOpts: FrameOptions = {},
+): ReplayScenarioPacket {
+  const timestampMs = REPLAY_START_MS + offsetMs;
+  const apdu = buildPdu({
+    gocbRef: REPLAY_GOCB_REF,
+    timeAllowedToLive: REPLAY_TIME_ALLOWED_TO_LIVE,
+    datSet: REPLAY_DAT_SET,
+    goID: "gcb01",
+    confRev: REPLAY_CONF_REV,
+    t: timestampMs - REPLAY_PUBLISH_LATENCY_MS,
+    stNum: 1,
+    sqNum: 0,
+    allData: [],
+    ...pdu,
+  });
+  return {
+    timestampMs,
+    description,
+    data: buildFrame(apdu, {
+      destMac: REPLAY_DEST_MAC,
+      srcMac: REPLAY_SRC_MAC,
+      appId: REPLAY_APP_ID,
+      ...frameOpts,
+    }),
+  };
+}
+
+/**
+ * The exact packet sequence stored in `fixtures/goose-replay.pcap`.
+ *
+ * It is a *synthetic* capture — hand-encoded by {@link buildPdu}/{@link
+ * buildFrame}, not sniffed from a real IED — because no relay is available to
+ * this repository. It is nonetheless a real, standards-shaped GOOSE trace: the
+ * committed `.pcap` is byte-for-byte `encodePcap(buildReplayScenario())`, which
+ * `pcap-replay.test.ts` asserts, so the binary fixture can never drift from
+ * this source.
+ *
+ * Sequence (offsets in ms from the first packet):
+ *
+ *   0   stNum=1 sqNum=0  breaker open, quality good     → accepted
+ *   80  stNum=1 sqNum=1  retransmission, same state     → accepted
+ *   160 ARP request (not GOOSE)                         → filtered by the backend
+ *   200 stNum=2 sqNum=0  breaker CLOSED (state change)  → accepted
+ *   260 stNum=3 sqNum=0  quality → invalid + failure    → accepted, tag quality "bad"
+ *   300 stNum=2 sqNum=0  stale frame replayed on to the bus → rejected (stnum_regression)
+ *   340 stNum=4 sqNum=0  simulation bit set             → accepted, simulated=true
+ *   400 stNum=5 sqNum=0  802.1Q tagged (vid 100, pcp 4) → accepted
+ *   440 a different control block / APPID               → rejected (no_subscription)
+ */
+export function buildReplayScenario(): ReplayScenarioPacket[] {
+  const openState = [data.boolean(false), data.quality({ validity: "good" }), data.float32(41)];
+  const closedState = [data.boolean(true), data.quality({ validity: "good" }), data.float32(42.5)];
+
+  return [
+    replayFrame(0, "stNum=1 sqNum=0 — breaker open, quality good", {
+      stNum: 1,
+      sqNum: 0,
+      allData: openState,
+    }),
+    replayFrame(80, "stNum=1 sqNum=1 — retransmission of the same state", {
+      stNum: 1,
+      sqNum: 1,
+      allData: openState,
+    }),
+    {
+      timestampMs: REPLAY_START_MS + 160,
+      description: "ARP request — non-GOOSE background traffic, must be filtered",
+      data: buildArpRequestFrame(),
+    },
+    replayFrame(200, "stNum=2 sqNum=0 — breaker closed (state change)", {
+      stNum: 2,
+      sqNum: 0,
+      allData: closedState,
+    }),
+    replayFrame(260, "stNum=3 sqNum=0 — quality degrades to invalid+failure", {
+      stNum: 3,
+      sqNum: 0,
+      allData: [
+        data.boolean(true),
+        data.quality({ validity: "invalid", failure: true }),
+        data.float32(42.5),
+      ],
+    }),
+    replayFrame(300, "stNum=2 sqNum=0 — stale frame re-injected, must be rejected", {
+      stNum: 2,
+      sqNum: 0,
+      allData: closedState,
+    }),
+    replayFrame(340, "stNum=4 sqNum=0 — simulation bit set", {
+      stNum: 4,
+      sqNum: 0,
+      simulation: true,
+      allData: [data.boolean(false), data.quality({ validity: "good" }), data.float32(0)],
+    }),
+    replayFrame(
+      400,
+      "stNum=5 sqNum=0 — 802.1Q tagged (vid 100, pcp 4)",
+      {
+        stNum: 5,
+        sqNum: 0,
+        allData: [data.boolean(true), data.quality({ validity: "good" }), data.float32(43.25)],
+      },
+      { vlan: { id: 100, priority: 4 } },
+    ),
+    replayFrame(
+      440,
+      "a different control block on APPID 0x3002 — no matching subscription",
+      {
+        gocbRef: "IED2LD0/LLN0$GO$gcb09",
+        datSet: "IED2LD0/LLN0$DataSet1",
+        stNum: 7,
+        sqNum: 0,
+        allData: [data.boolean(true)],
+      },
+      { appId: 0x3002 },
+    ),
+  ];
+}

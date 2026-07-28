@@ -14,7 +14,6 @@ import { certificationRoutes } from "./routes/certifications";
 import artifactRoutes from "./routes/ArtifactRoutes";
 import { assetRoutes } from "./routes/assets";
 import { alarmRoutes } from "./routes/alarms";
-import pidRoutes from "./routes/pid";
 import { fluxRoutes } from "./routes/flux";
 import { gatewayRoutes } from "./routes/gateway";
 import { intelligenceRoutes } from "./routes/intelligence";
@@ -24,13 +23,23 @@ import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
 import { alarmCorrelationService } from "./services/alarm-correlation";
 import { predictiveRoutes } from "./routes/predictive";
 import { predictiveMaintenanceService } from "./services/predictive";
+import { tuningRoutes } from "./routes/tuning";
+import { tuningService } from "./services/tuning";
+import { marketplaceRoutes } from "./routes/marketplace";
+import { marketplaceService } from "./services/marketplace";
 import { governanceRoutes } from "./routes/governance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
+import {
+  nodeRoutes, // #454: cross-node state queries
+  nodesRoutes, // #456 slashing & liveness visualizer
+} from "./routes/nodes";
+import { blueprintSafeStateRoutes } from "./routes/blueprint-safe-state"; // #459
 import { blueprintRoutes } from "./routes/blueprints";
 import { vendorRoutes } from "./routes/vendors";
 import { codegenRoutes } from "./routes/codegen";
 import { adminAnchorRoutes } from "./routes/admin-anchor"; // #455 Anchor-Backend Switch UX
+import { validatorRoutes } from "./routes/validators"; // #453 Validator Dashboard proxy
 import { getFluxPublisher } from "./services/flux";
 
 import { tagStreamServer } from "./websocket/tag-stream";
@@ -60,7 +69,6 @@ export async function registerRoutes(
   app.use("/api/artifacts", artifactRoutes);
   app.use("/api/assets", assetRoutes);
   app.use("/api/alarms", alarmRoutes);
-  app.use("/api/pid", pidRoutes);
   app.use("/api/flux", fluxRoutes);
   app.use("/api/gateway", gatewayRoutes);
 
@@ -69,9 +77,22 @@ export async function registerRoutes(
   app.use("/api/twin", twinRoutes);  // ADR-0013 [13.3] (#214)
   app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
   app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
+  // ADR-0013 [13.4] (#215). PID tuning deliberately does NOT live under
+  // /api/pid: that prefix belongs to the P&ID diagram surface the client
+  // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
+  app.use("/api/tuning", tuningRoutes);
+  app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
+  app.use("/api/nodes", nodeRoutes); // #454: GET /api/nodes/:id/state/:key
+  app.use("/api/blueprint-safe-state", blueprintSafeStateRoutes); // #459 watchdog & safe-state
+  // #456 validator attestation history (read-only). The live endpoint fails
+  // closed with 503 while no observed-attestation feed is registered; synthetic
+  // demo data lives on a separate route that is off unless SLASHING_DEMO_DATA=true.
+  // Mounted after nodeRoutes on the same prefix: the two route sets are
+  // disjoint, so unmatched requests fall through from one router to the other.
+  app.use("/api/nodes", nodesRoutes);
 
   // Blueprint / vendor / codegen surfaces (extracted from this file, #446).
   // vendorRoutes and codegenRoutes span several top-level prefixes
@@ -81,6 +102,7 @@ export async function registerRoutes(
   app.use("/api", vendorRoutes);
   app.use("/api", codegenRoutes);
   app.use("/api/admin/anchor-backend", adminAnchorRoutes); // #455 Anchor-Backend Switch UX
+  app.use("/api/validators", validatorRoutes); // #453 Validator Dashboard (server-side node polling)
 
   // Convenience routes for agent outputs and proposals (redirect to agentRoutes)
   app.get("/api/agent-outputs", async (req, res, next) => {
@@ -146,6 +168,22 @@ export async function registerRoutes(
     unsubscribeTwin();
     void digitalTwinService.shutdown();
   });
+
+  // Start the tuning service (and its underlying optimization service)
+  // here — services/initializeServices() has no callers at startup (#215).
+  // initialize() opens the durable tuning-audit store and logs whether the
+  // approver allowlist and the gain-apply opt-in are configured, so a
+  // fail-closed deployment is visible at boot rather than at first approval.
+  void tuningService.initialize();
+  httpServer.once("close", () => {
+    void tuningService.shutdown();
+  });
+  // Load marketplace state and register the first-party plugin
+  // implementations here — services/initializeServices() has no callers at
+  // startup (#217). This is awaited rather than fired-and-forgotten: the
+  // publish path checks plugin ownership against the loaded registry, and an
+  // ownership check against an unhydrated registry would authorize a hijack.
+  await marketplaceService.initialize();
 
   // WebSocket metrics endpoint. The legacy event-stream server was removed;
   // only the tag and unified streams report (#446, #479).

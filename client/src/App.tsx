@@ -22,6 +22,11 @@ import Integrity from './pages/integrity';
 import AnchorBackend from './pages/admin/AnchorBackend';
 import ApiCredentialControl from './components/ApiCredentialControl';
 
+// Validator Dashboard (issue #453)
+import ValidatorDashboard from './pages/ValidatorDashboard';
+// Slashing & Liveness Visualizer (issue #456)
+import SlashingVisualizer from './pages/SlashingVisualizer';
+
 const App: React.FC = () => {
   return (
     <div style={{ backgroundColor: '#0a0a0a', minHeight: '100vh', color: '#e5e5e5' }}>
@@ -68,9 +73,19 @@ const App: React.FC = () => {
               Integrity
             </a>
           </Link>
+          <Link href="/validators">
+            <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
+              Validators
+            </a>
+          </Link>
           <Link href="/admin/anchor-backend">
             <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
               Anchor Backend
+            </a>
+          </Link>
+          <Link href="/slashing">
+            <a style={{ color: '#e5e5e5', textDecoration: 'none', fontSize: 14 }}>
+              Slashing
             </a>
           </Link>
         </nav>
@@ -90,8 +105,14 @@ const App: React.FC = () => {
           <Route path="/security" component={SecurityCompliance} />
           <Route path="/integrity" component={Integrity} />
 
+          {/* Validator Dashboard (issue #453) */}
+          <Route path="/validators" component={ValidatorDashboard} />
+
           {/* Admin: Anchor-Backend Switch UX (issue #455) */}
           <Route path="/admin/anchor-backend" component={AnchorBackend} />
+
+          {/* Slashing & Liveness Visualizer (issue #456) */}
+          <Route path="/slashing" component={SlashingVisualizer} />
 
           {/* Catch-all route */}
           <Route>

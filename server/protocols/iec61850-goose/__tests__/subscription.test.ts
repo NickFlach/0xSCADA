@@ -14,7 +14,12 @@ import {
   qualityToTagQuality,
   type GooseSubscriptionConfig,
 } from "../subscription.js";
-import { GooseSubscriber, detectRawSocketCapability } from "../index.js";
+import {
+  GooseSubscriber,
+  NullGooseCaptureBackend,
+  detectRawSocketCapability,
+  type GooseCaptureBackend,
+} from "../index.js";
 import { parseGooseFrame } from "../frame-parser.js";
 import type { GooseTagUpdate } from "../types.js";
 import { canonicalFrame, data, buildPdu, buildFrame } from "./fixtures.js";
@@ -276,7 +281,7 @@ describe("GooseSubscription — MAC / confRev / ndsCom", () => {
 });
 
 describe("GooseSubscriber — service", () => {
-  it("never opens a raw socket on a non-Linux host (capability disabled)", () => {
+  it("never opens a raw socket on a non-Linux host (capability unavailable)", () => {
     const cap = detectRawSocketCapability("win32", false);
     expect(cap.available).toBe(false);
     expect(cap.reason).toMatch(/Linux/);
@@ -288,11 +293,58 @@ describe("GooseSubscriber — service", () => {
     expect(cap.reason).toMatch(/native/i);
   });
 
-  it("start() transitions to 'disabled' instead of throwing", () => {
-    const sub = new GooseSubscriber({ iface: "eth0", subscriptions: [baseConfig] });
-    const state = sub.start();
-    expect(state).toBe("disabled");
-    sub.stop();
+  it("start() reports 'unavailable' with the default backend instead of throwing", async () => {
+    const sub = new GooseSubscriber({
+      backend: new NullGooseCaptureBackend({ iface: "eth0" }),
+      subscriptions: [baseConfig],
+    });
+    await expect(sub.start()).resolves.toBe("unavailable");
+    await sub.stop();
+  });
+
+  it("consumes frames delivered by an injected capture backend", async () => {
+    const received: GooseTagUpdate[] = [];
+    let deliver: ((frame: Buffer, at: number) => void) | null = null;
+    // The smallest possible live-backend stand-in: it exists to prove the seam
+    // is injectable, NOT to imitate real Layer-2 capture.
+    const backend: GooseCaptureBackend = {
+      name: "test-injected",
+      availability: () => ({ available: true, reason: "test backend" }),
+      open: (onFrame) => {
+        deliver = onFrame;
+        return Promise.resolve();
+      },
+      close: () => {
+        deliver = null;
+        return Promise.resolve();
+      },
+    };
+
+    const sub = new GooseSubscriber({
+      backend,
+      subscriptions: [baseConfig],
+      onTagUpdate: (u) => received.push(u),
+    });
+    await expect(sub.start()).resolves.toBe("running");
+    expect(deliver).not.toBeNull();
+    deliver!(canonicalFrame(), 1_700_000_000_010);
+    expect(received).toHaveLength(3);
+
+    await sub.stop();
+    expect(sub.getState()).toBe("stopped");
+    expect(deliver).toBeNull();
+  });
+
+  it("start() reports 'error' when an available backend fails to open", async () => {
+    const backend: GooseCaptureBackend = {
+      name: "test-broken",
+      availability: () => ({ available: true, reason: "test backend" }),
+      open: () => Promise.reject(new Error("socket refused")),
+      close: () => Promise.resolve(),
+    };
+    const sub = new GooseSubscriber({ backend, subscriptions: [baseConfig] });
+    await expect(sub.start()).resolves.toBe("error");
+    await sub.stop();
   });
 
   it("decodes + validates a frame via handleFrame and invokes the sink", () => {

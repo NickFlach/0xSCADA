@@ -5,6 +5,7 @@
  */
 
 import { sqliteTable, text, integer, real, blob } from "drizzle-orm/sqlite-core";
+import type { GainEnvelope, TuningGains } from "./types/tuning";
 
 // Simplified schemas for SQLite (development mode)
 export const sites = sqliteTable("sites", {
@@ -288,6 +289,99 @@ export const alarmHistory = sqliteTable("alarm_history", {
   clearedAt: integer("cleared_at", { mode: "timestamp" }),
   metadata: text("metadata", { mode: "json" }),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── Validator Registry (#454) ───────────────────────────────────────────────
+// Dev-mode parity with the Postgres schema (`shared/schema.ts`) for the
+// cross-node `/state/:key` proxy. timestamptz → integer timestamp, boolean →
+// integer(mode boolean), bigint → integer, following this file's conventions.
+// The development database is created from the matching DDL in
+// `server/storage.ts` (`validatorRegistrySqliteSchema`); these declarations pin
+// the column contract against Postgres via
+// `shared/__tests__/schema-parity.test.ts`, and every column is exercised
+// against the live dev database by `server/__tests__/validator-registry.test.ts`.
+
+export const validatorNodes = sqliteTable("validator_nodes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  rpcUrl: text("rpc_url").notNull(),
+  operatorId: text("operator_id"),
+  region: text("region"),
+  enabled: integer("enabled", { mode: "boolean" }).default(true).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const validatorPubkeys = sqliteTable("validator_pubkeys", {
+  id: text("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  algorithm: text("algorithm").default("ed25519").notNull(),
+  publicKeyPem: text("public_key_pem").notNull(),
+  keyId: text("key_id").notNull(),
+  active: integer("active", { mode: "boolean" }).default(true).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  retiredAt: integer("retired_at", { mode: "timestamp" }),
+});
+
+export const validatorStateWatermarks = sqliteTable("validator_state_watermarks", {
+  id: text("id").primaryKey(),
+  nodeId: text("node_id").notNull(),
+  stateKey: text("state_key").notNull(),
+  blockHeight: integer("block_height").notNull(),
+  observedAt: integer("observed_at", { mode: "timestamp" }).notNull(),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── Blueprint Safe-State audit trail (#459) ─────────────────────────────────
+// Dev-mode parity with the Postgres table in `shared/schema.ts`, which is
+// created in production by migrations/0009_blueprint_safe_state_log.sql. The
+// safe-state audit must be durable on BOTH dialects — a swallowed audit write
+// would let the controller report a safe-state transition that was discarded.
+// jsonb → text(mode json), timestamptz → integer timestamp, per this file's
+// conventions. Kept in sync by `shared/__tests__/schema-parity.test.ts`; the
+// physical SQLite DDL lives in `blueprintSqliteSchema` (server/storage.ts).
+export const blueprintSafeStateLog = sqliteTable("blueprint_safe_state_log", {
+  id: text("id").primaryKey(),
+  blueprintId: text("blueprint_id").notNull(),
+  siteId: text("site_id"),
+  transition: text("transition").notNull(),
+  safeState: text("safe_state", { mode: "json" }).notNull(),
+  tickBudgetMs: integer("tick_budget_ms").notNull(),
+  consecutiveMisses: integer("consecutive_misses"),
+  operator: text("operator"),
+  reason: text("reason").notNull(),
+  anchorHash: text("anchor_hash").notNull(),
+  anchorTxHash: text("anchor_tx_hash"),
+  metadata: text("metadata", { mode: "json" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+// ─── PID Tuning Audit (ADR-0013 [13.4], #215) ────────────────────────────────
+// Dev-mode parity with `shared/schema.ts`. jsonb → text(mode json), timestamptz
+// → integer timestamp_ms (millisecond precision keeps audit rows totally
+// ordered), uuid → text. Append-only is enforced by BEFORE UPDATE / BEFORE
+// DELETE triggers created alongside the table (see
+// server/services/tuning/audit-store.ts for the SQLite DDL and migration 0010
+// for the Postgres equivalent). Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+export const pidTuningAudit = sqliteTable("pid_tuning_audit", {
+  id: text("id").primaryKey(),
+  proposalId: text("proposal_id").notNull(),
+  controllerId: text("controller_id").notNull(),
+  method: text("method").notNull(),
+  decision: text("decision").notNull(),
+  proposedBy: text("proposed_by").notNull(),
+  decidedBy: text("decided_by"),
+  currentGains: text("current_gains", { mode: "json" }).$type<TuningGains>().notNull(),
+  proposedGains: text("proposed_gains", { mode: "json" }).$type<TuningGains>().notNull(),
+  appliedGains: text("applied_gains", { mode: "json" }).$type<TuningGains>(),
+  envelope: text("envelope", { mode: "json" }).$type<GainEnvelope>().notNull(),
+  envelopeDecision: text("envelope_decision").notNull(),
+  reasonCode: text("reason_code"),
+  detail: text("detail"),
+  recordedAt: integer("recorded_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
 });
 
 // Basic exports for compatibility

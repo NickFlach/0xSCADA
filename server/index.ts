@@ -19,6 +19,10 @@ import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
+import { startBlueprintControlLoop } from "./blueprint/control-loop";
+// Blueprint watchdog / safe-state composition root (#459). Off unless the
+// deployment supplies BLUEPRINT_SAFETY_BINDINGS[_FILE].
+import { blueprintSafetyHost } from "./blueprint/safety-host";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -189,12 +193,64 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "Sparkplug B bridge failed to start");
       }
 
+      // Start the IEC 61850 GOOSE subscriber (Issue #465) — no-op unless
+      // GOOSE_SUBSCRIPTIONS_FILE is configured. Capture is opt-in: with
+      // GOOSE_PCAP_FILE it replays a capture, with GOOSE_CAPTURE=live it
+      // captures EtherType 0x88B8 off GOOSE_IFACE through a libpcap tool
+      // (needs CAP_NET_RAW), otherwise it starts "unavailable" and logs why.
+      try {
+        const { startGooseSubscriber } = await import("./protocols/iec61850-goose");
+        await startGooseSubscriber();
+      } catch (err) {
+        logError(err, "IEC 61850 GOOSE subscriber failed to start");
+      }
+
+      // Start OPC-UA Server Mode (Issue #461) — OFF unless
+      // OPCUA_SERVER_ENABLED=true. Defaults bind loopback with Basic256Sha256
+      // and no anonymous access; an invalid configuration throws here and leaves
+      // the process without an OPC-UA listener rather than opening a permissive
+      // one.
+      try {
+        const { startOpcuaServer } = await import(
+          "./protocols/opcua-server/runtime"
+        );
+        await startOpcuaServer();
+      } catch (err) {
+        logError(err, "OPC-UA Server Mode failed to start — not listening");
+      }
+
+      // Start Modbus TCP Server Mode (Issue #462) — no-op unless
+      // MODBUS_SERVER_ENABLED=true. The protocol has no authentication, so the
+      // listener defaults to loopback, refuses peers outside its allowlist, and
+      // serves write function codes only when separately opted in. A
+      // configuration or register-map failure is terminal for the listener:
+      // it is logged and no socket is bound, never downgraded to defaults.
+      try {
+        const { startModbusServer } = await import("./protocols/modbus-server");
+        await startModbusServer();
+      } catch (err) {
+        logError(err, "Modbus TCP Server Mode not started (failed closed)");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 
       // Record the boot-resolved anchor routing: runtime switches (#455) are
       // process-local, so a restart reverts to env and this makes that visible.
       logAnchorBackendBootState();
+
+      // Deterministic blueprint control loop (#457). OFF unless
+      // BLUEPRINT_CONTROL_LOOP_ENABLED === "true" and a blueprint file is
+      // configured. It executes compiled control logic on a fixed cadence and
+      // publishes scheduling telemetry; it has NO field write path, so enabling
+      // it cannot actuate a plant. Fails closed: a bad blueprint is logged and
+      // the loop stays off rather than taking the server down.
+      startBlueprintControlLoop();
+      // Arm the blueprint watchdogs (#459). No-op unless this deployment
+      // supplies BLUEPRINT_SAFETY_BINDINGS / BLUEPRINT_SAFETY_BINDINGS_FILE;
+      // the resulting state is always reported by /api/blueprint-safe-state.
+      const safetyStatus = blueprintSafetyHost.start();
+      log(`Blueprint safety host: ${safetyStatus.state} — ${safetyStatus.reason}`);
 
       // Start periodic health monitoring (every 30 s)
       healthManager.startPeriodicCheck(30_000);

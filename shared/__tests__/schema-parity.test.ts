@@ -1,21 +1,41 @@
 import { describe, it, expect } from 'vitest';
 import { getTableColumns, getTableName } from 'drizzle-orm';
 import type { Table } from 'drizzle-orm';
-import { alarms as pgAlarms, alarmHistory as pgAlarmHistory } from '../schema';
+import {
+  alarms as pgAlarms,
+  alarmHistory as pgAlarmHistory,
+  validatorNodes as pgValidatorNodes,
+  validatorPubkeys as pgValidatorPubkeys,
+  validatorStateWatermarks as pgValidatorStateWatermarks,
+  blueprintSafeStateLog as pgBlueprintSafeStateLog,
+  pidTuningAudit as pgPidTuningAudit,
+} from '../schema';
 import {
   alarms as sqliteAlarms,
   alarmHistory as sqliteAlarmHistory,
+  validatorNodes as sqliteValidatorNodes,
+  validatorPubkeys as sqliteValidatorPubkeys,
+  validatorStateWatermarks as sqliteValidatorStateWatermarks,
+  blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
+  pidTuningAudit as sqlitePidTuningAudit,
 } from '../schema-sqlite';
 
 /**
  * Schema parity (issue #7): `shared/schema.ts` (Postgres, source of truth) and
- * `shared/schema-sqlite.ts` (dev-mode fallback) must define the same alarm
- * tables. Column *types* legitimately differ per dialect (pgEnum → text,
- * jsonb → text, timestamptz → integer), but the table names, property keys,
- * and SQL column names must match so alarm-touching code behaves the same in
- * dev SQLite as in production Postgres. If either schema adds, drops, or
- * renames an alarm column without the other, this suite fails instead of the
+ * `shared/schema-sqlite.ts` (dev-mode fallback) must define the same tables.
+ * Column *types* legitimately differ per dialect (pgEnum → text, jsonb → text,
+ * timestamptz → integer, bigint → integer), but the table names, property keys,
+ * and SQL column names must match so the code that touches them behaves the
+ * same in dev SQLite as in production Postgres. If either schema adds, drops,
+ * or renames a column without the other, this suite fails instead of the
  * divergence surfacing as a silent no-op at runtime.
+ *
+ * Covers the alarm tables (#7), the validator registry backing the cross-node
+ * state proxy (#454), and the PID tuning audit trail (#215).
+ *
+ * `blueprint_safe_state_log` (#459) is covered here because a safe-state audit
+ * that silently vanishes on one dialect is a safety defect, not a dev-mode
+ * inconvenience.
  */
 
 const sqlColumnNames = (table: Table): string[] =>
@@ -29,9 +49,25 @@ const propertyKeys = (table: Table): string[] =>
 const cases = [
   { name: 'alarms', pg: pgAlarms, sqlite: sqliteAlarms },
   { name: 'alarm_history', pg: pgAlarmHistory, sqlite: sqliteAlarmHistory },
+  { name: 'validator_nodes', pg: pgValidatorNodes, sqlite: sqliteValidatorNodes },
+  { name: 'validator_pubkeys', pg: pgValidatorPubkeys, sqlite: sqliteValidatorPubkeys },
+  {
+    name: 'validator_state_watermarks',
+    pg: pgValidatorStateWatermarks,
+    sqlite: sqliteValidatorStateWatermarks,
+  },
+  {
+    name: 'blueprint_safe_state_log',
+    pg: pgBlueprintSafeStateLog,
+    sqlite: sqliteBlueprintSafeStateLog,
+  },
+  // #215: the tuning audit trail is written through whichever backend is
+  // configured, so a column that exists on only one of them would silently
+  // drop part of a plant-change record.
+  { name: 'pid_tuning_audit', pg: pgPidTuningAudit, sqlite: sqlitePidTuningAudit },
 ] as const;
 
-describe('alarm schema parity (Postgres vs SQLite dev fallback)', () => {
+describe('schema parity (Postgres vs SQLite dev fallback)', () => {
   for (const { name, pg, sqlite } of cases) {
     describe(name, () => {
       it('uses the same SQL table name', () => {

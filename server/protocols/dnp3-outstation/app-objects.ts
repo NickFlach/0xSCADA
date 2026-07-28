@@ -11,12 +11,14 @@
  *   - Object group / variation enums for the five static groups + their events
  *   - Status-flag octet construction (IIN-independent point quality flags)
  *   - Internal Indication (IIN) bit constants
- *   - Function codes
+ *   - Function codes and control CommandStatus codes
+ *   - CROB control-code bit layout
+ *   - DNP3 Time (48-bit little-endian epoch ms) codec
  *   - Single-point value encoders for each supported variation
  *
- * NOTE: Object-header (qualifier/range) framing and full APDU assembly live in
- * `index.ts` and are marked there as substantial-but-partial. This file only
- * owns the leaf encoding that opendnp3 conformance most depends on.
+ * NOTE: this file owns only the leaf encoding. Object-header (qualifier/range)
+ * framing lives in `app-layer.ts`, event objects in `event-objects.ts`, and
+ * command objects in `controls.ts`.
  */
 
 /** DNP3 application-layer function codes (subset relevant to an outstation). */
@@ -59,6 +61,8 @@ export const DNP3_GROUP = {
   ANALOG_OUTPUT_STATUS: 40,
   ANALOG_OUTPUT_EVENT: 42,
   ANALOG_OUTPUT_COMMAND: 41,
+  /** Common Time Of Occurrence — the time base for relative-time events (g2v3) */
+  TIME_AND_DATE_CTO: 51,
   CLASS_DATA: 60,
   INTERNAL_INDICATIONS: 80,
   SECURE_AUTH: 120,
@@ -75,23 +79,45 @@ export const DNP3_VARIATION = {
   // Group 2 — Binary Input Event
   BI_EVENT_NO_TIME: 1,
   BI_EVENT_ABS_TIME: 2,
+  BI_EVENT_REL_TIME: 3,
   // Group 10 — Binary Output Status
   BO_STATUS_WITH_FLAGS: 2,
+  // Group 11 — Binary Output Event (same octet layout as group 2 v1/v2)
+  BO_EVENT_NO_TIME: 1,
+  BO_EVENT_ABS_TIME: 2,
+  // Group 12 — Control Relay Output Block
+  CROB: 1,
   // Group 20 — Counter
   CNT_32_WITH_FLAG: 1,
   CNT_16_WITH_FLAG: 2,
   // Group 22 — Counter Event
   CNT_EVENT_32_WITH_FLAG: 1,
+  CNT_EVENT_32_ABS_TIME: 5,
   // Group 30 — Analog Input
   AI_32_WITH_FLAG: 1,
   AI_16_WITH_FLAG: 2,
   AI_FLOAT_WITH_FLAG: 5,
   // Group 32 — Analog Input Event
   AI_EVENT_32_WITH_FLAG: 1,
+  AI_EVENT_32_ABS_TIME: 3,
   AI_EVENT_FLOAT_WITH_FLAG: 5,
+  AI_EVENT_FLOAT_ABS_TIME: 7,
   // Group 40 — Analog Output Status
   AO_STATUS_32_WITH_FLAG: 1,
   AO_STATUS_FLOAT_WITH_FLAG: 3,
+  // Group 41 — Analog Output Block (command)
+  AO_CMD_INT32: 1,
+  AO_CMD_INT16: 2,
+  AO_CMD_FLOAT32: 3,
+  AO_CMD_DOUBLE64: 4,
+  // Group 42 — Analog Output Event (same layout as group 32)
+  AO_EVENT_32_WITH_FLAG: 1,
+  AO_EVENT_32_ABS_TIME: 3,
+  AO_EVENT_FLOAT_WITH_FLAG: 5,
+  AO_EVENT_FLOAT_ABS_TIME: 7,
+  // Group 51 — Common Time Of Occurrence
+  CTO_SYNC: 1,
+  CTO_UNSYNC: 2,
   // Class objects (group 60)
   CLASS0: 1,
   CLASS1: 2,
@@ -139,6 +165,76 @@ export const DNP3_IIN = {
   ALREADY_EXECUTING: 0x0010,
   CONFIG_CORRUPT: 0x0020,
 } as const;
+
+/**
+ * Command status codes returned in the status octet of an echoed control object
+ * (IEEE 1815-2012 Table 11-6 — "Control status codes").
+ */
+export const DNP3_COMMAND_STATUS = {
+  SUCCESS: 0,
+  TIMEOUT: 1,
+  NO_SELECT: 2,
+  FORMAT_ERROR: 3,
+  NOT_SUPPORTED: 4,
+  ALREADY_ACTIVE: 5,
+  HARDWARE_ERROR: 6,
+  LOCAL: 7,
+  TOO_MANY_OBJS: 8,
+  NOT_AUTHORIZED: 9,
+  AUTOMATION_INHIBIT: 10,
+  PROCESSING_LIMITED: 11,
+  OUT_OF_RANGE: 12,
+  UNDEFINED: 127,
+} as const;
+
+export type Dnp3CommandStatus = (typeof DNP3_COMMAND_STATUS)[keyof typeof DNP3_COMMAND_STATUS];
+
+/** g12v1 control-code operation types (low nibble of the control-code octet). */
+export const DNP3_CONTROL_OP_TYPE = {
+  NUL: 0,
+  PULSE_ON: 1,
+  PULSE_OFF: 2,
+  LATCH_ON: 3,
+  LATCH_OFF: 4,
+} as const;
+
+/** g12v1 Trip-Close Code (bits 6-7 of the control-code octet). */
+export const DNP3_CONTROL_TCC = {
+  NUL: 0,
+  CLOSE: 1,
+  TRIP: 2,
+} as const;
+
+/** g12v1 control-code octet bit masks. */
+export const CROB_OP_TYPE_MASK = 0x0f;
+/** Queue bit — deprecated by IEEE 1815-2012; this outstation rejects it. */
+export const CROB_QUEUE_MASK = 0x10;
+/** Clear bit — "cancel the operation currently running on this point". */
+export const CROB_CLEAR_MASK = 0x20;
+export const CROB_TCC_MASK = 0xc0;
+export const CROB_TCC_SHIFT = 6;
+
+/** Largest value representable by the DNP3 48-bit millisecond timestamp. */
+export const DNP3_TIME_MAX = 0xffffffffffff; // 2^48 - 1, below Number.MAX_SAFE_INTEGER
+
+/**
+ * Encode a DNP3 "DNP3 Time" field: 48-bit unsigned count of milliseconds since
+ * 1970-01-01 00:00:00 UTC, little-endian (IEEE 1815-2012 §A.4). Six octets.
+ */
+export function encodeDnp3Time(epochMs: number): Buffer {
+  const buf = Buffer.alloc(6);
+  const ms = Math.trunc(epochMs);
+  buf.writeUIntLE(ms < 0 ? 0 : Math.min(ms, DNP3_TIME_MAX), 0, 6);
+  return buf;
+}
+
+/** Decode a 6-octet little-endian DNP3 Time field into epoch milliseconds. */
+export function decodeDnp3Time(buf: Buffer, offset = 0): number {
+  if (buf.length < offset + 6) {
+    throw new Error('DNP3 time field truncated');
+  }
+  return buf.readUIntLE(offset, 6);
+}
 
 /** Quality of a point as understood by the rest of 0xSCADA. */
 export type PointQuality = 'good' | 'bad' | 'uncertain';

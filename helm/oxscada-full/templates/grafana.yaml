@@ -1,4 +1,7 @@
 {{- if and .Values.observability.enabled .Values.observability.grafana.enabled }}
+{{- if not .Values.observability.prometheus.enabled }}
+{{- fail "observability.prometheus.enabled must be true when the built-in Grafana datasource is enabled" }}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:

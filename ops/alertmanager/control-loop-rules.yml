@@ -1,0 +1,241 @@
+# Control-Loop Latency Alerting Rules (#460)
+#
+# Prometheus alerting rules for the per-stage anchor-pipeline SLO instrument.
+# Evaluated by Prometheus and routed to Alertmanager. The format matches the
+# repo's existing rules in k8s/observability/alertmanager-config.yaml.
+#
+# HOW THIS FILE IS LOADED: it is not, automatically. Nothing in this repo wires
+# it into a running Prometheus — k8s/observability/prometheus-deployment.yaml's
+# prometheus.yml declares no `rule_files:` at all, so the repo's pre-existing
+# alerts.yml is unloaded for the same reason. Point your Prometheus at this file
+# (`rule_files: [/etc/prometheus/control-loop-rules.yml]` plus a mount, or paste
+# the group into whatever rule ConfigMap you already evaluate). Wiring the
+# cluster's Prometheus rule loading is deliberately out of scope for #460.
+#
+# EVERY expression below references a series that is genuinely produced.
+# server/integrity/__tests__/control-loop-observability.test.ts runs the real
+# pipeline and the real probe, scrapes the real /metrics endpoint, and fails if
+# this file mentions a metric that never appears in that scrape.
+#
+# Producer: server/integrity/anchor-pipeline.ts times its own stages on every
+# batch it anchors. Metrics registered in server/integrity/stage-timestamps.ts
+# and server/integrity/latency-probe.ts on the shared registry (server/metrics):
+#
+#   scada_control_loop_stage_latency_seconds       histogram {stage, source}
+#   scada_control_loop_roundtrip_latency_seconds   histogram {source}
+#   scada_control_loop_stage_slo_ok                gauge 1/0 {stage, source}
+#   scada_control_loop_cycles_total                counter   {source, outcome}
+#   scada_control_loop_probe_up                    gauge 1/0
+#   scada_control_loop_probe_flips_total           counter   {outcome}
+#   scada_control_loop_sentinel_roundtrip_seconds  histogram (probe only)
+#
+# Measured stages: batch, sign, anchor, confirm (+ the `total` round-trip).
+# There is deliberately NO `tick` stage: no control loop feeds the anchor
+# pipeline on this branch, so nothing produces that number and nothing here
+# asks for it. See UNMEASURED_STAGES in server/integrity/stage-timestamps.ts.
+#
+# Per-stage SLO budgets — keep in sync with STAGE_SLO_MS:
+#   batch=100ms  sign=150ms  anchor=100ms  confirm=30s  total=30.5s
+#
+# NOTE on `anchor`: submitAnchor coalesces the request and kicks the relayer's
+# processQueue() WITHOUT awaiting it, so this stage times the HAND-OFF only
+# (~1ms observed). Signature verification, gas estimation and the transaction
+# itself are asynchronous and are accounted to `confirm`. A breach here means
+# the event loop is stalled, not that the chain is slow.
+groups:
+  - name: control-loop-latency
+    rules:
+      # ----------------------------------------------------------------------
+      # PRIMARY: a stage stays out of its SLO budget for >5 minutes.
+      # Driven by the gauge the instrument sets on every measured stage
+      # (1 = within budget, 0 = breach). Prometheus's `for: 5m` timer requires
+      # the live gauge to remain zero continuously.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopStageBudgetBreached
+        expr: scada_control_loop_stage_slo_ok == 0
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Anchor stage '{{ $labels.stage }}' over SLO budget (>5min)"
+          description: >-
+            Stage '{{ $labels.stage }}' of pipeline '{{ $labels.source }}' has
+            been outside its latency SLO budget continuously for more than 5
+            minutes. Inspect the per-stage latency panel in the "0xSCADA
+            Control-Loop Latency (SLO)" dashboard.
+
+      # ----------------------------------------------------------------------
+      # Per-stage P95 thresholds (defence-in-depth on the gauge above).
+      # Thresholds equal each stage's SLO budget, expressed in seconds.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopBatchLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, source) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="batch"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: batch
+        annotations:
+          summary: "Merkle batch build P95 > 100ms (pipeline {{ $labels.source }})"
+
+      - alert: ControlLoopSignLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, source) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="sign"}[5m]))
+          ) > 0.15
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: sign
+        annotations:
+          summary: "HSM signing P95 > 150ms (pipeline {{ $labels.source }})"
+          description: >-
+            Merkle-root signing latency has exceeded its 150ms budget at P95 for
+            over 5 minutes. This is the stage exercised by the #460 verification
+            scenario (a 200ms delay injected into the real signer).
+
+      - alert: ControlLoopAnchorEnqueueLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, source) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="anchor"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: anchor
+        annotations:
+          summary: "Anchor enqueue hand-off P95 > 100ms (pipeline {{ $labels.source }})"
+          description: >-
+            Handing a signed root to the relayer's submission queue is taking
+            over 100ms at P95. This stage does NOT include the on-chain
+            submission (that is asynchronous and lands in `confirm`), so a
+            breach points at event-loop starvation in the server process.
+
+      - alert: ControlLoopConfirmLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, source) (rate(scada_control_loop_stage_latency_seconds_bucket{stage="confirm"}[5m]))
+          ) > 30
+        for: 5m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+          stage: confirm
+        annotations:
+          summary: "On-chain confirmation P95 > 30s (pipeline {{ $labels.source }})"
+
+      # ----------------------------------------------------------------------
+      # End-to-end round-trip budget breach (escalates to critical).
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopRoundTripLatencyHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le, source) (rate(scada_control_loop_roundtrip_latency_seconds_bucket[5m]))
+          ) > 30.5
+        for: 5m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Anchor round-trip P95 > 30.5s (pipeline {{ $labels.source }})"
+          description: >-
+            End-to-end batch -> on-chain-confirmation latency has exceeded its
+            30.5s budget at P95 for over 5 minutes.
+
+      # ----------------------------------------------------------------------
+      # Batches are being anchored but not confirmed. `outcome` is one of
+      # confirmed / failed / unconfirmed; the latter two mean the round-trip was
+      # never closed, which is why the round-trip histogram alone cannot see it.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopAnchorsNotConfirming
+        expr: |
+          sum by (source) (increase(scada_control_loop_cycles_total{outcome!="confirmed"}[15m])) > 0
+        for: 15m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Anchor batches failing or never confirming (pipeline {{ $labels.source }})"
+          description: >-
+            One or more batches closed with outcome != confirmed in the last 15
+            minutes. Check relayer connectivity, the gas-price ceiling, and the
+            signature verifier.
+
+      # ----------------------------------------------------------------------
+      # The sentinel probe is not running.
+      #
+      # scada_control_loop_probe_up is published unconditionally during server
+      # composition (server/health/index.ts), as 0 while the probe is not
+      # running and 1 while it is. That is the whole point: an alert written
+      # against an absent histogram can never fire, whereas `== 0` fires on a
+      # series that always exists.
+      #
+      # The probe is opt-in (CONTROL_LOOP_LATENCY_PROBE=true), so on a
+      # deployment that deliberately runs without it this alert WILL fire — that
+      # is the intended, honest behaviour: "no sentinel coverage" is a real
+      # state. Silence or inhibit it in Alertmanager routing for deployments
+      # that have chosen not to run the probe, rather than deleting the rule.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopProbeDown
+        expr: scada_control_loop_probe_up == 0
+        for: 15m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Control-loop sentinel latency probe is not running"
+          description: >-
+            No sentinel round-trips are being driven through the anchor
+            pipeline, so an idle plant and a stalled pipeline are
+            indistinguishable. Either enable the probe with
+            CONTROL_LOOP_LATENCY_PROBE=true on an ANCHOR_BACKEND=l2/both node,
+            or route/inhibit this alert for deployments that intentionally run
+            without sentinel coverage.
+
+      # ----------------------------------------------------------------------
+      # The probe IS running but its flips are not landing. Guarded on
+      # probe_up == 1 so it is scoped to deployments that actually run it.
+      # ----------------------------------------------------------------------
+      - alert: ControlLoopSentinelFlipsDropped
+        expr: |
+          increase(scada_control_loop_probe_flips_total{outcome=~"dropped|rejected"}[15m]) > 0
+          and on() scada_control_loop_probe_up == 1
+        for: 15m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Sentinel tag flips are not reaching the chain"
+          description: >-
+            Sentinel flips were rejected at ingest, or belonged to batches that
+            failed or never confirmed, in the last 15 minutes.
+
+      - alert: ControlLoopSentinelRoundTripHigh
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum by (le) (rate(scada_control_loop_sentinel_roundtrip_seconds_bucket[15m]))
+          ) > 120
+          and on() scada_control_loop_probe_up == 1
+        for: 15m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Sentinel round-trip P95 > 120s"
+          description: >-
+            Time from a sentinel tag flip to on-chain confirmation of its batch
+            has exceeded 120s at P95. Note this interval includes the pipeline's
+            batching window, so compare it against windowSizeMs/flushIntervalMs
+            before treating it as a chain problem.

@@ -13,6 +13,7 @@
  *   - event_anchors: Blockchain-anchored events
  *   - maintenance_records: Maintenance tracking
  *   - certifications, certification_approvals: Certification workflow
+ *   - plugin_registry, plugin_installations: Agent marketplace (#217)
  */
 
 import {
@@ -23,6 +24,7 @@ import {
   timestamp,
   boolean,
   integer,
+  bigint,
   real,
   jsonb,
   pgEnum,
@@ -32,6 +34,8 @@ import {
 } from "drizzle-orm/pg-core";
 import { relations, sql } from "drizzle-orm";
 import { createInsertSchema } from "drizzle-zod";
+import { z } from "zod"; // #459: safe-state config validation schemas
+import type { GainEnvelope, TuningGains } from "./types/tuning";
 
 // ─── Enums ───────────────────────────────────────────────────────────────────
 
@@ -543,6 +547,248 @@ export const controllers = pgTable("controllers", {
   vendorIdx: index("idx_controllers_vendor").on(table.vendorId),
 }));
 
+// ─── Validator Nodes & Pubkeys (#454: Cross-Node State Queries) ───────────────
+// Additive — these tables back the per-validator /state/:key proxy so the server
+// can resolve a validator's RPC endpoint and verify its signed responses against
+// a registered public key before returning them to the operator.
+
+export const validatorNodes = pgTable("validator_nodes", {
+  // Human/operator-facing node id used in the URL (e.g. "validator-2").
+  id: varchar("id", { length: 64 }).primaryKey(),
+  name: varchar("name", { length: 255 }).notNull(),
+  // Base URL of the oxscada RPC endpoint, e.g. "http://10.0.0.12:9090"
+  // (see docs/blockchain/validator-monitoring.md for the node RPC surface).
+  rpcUrl: varchar("rpc_url", { length: 512 }).notNull(),
+  // Owning operator, for inventory/reporting. NOT the rate-limit bucket: state
+  // reads are bucketed by the caller's authenticated API-key identity, which is
+  // a property of the requester rather than of the validator being queried.
+  operatorId: varchar("operator_id", { length: 255 }),
+  region: varchar("region", { length: 64 }),
+  enabled: boolean("enabled").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  operatorIdIdx: index("idx_validator_nodes_operator_id").on(table.operatorId),
+  enabledIdx: index("idx_validator_nodes_enabled").on(table.enabled),
+}));
+
+export const validatorPubkeys = pgTable("validator_pubkeys", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  nodeId: varchar("node_id", { length: 64 }).notNull().references(() => validatorNodes.id, { onDelete: "cascade" }),
+  // Signature scheme of the registered key. Default is ed25519 (node:crypto).
+  algorithm: varchar("algorithm", { length: 32 }).default("ed25519").notNull(),
+  // PEM-encoded SPKI public key (one row per active/rotated key).
+  publicKeyPem: text("public_key_pem").notNull(),
+  // Short fingerprint identifying which key the validator signed with. Required:
+  // the proxy resolves the exact key named by the response so a rotated-out key
+  // can never be substituted for the active one.
+  keyId: varchar("key_id", { length: 128 }).notNull(),
+  active: boolean("active").default(true).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  retiredAt: timestamp("retired_at", { withTimezone: true }),
+}, (table) => ({
+  nodeIdIdx: index("idx_validator_pubkeys_node_id").on(table.nodeId),
+  nodeActiveIdx: index("idx_validator_pubkeys_node_active").on(table.nodeId, table.active),
+  nodeKeyIdIdx: uniqueIndex("idx_validator_pubkeys_node_key_id").on(table.nodeId, table.keyId),
+}));
+
+/**
+ * Per-(validator, state key) high-water mark of the highest block height the
+ * server has ever accepted a signed answer for.
+ *
+ * This is the persisted half of the anti-rollback check in
+ * `server/routes/nodes.ts`: a validator that answers a *fresh* challenge but
+ * reports a block height below the mark is serving a rolled-back view of state,
+ * and the proxy refuses to hand it to an operator. Persisting the mark (rather
+ * than keeping it in process memory) is what makes the check survive restarts
+ * and hold across server replicas sharing one database.
+ */
+export const validatorStateWatermarks = pgTable("validator_state_watermarks", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  nodeId: varchar("node_id", { length: 64 }).notNull().references(() => validatorNodes.id, { onDelete: "cascade" }),
+  // Named `state_key` rather than `key` to avoid quoting a SQL keyword.
+  stateKey: varchar("state_key", { length: 512 }).notNull(),
+  blockHeight: bigint("block_height", { mode: "number" }).notNull(),
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  nodeKeyIdx: uniqueIndex("idx_validator_state_watermarks_node_key").on(table.nodeId, table.stateKey),
+}));
+
+// ─── Modbus Register Map (Issue #462: Modbus TCP Server Mode) ────────────────
+//
+// Per-site mapping of 0xSCADA tags to Modbus addresses so standard Modbus
+// masters can poll 0xSCADA. One row per (site, area, address). `area` is one of
+// coil | discreteInput | holdingRegister | inputRegister; `dataType` is one of
+// bool | uint16 | int16 | uint32 | int32 | float32 (see
+// server/protocols/modbus-server/register-map.ts for the runtime schema/codec).
+//
+// `writable` defaults to FALSE. Modbus TCP has no authentication, so mapping a
+// tag only ever makes it readable; permitting a master to actuate it is a
+// per-address opt-in that additionally requires the listener to have been
+// started with MODBUS_SERVER_ALLOW_WRITES=true.
+
+export const modbusRegisterMap = pgTable("modbus_register_map", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  siteId: varchar("site_id", { length: 64 }).notNull().references(() => sites.id, { onDelete: "cascade" }),
+  unitId: integer("unit_id").default(1).notNull(),
+  area: varchar("area", { length: 32 }).notNull(),
+  address: integer("address").notNull(),
+  tagId: varchar("tag_id", { length: 255 }).notNull(),
+  dataType: varchar("data_type", { length: 16 }).notNull(),
+  scale: real("scale"),
+  wordOrder: varchar("word_order", { length: 8 }),
+  writable: boolean("writable").default(false).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  siteAreaAddressIdx: uniqueIndex("idx_modbus_register_map_site_area_address").on(table.siteId, table.unitId, table.area, table.address),
+  siteIdIdx: index("idx_modbus_register_map_site_id").on(table.siteId),
+}));
+
+// ─── Blueprint Safe-State (#459) ─────────────────────────────────────────────
+// Watchdog & Safe-State Fallback. A blueprint's control tick has a per-tick
+// budget; if it is exceeded for N consecutive ticks the watchdog halts the
+// blueprint and applies a pre-declared safe state, anchoring a CRITICAL
+// `SafeStateEntered` event. Re-entry to RUNNING requires explicit operator
+// action. These additions are append-only to avoid cross-issue merge conflicts.
+
+/**
+ * Pre-declared safe state a blueprint falls back to on a watchdog trip.
+ *  - `hold-last`  : freeze all outputs at their last commanded value.
+ *  - `force-zero` : drive all outputs to zero / de-energised.
+ *  - { recipe }   : load a named, previously-validated safe recipe.
+ */
+export const safeStateActionSchema = z.union([
+  z.literal("hold-last"),
+  z.literal("force-zero"),
+  z.object({ recipe: z.string().min(1) }),
+]);
+export type SafeStateAction = z.infer<typeof safeStateActionSchema>;
+
+/** Per-blueprint watchdog / safe-state configuration. */
+export const safeStateConfigSchema = z.object({
+  /** Whether the watchdog is armed for this blueprint. */
+  enabled: z.boolean().default(true),
+  /** Per-tick wall-clock budget in milliseconds. */
+  tickBudgetMs: z.number().int().positive(),
+  /** Consecutive over-budget ticks tolerated before the safe state is applied. */
+  consecutiveMissesBeforeSafeState: z.number().int().positive(),
+  /** The pre-declared safe state to apply on a trip. */
+  safeState: safeStateActionSchema,
+});
+export type SafeStateConfig = z.infer<typeof safeStateConfigSchema>;
+
+// Persisted record of every safe-state entry / exit transition (audit trail).
+export const blueprintSafeStateLog = pgTable("blueprint_safe_state_log", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  blueprintId: varchar("blueprint_id", { length: 64 }).notNull(),
+  siteId: varchar("site_id", { length: 64 }).references(() => sites.id),
+  // ENTERED/EXIT_REQUESTED/EXITED plus compensating failure transitions.
+  transition: varchar("transition", { length: 16 }).notNull(),
+  // Serialized SafeStateAction that was applied.
+  safeState: jsonb("safe_state").notNull(),
+  tickBudgetMs: integer("tick_budget_ms").notNull(),
+  consecutiveMisses: integer("consecutive_misses"),
+  // Operator who acknowledged / resumed (null for an automatic ENTERED event).
+  operator: varchar("operator", { length: 255 }),
+  reason: text("reason").notNull(),
+  // Hash anchored to the canonical anchor backend for this transition.
+  anchorHash: varchar("anchor_hash", { length: 255 }).notNull(),
+  anchorTxHash: varchar("anchor_tx_hash", { length: 255 }),
+  metadata: jsonb("metadata"),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  blueprintIdIdx: index("idx_safe_state_log_blueprint_id").on(table.blueprintId),
+  transitionIdx: index("idx_safe_state_log_transition").on(table.transition),
+  createdAtIdx: index("idx_safe_state_log_created_at").on(table.createdAt),
+  anchorHashIdx: uniqueIndex("idx_safe_state_log_anchor_hash").on(table.anchorHash),
+}));
+
+export type BlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferSelect;
+export type InsertBlueprintSafeStateLog = typeof blueprintSafeStateLog.$inferInsert;
+
+// ─── PID Tuning Audit (ADR-0013 [13.4], #215) ────────────────────────────────
+
+/**
+ * Append-only audit trail for every PID tuning decision that could move — or
+ * was refused from moving — live controller gains.
+ *
+ * Immutability is enforced in the database, not only in application code:
+ * migration 0010 installs BEFORE UPDATE / BEFORE DELETE triggers that raise.
+ * There is deliberately no update or delete helper anywhere in the codebase.
+ *
+ * `proposedBy` / `decidedBy` are control-plane principal names taken from the
+ * authenticated API key record — never from a request body.
+ */
+export const pidTuningAudit = pgTable("pid_tuning_audit", {
+  id: uuid("id").defaultRandom().primaryKey(),
+  proposalId: varchar("proposal_id", { length: 128 }).notNull(),
+  controllerId: varchar("controller_id", { length: 128 }).notNull(),
+  method: varchar("method", { length: 64 }).notNull(),
+  decision: varchar("decision", { length: 32 }).notNull(),
+  proposedBy: varchar("proposed_by", { length: 128 }).notNull(),
+  decidedBy: varchar("decided_by", { length: 128 }),
+  currentGains: jsonb("current_gains").$type<TuningGains>().notNull(),
+  proposedGains: jsonb("proposed_gains").$type<TuningGains>().notNull(),
+  appliedGains: jsonb("applied_gains").$type<TuningGains>(),
+  envelope: jsonb("envelope").$type<GainEnvelope>().notNull(),
+  envelopeDecision: varchar("envelope_decision", { length: 32 }).notNull(),
+  reasonCode: varchar("reason_code", { length: 64 }),
+  detail: text("detail"),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  proposalIdx: index("idx_pid_tuning_audit_proposal").on(table.proposalId),
+  controllerIdx: index("idx_pid_tuning_audit_controller").on(table.controllerId),
+  recordedAtIdx: index("idx_pid_tuning_audit_recorded_at").on(table.recordedAt),
+}));
+
+// ─── Agent Marketplace (ADR-0013 [13.6], #217) ───────────────────────────────
+
+/**
+ * Published plugin manifests plus their durable ownership record.
+ *
+ * `publisher` is the authenticated control-plane principal that first
+ * published the id. Publishing a later version of an existing id is refused
+ * unless the requesting principal matches this row. There is deliberately NO
+ * admin break-glass: an `admin`/`*` key reaches the publish route but is still
+ * refused with `ownership-conflict` on someone else's id, because a takeover
+ * that any privileged key can perform is not an ownership record. A transfer,
+ * if ever wanted, belongs on its own explicitly-scoped endpoint.
+ * The check is only a security control because the row is durable — an
+ * ownership table that resets on restart would let a restart re-open the id.
+ */
+export const pluginRegistry = pgTable("plugin_registry", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  version: varchar("version", { length: 32 }).notNull(),
+  manifest: jsonb("manifest").notNull(),
+  publisher: varchar("publisher", { length: 255 }).notNull(),
+  installs: integer("installs").default(0).notNull(),
+  publishedAt: timestamp("published_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  publisherIdx: index("idx_plugin_registry_publisher").on(table.publisher),
+}));
+
+/**
+ * One row per installed plugin: the manifest version pinned at install time,
+ * the validated configuration, the capabilities actually granted, and the
+ * lifecycle status. Grants are security state, so they are durable too.
+ */
+export const pluginInstallations = pgTable("plugin_installations", {
+  id: varchar("id", { length: 64 }).primaryKey().references(() => pluginRegistry.id),
+  version: varchar("version", { length: 32 }).notNull(),
+  manifest: jsonb("manifest").notNull(),
+  status: varchar("status", { length: 32 }).notNull(),
+  config: jsonb("config").notNull().default(sql`'{}'::jsonb`),
+  grantedCapabilities: jsonb("granted_capabilities").notNull().default(sql`'[]'::jsonb`),
+  installedBy: varchar("installed_by", { length: 255 }).notNull(),
+  installedAt: timestamp("installed_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  statusIdx: index("idx_plugin_installations_status").on(table.status),
+}));
+
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
 // Insert schemas for validation
@@ -562,6 +808,10 @@ export const insertDesignSpecificationSchema = createInsertSchema(designSpecific
 export const insertGeneratedCodeSchema = createInsertSchema(generatedCode);
 export const insertDataTypeMappingSchema = createInsertSchema(dataTypeMappings);
 export const insertControllerSchema = createInsertSchema(controllers);
+export const insertValidatorNodeSchema = createInsertSchema(validatorNodes);
+export const insertValidatorPubkeySchema = createInsertSchema(validatorPubkeys);
+export const insertValidatorStateWatermarkSchema = createInsertSchema(validatorStateWatermarks);
+export const insertModbusRegisterMapSchema = createInsertSchema(modbusRegisterMap);
 
 // Type exports
 export type Site = typeof sites.$inferSelect;
@@ -596,3 +846,17 @@ export type DataTypeMapping = typeof dataTypeMappings.$inferSelect;
 export type InsertDataTypeMapping = typeof dataTypeMappings.$inferInsert;
 export type Controller = typeof controllers.$inferSelect;
 export type InsertController = typeof controllers.$inferInsert;
+export type ValidatorNode = typeof validatorNodes.$inferSelect;
+export type ValidatorPubkey = typeof validatorPubkeys.$inferSelect;
+export type ValidatorStateWatermark = typeof validatorStateWatermarks.$inferSelect;
+export type InsertValidatorNode = typeof validatorNodes.$inferInsert;
+export type InsertValidatorPubkey = typeof validatorPubkeys.$inferInsert;
+export type InsertValidatorStateWatermark = typeof validatorStateWatermarks.$inferInsert;
+export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
+export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
+export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;
+export type InsertPidTuningAuditRow = typeof pidTuningAudit.$inferInsert;
+export type PluginRegistryRow = typeof pluginRegistry.$inferSelect;
+export type InsertPluginRegistryRow = typeof pluginRegistry.$inferInsert;
+export type PluginInstallationRow = typeof pluginInstallations.$inferSelect;
+export type InsertPluginInstallationRow = typeof pluginInstallations.$inferInsert;

@@ -2,11 +2,12 @@
  * DNP3 Application Layer — APDU Assembly
  * Issue #464: DNP3 Outstation Mode
  *
- * PARTIAL (substantial). The request-header parse, response-header build,
- * object-header (qualifier 0x00/0x01 — 1-octet start/stop range) emission, and
- * the Class-0 static-read assembly are implemented + unit tested. Full request
- * parsing for every qualifier code, prefixed object headers, and per-variation
- * read selection are marked TODO inline.
+ * Implemented + unit tested: request-header parse, object-header scan for the
+ * range/count qualifiers AND the index-prefixed qualifiers (0x17/0x28) that
+ * carry control objects, response-header build, and Class-0 static-read
+ * assembly split into fragment-sized object blocks. Per-variation read
+ * selection (a master asking for a specific variation rather than a class) is
+ * still TODO and marked inline.
  *
  * Application request header (master -> outstation):
  *   APP_CONTROL (1) : FIR/FIN/CON/UNS/SEQ
@@ -32,6 +33,7 @@ import {
   type Dnp3PointType,
   type PointGroupVariation,
 } from './point-map';
+import { commandObjectSize } from './controls';
 
 export const APP_CTRL_FIR = 0x80;
 export const APP_CTRL_FIN = 0x40;
@@ -52,19 +54,52 @@ export interface ParsedRequest {
   objects: ParsedObjectHeader[];
   /** raw bytes after the function code (for SAv5 critical-ASDU MAC input) */
   rawObjects: Buffer;
+  /**
+   * The complete application fragment as received. IEEE 1815 defines the
+   * Secure-Authentication "Critical ASDU" as the whole fragment (application
+   * header included), and a verified request has to be re-dispatched from it.
+   */
+  raw: Buffer;
+}
+
+/** One index-prefixed object carried by a request (qualifier 0x17 / 0x28). */
+export interface ParsedPrefixedObject {
+  /** DNP3 point index from the object's index prefix */
+  index: number;
+  /** object body octets, excluding the index prefix */
+  data: Buffer;
 }
 
 export interface ParsedObjectHeader {
   group: number;
   variation: number;
   qualifier: number;
+  /** start/stop range, for qualifiers 0x00 / 0x01 */
+  range?: { start: number; stop: number };
+  /** object count, for the count and index-prefixed qualifiers */
+  count?: number;
+  /**
+   * Decoded index-prefixed objects, for qualifiers 0x17 / 0x28 whose object
+   * length this outstation knows. Absent when the objects could not be
+   * length-decoded — callers must then treat the header as undecodable rather
+   * than guessing at the octets.
+   */
+  items?: ParsedPrefixedObject[];
 }
 
 /**
- * Parse an application request fragment. Implemented: header + object-header
- * group/variation/qualifier scan with range field skipping for the common
- * qualifiers (0x00,0x01,0x06,0x07,0x08). TODO: prefixed counts (0x17/0x28) and
- * object-data length computation for write/operate payloads.
+ * Parse an application request fragment.
+ *
+ * Object-header scanning understands the range qualifiers (0x00/0x01), the
+ * "all objects" qualifier (0x06), the count qualifiers (0x07/0x08) and the
+ * index-prefixed qualifiers 0x17 (1-octet prefix + 1-octet count) and 0x28
+ * (2-octet prefix + 2-octet count). Index-prefixed object bodies are decoded
+ * when the group/variation has a known fixed size — which covers every control
+ * object (g12v1, g41v1..v4). Anything else stops the scan rather than
+ * misinterpreting octets.
+ *
+ * TODO: free-format qualifiers (0x5B) used by the group-120 objects, and
+ * object data following a non-prefixed range header (e.g. WRITE g80v1).
  */
 export function parseRequest(fragment: Buffer): ParsedRequest {
   if (fragment.length < 2) {
@@ -80,44 +115,95 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
     const group = fragment[off];
     const variation = fragment[off + 1];
     const qualifier = fragment[off + 2];
-    objects.push({ group, variation, qualifier });
+    const header: ParsedObjectHeader = { group, variation, qualifier };
+    objects.push(header);
     off += 3;
-    // Skip the range field based on qualifier code (low nibble).
-    const rangeSpecifier = qualifier & 0x0f;
-    switch (rangeSpecifier) {
-      case 0x00: // start/stop 1-octet
+
+    const prefixCode = (qualifier & 0xf0) >>> 4;
+    const rangeCode = qualifier & 0x0f;
+    let count: number | null = null;
+
+    switch (rangeCode) {
+      case 0x00: // start/stop, 1-octet indices
+        if (off + 2 > fragment.length) return finish();
+        header.range = { start: fragment[off], stop: fragment[off + 1] };
+        count = header.range.stop - header.range.start + 1;
         off += 2;
         break;
-      case 0x01: // start/stop 2-octet
+      case 0x01: // start/stop, 2-octet indices
+        if (off + 4 > fragment.length) return finish();
+        header.range = { start: fragment.readUInt16LE(off), stop: fragment.readUInt16LE(off + 2) };
+        count = header.range.stop - header.range.start + 1;
         off += 4;
         break;
-      case 0x06: // all objects, no range
+      case 0x06: // all objects — no range field, no object data
         break;
       case 0x07: // 1-octet count
+        if (off + 1 > fragment.length) return finish();
+        count = fragment[off];
         off += 1;
         break;
       case 0x08: // 2-octet count
+        if (off + 2 > fragment.length) return finish();
+        count = fragment.readUInt16LE(off);
         off += 2;
         break;
       default:
-        // TODO: prefixed-index qualifiers (0x17/0x28) carry object data we do
-        // not yet length-decode; stop scanning to avoid misparsing.
-        off = fragment.length;
-        break;
+        // Unknown range specifier: object data of unknown length follows, so
+        // stop scanning rather than misparsing.
+        return finish();
+    }
+    if (count !== null) header.count = count;
+
+    // Index-prefixed object data (qualifiers 0x17 / 0x28).
+    if (prefixCode === 1 || prefixCode === 2) {
+      const prefixLen = prefixCode === 1 ? 1 : 2;
+      const objectSize = commandObjectSize(group, variation);
+      if (objectSize === null || count === null || count < 0) {
+        // We cannot compute where this header's data ends.
+        return finish();
+      }
+      const items: ParsedPrefixedObject[] = [];
+      let ok = true;
+      for (let n = 0; n < count; n++) {
+        if (off + prefixLen + objectSize > fragment.length) {
+          ok = false;
+          break;
+        }
+        const index = prefixLen === 1 ? fragment[off] : fragment.readUInt16LE(off);
+        const data = Buffer.from(fragment.subarray(off + prefixLen, off + prefixLen + objectSize));
+        items.push({ index, data });
+        off += prefixLen + objectSize;
+      }
+      if (!ok) {
+        // Truncated object data: leave `items` unset so callers reject the
+        // header with a format error instead of acting on a partial command.
+        return finish();
+      }
+      header.items = items;
+    } else if (prefixCode !== 0) {
+      // 4-octet index prefixes and the free-format/object-size prefixes are not
+      // modelled; their object data length is unknown to us.
+      return finish();
     }
   }
 
-  return {
-    appControl,
-    fir: (appControl & APP_CTRL_FIR) !== 0,
-    fin: (appControl & APP_CTRL_FIN) !== 0,
-    con: (appControl & APP_CTRL_CON) !== 0,
-    uns: (appControl & APP_CTRL_UNS) !== 0,
-    seq: appControl & APP_CTRL_SEQ_MASK,
-    func,
-    objects,
-    rawObjects,
-  };
+  return finish();
+
+  function finish(): ParsedRequest {
+    return {
+      appControl,
+      fir: (appControl & APP_CTRL_FIR) !== 0,
+      fin: (appControl & APP_CTRL_FIN) !== 0,
+      con: (appControl & APP_CTRL_CON) !== 0,
+      uns: (appControl & APP_CTRL_UNS) !== 0,
+      seq: appControl & APP_CTRL_SEQ_MASK,
+      func,
+      objects,
+      rawObjects,
+      raw: Buffer.from(fragment),
+    };
+  }
 }
 
 /** Build the 4-octet response header (APP_CONTROL + FUNCTION + IIN). */
@@ -161,6 +247,26 @@ export function buildObjectHeaderRange8(
   return Buffer.concat([header, data]);
 }
 
+/**
+ * Build an object header with qualifier 0x01 (16-bit start/stop index range).
+ * Required once a point index exceeds 255 — the 8-bit form would silently
+ * truncate the index and hand the master the wrong points.
+ */
+export function buildObjectHeaderRange16(
+  gv: PointGroupVariation,
+  start: number,
+  stop: number,
+  data: Buffer,
+): Buffer {
+  const header = Buffer.alloc(7);
+  header.writeUInt8(gv.group, 0);
+  header.writeUInt8(gv.variation, 1);
+  header.writeUInt8(0x01, 2); // qualifier: 16-bit start/stop
+  header.writeUInt16LE(start & 0xffff, 3);
+  header.writeUInt16LE(stop & 0xffff, 5);
+  return Buffer.concat([header, data]);
+}
+
 /** Mapping of the five point types to read order for Class 0. */
 const STATIC_READ_ORDER: Dnp3PointType[] = [
   'binaryInput',
@@ -170,34 +276,88 @@ const STATIC_READ_ORDER: Dnp3PointType[] = [
   'analogOutput',
 ];
 
+/** A contiguous run of same-variation static points being assembled. */
+interface StaticRun {
+  gv: PointGroupVariation;
+  /** true when the run needs the 16-bit start/stop qualifier */
+  wide: boolean;
+  start: number;
+  stop: number;
+  chunks: Buffer[];
+  /** octets of point data accumulated so far (header excluded) */
+  bytes: number;
+}
+
+function encodeStaticRun(run: StaticRun): Buffer {
+  const data = Buffer.concat(run.chunks);
+  return run.wide
+    ? buildObjectHeaderRange16(run.gv, run.start, run.stop, data)
+    : buildObjectHeaderRange8(run.gv, run.start, run.stop, data);
+}
+
 /**
- * Assemble the object portion of a Class-0 (all static data) response from the
- * point map. Groups contiguous points of each type into a single qualifier-0x00
- * object header. Returns the concatenated object bytes (no app header).
+ * Assemble the Class-0 (all static data) response as a list of self-contained
+ * object blocks. Each block is one object header plus its points, so the caller
+ * can pack blocks into response fragments without splitting an object header.
  *
- * NOTE: assumes each type's indices are contiguous from 0; gaps would require
- * multiple range headers — a TODO for sparse maps.
+ * A new block is started whenever the point indices stop being contiguous, the
+ * group/variation changes (e.g. an int32 and a float32 analog input in the same
+ * group), an index crosses 255 (the range qualifier has to widen), or adding
+ * the next point would exceed `maxBlockBytes`.
+ */
+export function buildClass0Blocks(
+  map: Dnp3PointMap,
+  maxBlockBytes: number = Number.MAX_SAFE_INTEGER,
+): Buffer[] {
+  const blocks: Buffer[] = [];
+  for (const type of STATIC_READ_ORDER) {
+    let current: StaticRun | undefined;
+    for (const def of map.pointsOfType(type)) {
+      const resolved = map.resolve(def.type, def.index);
+      if (!resolved) continue;
+      const ser = serializeStaticPoint(resolved);
+      const wide = def.index > 0xff;
+
+      if (current !== undefined) {
+        const headerLen = current.wide ? 7 : 5;
+        const continues =
+          def.index === current.stop + 1 &&
+          wide === current.wide &&
+          ser.groupVariation.group === current.gv.group &&
+          ser.groupVariation.variation === current.gv.variation &&
+          headerLen + current.bytes + ser.data.length <= maxBlockBytes;
+        if (!continues) {
+          blocks.push(encodeStaticRun(current));
+          current = undefined;
+        }
+      }
+
+      if (current === undefined) {
+        current = {
+          gv: ser.groupVariation,
+          wide,
+          start: def.index,
+          stop: def.index,
+          chunks: [ser.data],
+          bytes: ser.data.length,
+        };
+      } else {
+        current.chunks.push(ser.data);
+        current.bytes += ser.data.length;
+        current.stop = def.index;
+      }
+    }
+    if (current !== undefined) blocks.push(encodeStaticRun(current));
+  }
+  return blocks;
+}
+
+/**
+ * Assemble the object portion of a Class-0 response as one buffer. Convenience
+ * wrapper over {@link buildClass0Blocks} for callers with no fragment budget.
  */
 export function buildClass0Objects(map: Dnp3PointMap): Buffer {
-  const parts: Buffer[] = [];
-  for (const type of STATIC_READ_ORDER) {
-    const points = map.pointsOfType(type);
-    if (points.length === 0) continue;
-
-    const dataChunks: Buffer[] = [];
-    let gv: PointGroupVariation | null = null;
-    for (const def of points) {
-      const resolved = map.resolve(def.type, def.index)!;
-      const ser = serializeStaticPoint(resolved);
-      gv = ser.groupVariation;
-      dataChunks.push(ser.data);
-    }
-    if (!gv) continue;
-    const start = points[0].index;
-    const stop = points[points.length - 1].index;
-    parts.push(buildObjectHeaderRange8(gv, start, stop, Buffer.concat(dataChunks)));
-  }
-  return Buffer.concat(parts);
+  return Buffer.concat(buildClass0Blocks(map));
 }
 
 /**
