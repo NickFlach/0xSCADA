@@ -232,6 +232,24 @@ registerSwaggerRoutes(app, gatewayConfig);
         logError(err, "Modbus TCP Server Mode not started (failed closed)");
       }
 
+      // Start DNP3 Outstation Mode (Issue #464) — no-op unless
+      // DNP3_OUTSTATION_ENABLED=true. DNP3 does not authenticate the TCP peer
+      // and does not authenticate reads at all, so the listener defaults to
+      // loopback, refuses peers outside its allowlist, and executes
+      // SELECT/OPERATE only when separately opted in (which additionally
+      // requires an SAv5 Update Key unless the deployment explicitly declares
+      // it is running controls unauthenticated). A configuration or point-map
+      // failure is terminal for the listener: it is logged and no socket is
+      // bound, never downgraded to defaults.
+      try {
+        const { startDnp3Outstation } = await import(
+          "./protocols/dnp3-outstation"
+        );
+        await startDnp3Outstation();
+      } catch (err) {
+        logError(err, "DNP3 Outstation Mode not started (failed closed)");
+      }
+
       // Connect to NATS for SCADA event publishing
       await natsPublisher.connect();
 

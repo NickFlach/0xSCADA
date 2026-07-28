@@ -1,11 +1,12 @@
 /**
- * DNP3 Outstation — TCP Server
+ * DNP3 Outstation — application layer, outstation object, and startup path
  * Issue #464: [wave:2c] Build DNP3 Outstation Mode
  *
  * Wires the protocol cores (point-map, event-buffer, event-object encoder,
- * controls, secure-auth, link CRC, transport, APDU assembly) into a TCP
- * outstation that DNP3 masters (e.g. opendnp3) can poll. The request-dispatch
- * covers the conformance-critical paths:
+ * controls, secure-auth, link CRC, transport, APDU assembly) into an outstation
+ * that DNP3 masters can poll. The socket, peer admission and link-frame
+ * reassembly live in `server.ts`; this file owns the decisions. The
+ * request-dispatch covers the conformance-critical paths:
  *   - Class 0 read      -> all static data (BI/AI/Counter/BO status/AO status)
  *   - Class 1/2/3 read  -> buffered events serialised as g2/g11/g22/g32/g42
  *                          objects with index-prefixed qualifiers, split across
@@ -21,13 +22,16 @@
  * DNP3 controls move live plant state. They are rejected with CommandStatus
  * NOT_SUPPORTED unless BOTH `config.controls.enabled` is explicitly true (it
  * defaults to false) AND the embedder installs a control sink via
- * `setControlSink()`. A default-constructed outstation is read-only.
+ * `setControlSink()`. A default-constructed outstation is read-only, and
+ * `startDnp3Outstation()` installs a sink only when DNP3_OUTSTATION_ALLOW_CONTROLS
+ * is set — which itself requires an SAv5 Update Key or an explicit declaration
+ * that the deployment accepts unauthenticated controls.
  *
- * ── NOT WIRED INTO SERVER STARTUP ────────────────────────────────────────────
- * Nothing here starts a listener on import. `start()` must be called
- * explicitly. Exposing the outstation on a network interface is deliberately
- * left to a separate change: it needs its own network-policy review because a
- * DNP3 master that reaches this port can drive the control path.
+ * ── SERVER STARTUP ───────────────────────────────────────────────────────────
+ * Nothing here starts a listener on import. `startDnp3Outstation()` (below) is
+ * the startup path `server/index.ts` calls, and it does nothing at all unless
+ * DNP3_OUTSTATION_ENABLED=true. See `config.ts` for the gates and `server.ts`
+ * for the listener itself.
  *
  * ── Known remaining gaps (honest list) ───────────────────────────────────────
  *   - One master association. The application-layer confirm state lives in a
@@ -41,9 +45,10 @@
  *   - Unconfirmed events are re-sent on the next Class poll (correct), but
  *     there is no independent retry timer.
  *   - DNP3 serial transport (this is TCP only).
+ *   - Nothing here has been exercised against opendnp3 or any real utility
+ *     master; the wire behaviour is verified only by this repository's tests.
  */
 
-import net from 'net';
 import { z } from 'zod';
 import { log, logError, logWarn } from '../../logger';
 import { Dnp3PointMap, Dnp3PointMapConfigSchema, deriveFlags, type PointSample, type Dnp3PointType } from './point-map';
@@ -81,21 +86,77 @@ import {
 } from './app-layer';
 import { DNP3_FUNCTION, DNP3_GROUP } from './app-objects';
 import {
-  buildLinkFrame,
-  buildResponseControl,
-  extractPayload,
-  DNP3_LINK_FUNCTION,
-} from './link-layer';
-import { segment, TransportReassembler, TRANSPORT_SEQ_MASK } from './transport';
+  createSession,
+  type Dnp3ResponseFragment,
+  type OutstationSession,
+} from './session';
+import {
+  Dnp3TcpServer,
+  DEFAULT_BIND_HOST,
+  DEFAULT_MAX_CONNECTIONS,
+  DEFAULT_MAX_RX_BUFFER_BYTES,
+  DEFAULT_MAX_TX_QUEUE_BYTES,
+  DEFAULT_PORT,
+  DEFAULT_SOCKET_TIMEOUT_MS,
+  DNP3_MAX_LINK_FRAME_BYTES,
+  type Dnp3ApplicationDispatcher,
+} from './server';
+import {
+  createDnp3TagStorePort,
+  createTagStoreControlSink,
+  Dnp3TagStorePoller,
+  type Dnp3TagStorePort,
+} from './tag-store-bridge';
+import {
+  describeDnp3OutstationConfig,
+  isDnp3OutstationEnabled,
+  loadDnp3OutstationConfig,
+  loadDnp3PointMapFile,
+} from './config';
+import { isLoopbackHost } from '../peer-allowlist';
 
 /** Octets of application header (APP_CONTROL + FUNCTION + IIN) on a response. */
 const APP_HEADER_LEN = 4;
 
 export const Dnp3OutstationConfigSchema = z.object({
   /** TCP listen port. DNP3 default is 20000; 0 asks the OS for a free port. */
-  port: z.number().int().min(0).max(65535).default(20000),
-  /** Bind host. */
-  host: z.string().default('0.0.0.0'),
+  port: z.number().int().min(0).max(65535).default(DEFAULT_PORT),
+  /**
+   * Bind host. Loopback by default: DNP3 does not authenticate the TCP peer, so
+   * a routable bind must be an explicit act (see `config.ts`, which additionally
+   * refuses one without a peer allowlist).
+   */
+  host: z.string().default(DEFAULT_BIND_HOST),
+  /**
+   * Peer IPs/CIDRs allowed to connect, checked at accept time. Loopback only by
+   * default; `/0` wildcards are refused.
+   */
+  allowedPeers: z.array(z.string().min(1)).min(1).optional(),
+  /** Hard cap on simultaneous master associations. */
+  maxConnections: z.number().int().min(1).max(64).default(DEFAULT_MAX_CONNECTIONS),
+  /** Idle socket timeout in ms (0 disables). */
+  socketTimeoutMs: z.number().int().min(0).default(DEFAULT_SOCKET_TIMEOUT_MS),
+  /**
+   * Per-connection receive-buffer bound. Must fit at least one maximum-size
+   * link frame; a peer that exceeds it without completing a frame is dropped.
+   */
+  maxRxBufferBytes: z
+    .number()
+    .int()
+    .min(DNP3_MAX_LINK_FRAME_BYTES)
+    .max(1_048_576)
+    .default(DEFAULT_MAX_RX_BUFFER_BYTES),
+  /**
+   * Per-connection transmit-queue bound. A Class 0 READ is 17 octets and asks
+   * for the whole static database, so a peer that pipelines requests and stops
+   * reading is the real memory risk; passing this bound drops the connection.
+   */
+  maxTxQueueBytes: z
+    .number()
+    .int()
+    .min(4096)
+    .max(67_108_864)
+    .default(DEFAULT_MAX_TX_QUEUE_BYTES),
   /** This outstation's DNP3 link address. */
   localAddress: z.number().int().min(0).max(0xffff).default(10),
   /** Whether unsolicited responses are enabled at startup. */
@@ -131,44 +192,20 @@ export const Dnp3OutstationConfigSchema = z.object({
 export type Dnp3OutstationConfig = z.input<typeof Dnp3OutstationConfigSchema>;
 type ResolvedConfig = z.infer<typeof Dnp3OutstationConfigSchema>;
 
-/** One fragment of an application response, plus what it commits the outstation to. */
-export interface Dnp3ResponseFragment {
-  /** the application fragment octets (header + objects) */
-  bytes: Buffer;
-  /** application sequence number carried in the fragment header */
-  seq: number;
-  /** CON bit — the master must send an application CONFIRM for this fragment */
-  con: boolean;
-  /** event-buffer sequence numbers carried; removed from the buffer on CONFIRM */
-  eventSeqs: number[];
-}
-
-/**
- * Per-master-association application-layer state. An outstation may only have
- * one response outstanding at a time, so this holds the fragment awaiting a
- * CONFIRM plus any fragments queued behind it.
- */
-export interface OutstationSession {
-  pendingFragments: Dnp3ResponseFragment[];
-  awaitingConfirm: Dnp3ResponseFragment | null;
-}
-
-export function createSession(): OutstationSession {
-  return { pendingFragments: [], awaitingConfirm: null };
-}
-
-/** Per-connection link/transport state. */
-interface ConnectionState {
-  socket: net.Socket;
-  reassembler: TransportReassembler;
-  /** master's link address learned from the first frame */
-  masterAddress: number;
-  /** running transport-function sequence number for transmitted segments */
-  transportSeq: number;
-  /** application-layer response state for this association */
-  session: OutstationSession;
-  rxBuffer: Buffer;
-}
+export {
+  createSession,
+  type Dnp3ResponseFragment,
+  type OutstationSession,
+} from './session';
+export {
+  Dnp3LinkFrameReader,
+  Dnp3TcpServer,
+  DNP3_MAX_LINK_FRAME_BYTES,
+  type Dnp3ApplicationDispatcher,
+  type Dnp3TcpServerConfig,
+} from './server';
+export * from './config';
+export * from './tag-store-bridge';
 
 /**
  * Context object passed to the pure request handler so it can be unit tested
@@ -488,16 +525,15 @@ export function handleSecureAuthReply(
 }
 
 /**
- * The DNP3 TCP outstation network object. Owns the listening socket and the
- * per-connection link/transport reassembly; delegates all decision logic to the
- * pure handlers above.
+ * The DNP3 TCP outstation. Owns the outstation state (point map, event buffer,
+ * controls, SAv5) and the application-layer decisions; the listening socket,
+ * peer admission and link-frame reassembly belong to `Dnp3TcpServer`, which
+ * calls back into this class through `Dnp3ApplicationDispatcher`.
  */
-export class Dnp3Outstation {
-  private server: net.Server | null = null;
-  private connections = new Set<ConnectionState>();
+export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
+  private tcp: Dnp3TcpServer | null = null;
   private unsolicitedTimer: NodeJS.Timeout | null = null;
   private unsolicitedSeq = 0;
-  private boundPort: number | null = null;
   readonly config: ResolvedConfig;
   readonly ctx: OutstationContext;
 
@@ -544,7 +580,17 @@ export class Dnp3Outstation {
    * `config.port` when the OS assigned an ephemeral port (`port: 0`).
    */
   get listeningPort(): number | null {
-    return this.boundPort;
+    return this.tcp?.boundPort ?? null;
+  }
+
+  /** Accepted, still-open master associations. */
+  get connectionCount(): number {
+    return this.tcp?.connectionCount ?? 0;
+  }
+
+  /** Connections refused since start (allowlist misses + cap overflow). */
+  get rejectedConnectionCount(): number {
+    return this.tcp?.rejectedConnectionCount ?? 0;
   }
 
   /**
@@ -573,23 +619,34 @@ export class Dnp3Outstation {
     this.maybeSendUnsolicited();
   }
 
-  /** Start listening for masters. */
+  /**
+   * Start listening for masters.
+   *
+   * The socket, its peer allowlist, the connection cap and the bounded frame
+   * reassembly all live in `Dnp3TcpServer`; this only supplies the configuration
+   * and the application dispatcher (itself).
+   *
+   * @throws when the peer allowlist does not parse, or the port cannot be bound.
+   *   Either way no listener exists afterwards.
+   */
   async start(): Promise<void> {
-    if (this.server) return;
-    this.server = net.createServer((socket) => this.onConnection(socket));
-    await new Promise<void>((resolve, reject) => {
-      this.server!.once('error', reject);
-      this.server!.listen(this.config.port, this.config.host, () => {
-        this.server!.off('error', reject);
-        const address = this.server!.address();
-        this.boundPort = typeof address === 'object' && address !== null ? address.port : null;
-        log(
-          `DNP3 outstation listening on ${this.config.host}:${this.boundPort ?? this.config.port} ` +
-            `(link addr ${this.config.localAddress}, controls ${this.ctx.controls.writable ? 'ENABLED' : 'disabled'})`,
-        );
-        resolve();
-      });
+    if (this.tcp) return;
+    const tcp = new Dnp3TcpServer(this, {
+      host: this.config.host,
+      port: this.config.port,
+      localAddress: this.config.localAddress,
+      allowedPeers: this.config.allowedPeers,
+      maxConnections: this.config.maxConnections,
+      socketTimeoutMs: this.config.socketTimeoutMs,
+      maxRxBufferBytes: this.config.maxRxBufferBytes,
+      maxTxQueueBytes: this.config.maxTxQueueBytes,
     });
+    await tcp.start();
+    this.tcp = tcp;
+    log(
+      `DNP3 outstation ready on ${this.config.host}:${tcp.boundPort ?? this.config.port} ` +
+        `(link addr ${this.config.localAddress}, controls ${this.ctx.controls.writable ? 'ENABLED' : 'disabled'})`,
+    );
     // Periodic unsolicited evaluation for the delay-based trigger.
     this.unsolicitedTimer = setInterval(() => this.maybeSendUnsolicited(), 500);
   }
@@ -600,105 +657,27 @@ export class Dnp3Outstation {
       clearInterval(this.unsolicitedTimer);
       this.unsolicitedTimer = null;
     }
-    for (const conn of this.connections) conn.socket.destroy();
-    this.connections.clear();
     this.ctx.controls.disarm();
-    if (this.server) {
-      await new Promise<void>((resolve) => this.server!.close(() => resolve()));
-      this.server = null;
-      this.boundPort = null;
+    if (this.tcp) {
+      await this.tcp.stop();
+      this.tcp = null;
     }
   }
 
-  private onConnection(socket: net.Socket): void {
-    const conn: ConnectionState = {
-      socket,
-      reassembler: new TransportReassembler(),
-      masterAddress: 1,
-      transportSeq: 0,
-      session: createSession(),
-      rxBuffer: Buffer.alloc(0),
-    };
-    this.connections.add(conn);
-    log(`DNP3 master connected from ${socket.remoteAddress}:${socket.remotePort}`);
-
-    socket.on('data', (chunk) => {
-      conn.rxBuffer = Buffer.concat([conn.rxBuffer, chunk]);
-      this.drainRx(conn);
-    });
-    socket.on('error', (err) => logError(err, 'DNP3 outstation socket error'));
-    socket.on('close', () => {
-      this.connections.delete(conn);
-      // A dropped link invalidates any armed SELECT.
-      this.ctx.controls.disarm();
-      log('DNP3 master disconnected');
-    });
-  }
+  // ── Dnp3ApplicationDispatcher ──────────────────────────────────────────────
 
   /**
-   * Pull complete link frames out of the rx buffer and process them.
-   * TODO: this length-based framing is the happy path; a malformed length
-   * should resync on the next 0x0564 start pattern.
+   * Handle one parsed application request for an association and return the
+   * fragment to transmit (empty for the no-response functions).
    */
-  private drainRx(conn: ConnectionState): void {
-    while (conn.rxBuffer.length >= 10) {
-      if (conn.rxBuffer[0] !== 0x05 || conn.rxBuffer[1] !== 0x64) {
-        // Resync: drop one byte and retry.
-        conn.rxBuffer = conn.rxBuffer.subarray(1);
-        continue;
-      }
-      const userDataLen = conn.rxBuffer[2] - 5;
-      const blocks = userDataLen > 0 ? Math.ceil(userDataLen / 16) : 0;
-      const totalLen = 10 + userDataLen + blocks * 2;
-      if (conn.rxBuffer.length < totalLen) return; // wait for more
-      const frame = conn.rxBuffer.subarray(0, totalLen);
-      conn.rxBuffer = conn.rxBuffer.subarray(totalLen);
-      this.processFrame(conn, frame);
-    }
-  }
-
-  private processFrame(conn: ConnectionState, frame: Buffer): void {
-    const extracted = extractPayload(frame);
-    if (!extracted) {
-      logWarn('DNP3 outstation: dropped frame with bad CRC');
-      return;
-    }
-    conn.masterAddress = extracted.header.source;
-
-    // Link-layer service frames (no user data) — answer link status, etc.
-    if (extracted.payload.length === 0) {
-      if (extracted.header.func === DNP3_LINK_FUNCTION.REQUEST_LINK_STATUS) {
-        this.sendLinkStatus(conn);
-      }
-      return;
-    }
-
-    const result = conn.reassembler.accept(extracted.payload);
-    if (result.error || !result.fragment) return;
-
-    let req: ParsedRequest;
-    try {
-      req = parseRequest(result.fragment);
-    } catch (err) {
-      logError(err, 'DNP3 outstation: failed to parse application request');
-      return;
-    }
-
-    // SAv5 reply (g120v2) arriving from the master.
-    if (req.func === DNP3_FUNCTION.WRITE && req.objects.some((o) => o.group === DNP3_GROUP.SECURE_AUTH)) {
-      this.processSecureAuthReply(conn, req);
-      return;
-    }
-
+  dispatch(req: ParsedRequest, session: OutstationSession): Buffer {
     const { response } = handleApplicationRequest(this.ctx, req, {
       userNumber: 1,
-      session: conn.session,
+      session,
     });
-    if (response.length > 0) {
-      this.sendFragment(conn, response);
-    }
     // A successful read with the device-restart bit acknowledged clears it once
     // the master writes IIN1.7 = 0 (WRITE g80v1). TODO: handle that write.
+    return response;
   }
 
   /**
@@ -706,17 +685,17 @@ export class Dnp3Outstation {
    * The reply object body follows the 4-octet object header this module emits
    * for group 120 (see the free-format TODO in the module doc).
    */
-  private processSecureAuthReply(conn: ConnectionState, req: ParsedRequest): void {
+  dispatchSecureAuthReply(req: ParsedRequest, session: OutstationSession): Buffer {
     let verify: Sav5VerifyResult;
     try {
       verify = handleSecureAuthReply(this.ctx, req.rawObjects.subarray(4));
     } catch (err) {
       logError(err, 'DNP3 outstation: malformed SAv5 reply');
-      return;
+      return Buffer.alloc(0);
     }
     if (!verify.ok) {
       logWarn(`DNP3 SAv5: reply rejected (${verify.error})`);
-      return;
+      return Buffer.alloc(0);
     }
 
     let authorised: ParsedRequest;
@@ -724,44 +703,20 @@ export class Dnp3Outstation {
       authorised = parseRequest(verify.criticalAsdu);
     } catch (err) {
       logError(err, 'DNP3 outstation: authorised ASDU failed to parse');
-      return;
+      return Buffer.alloc(0);
     }
     log(`DNP3 SAv5: reply verified, dispatching authorised function 0x${authorised.func.toString(16)}`);
     const { response } = handleApplicationRequest(this.ctx, authorised, {
       userNumber: verify.userNumber,
-      session: conn.session,
+      session,
       skipSecureAuth: true,
     });
-    if (response.length > 0) {
-      this.sendFragment(conn, response);
-    }
+    return response;
   }
 
-  /** Frame + send one application response fragment to the master. */
-  private sendFragment(conn: ConnectionState, appFragment: Buffer): void {
-    const segments = segment(appFragment, conn.transportSeq);
-    conn.transportSeq = (conn.transportSeq + segments.length) & TRANSPORT_SEQ_MASK;
-    for (const seg of segments) {
-      const control = buildResponseControl(DNP3_LINK_FUNCTION.UNCONFIRMED_USER_DATA);
-      const frame = buildLinkFrame({
-        control,
-        destination: conn.masterAddress,
-        source: this.config.localAddress,
-        payload: seg,
-      });
-      conn.socket.write(frame);
-    }
-  }
-
-  private sendLinkStatus(conn: ConnectionState): void {
-    const control = buildResponseControl(DNP3_LINK_FUNCTION.LINK_STATUS);
-    const frame = buildLinkFrame({
-      control,
-      destination: conn.masterAddress,
-      source: this.config.localAddress,
-      payload: Buffer.alloc(0),
-    });
-    conn.socket.write(frame);
+  /** A dropped link invalidates any armed SELECT. */
+  onAssociationClosed(_session: OutstationSession): void {
+    this.ctx.controls.disarm();
   }
 
   /**
@@ -799,13 +754,7 @@ export class Dnp3Outstation {
       eventSeqs: encoded.encodedSeqs,
     };
 
-    let sent = 0;
-    for (const conn of this.connections) {
-      if (conn.session.awaitingConfirm) continue;
-      conn.session.awaitingConfirm = fragment;
-      this.sendFragment(conn, fragment.bytes);
-      sent += 1;
-    }
+    const sent = this.tcp?.broadcastUnsolicited(fragment) ?? 0;
     if (sent === 0) return;
     this.ctx.eventBuffer.markReported(encoded.encodedSeqs);
     log(
@@ -818,4 +767,143 @@ export class Dnp3Outstation {
 /** Factory mirroring the modbus driver convention. */
 export function createDnp3Outstation(config?: Dnp3OutstationConfig): Dnp3Outstation {
   return new Dnp3Outstation(config);
+}
+
+// ── Startup path ────────────────────────────────────────────────────────────
+
+const LOG_SCOPE = 'dnp3-outstation';
+
+/** A started outstation plus everything that has to be torn down with it. */
+export interface Dnp3OutstationService {
+  outstation: Dnp3Outstation;
+  /** Live tag poller feeding `updateTag`. */
+  poller: Dnp3TagStorePoller;
+  /** Stop the listener and the poller. Idempotent. */
+  stop(): Promise<void>;
+}
+
+export interface StartDnp3OutstationOptions {
+  /** Environment to read configuration from. Defaults to `process.env`. */
+  env?: NodeJS.ProcessEnv;
+  /** File reader seam for the point map, so the bootstrap is testable. */
+  readFile?: (path: string) => string;
+  /** Tag backing store. Defaults to the live `tagCache` for the site. */
+  tagStore?: Dnp3TagStorePort;
+}
+
+/**
+ * Start DNP3 Outstation Mode from validated configuration. This is the function
+ * `server/index.ts` calls at boot.
+ *
+ * Returns `null` — having done nothing at all, no socket, no timer — when the
+ * feature is not explicitly enabled. That is the default for every deployment.
+ *
+ * @throws {Dnp3OutstationConfigError} when enabled with configuration (or a
+ *   point map) that cannot produce a safe listener. No socket is bound: the
+ *   failure is terminal for the listener, never a fallback to permissive
+ *   defaults.
+ */
+export async function startDnp3Outstation(
+  options: StartDnp3OutstationOptions = {},
+): Promise<Dnp3OutstationService | null> {
+  const env = options.env ?? process.env;
+
+  if (!isDnp3OutstationEnabled(env)) {
+    return null;
+  }
+
+  const config = loadDnp3OutstationConfig(env);
+  const pointMapConfig = loadDnp3PointMapFile(config.pointMapFile, options.readFile);
+
+  const outstation = new Dnp3Outstation({
+    host: config.host,
+    port: config.port,
+    localAddress: config.localAddress,
+    allowedPeers: config.allowedPeers,
+    maxConnections: config.maxConnections,
+    socketTimeoutMs: config.socketTimeoutMs,
+    maxRxBufferBytes: config.maxRxBufferBytes,
+    maxTxQueueBytes: config.maxTxQueueBytes,
+    unsolicitedEnabled: config.unsolicitedEnabled,
+    controls: {
+      enabled: config.allowControls,
+      selectTimeoutMs: config.selectTimeoutMs,
+    },
+    pointMap: pointMapConfig,
+  });
+
+  if (config.sav5UpdateKeyHex) {
+    outstation.setUpdateKey(
+      config.sav5UserNumber,
+      Buffer.from(config.sav5UpdateKeyHex, 'hex'),
+    );
+  }
+
+  const store = options.tagStore ?? createDnp3TagStorePort(config.siteId);
+
+  // The control sink exists ONLY when controls were opted into. With the opt-in
+  // off there is no sink at all, so SELECT/OPERATE are answered NOT_SUPPORTED by
+  // `Dnp3ControlProcessor` — the same fail-closed answer a bare library gives.
+  if (config.allowControls) {
+    outstation.setControlSink(
+      createTagStoreControlSink({ pointMap: outstation.ctx.pointMap, store }),
+    );
+    const writable = pointMapConfig.points.filter((p) => p.writable);
+    // Say plainly what an unauthenticated peer will be able to actuate.
+    logWarn(
+      `DNP3 Outstation Mode has CONTROLS ENABLED: ${writable.length} of ` +
+        `${pointMapConfig.points.length} mapped points are writable by a master ` +
+        `(${writable.map((p) => `${p.type}:${p.index}→${p.tagId}`).join(', ') || 'none'}). ` +
+        (config.sav5UpdateKeyHex
+          ? `SAv5 challenges those commands for user ${config.sav5UserNumber}; reads and the ` +
+            'TCP peer itself remain unauthenticated.'
+          : 'SAv5 is NOT provisioned, so these commands carry no authentication at all — ' +
+            'the peer allowlist and network segmentation are the only controls in front of ' +
+            'these tags.'),
+      LOG_SCOPE,
+    );
+  }
+
+  if (!isLoopbackHost(config.host)) {
+    logWarn(
+      `DNP3 Outstation Mode is bound to the non-loopback address ${config.host}. ` +
+        `Peers are restricted to [${config.allowedPeers.join(', ')}], but DNP3 does ` +
+        'not authenticate the TCP peer and does not authenticate reads at all; keep ' +
+        'this listener on a segmented control network.',
+      LOG_SCOPE,
+    );
+  }
+
+  const poller = new Dnp3TagStorePoller(
+    outstation,
+    store,
+    outstation.ctx.pointMap,
+    config.pollIntervalMs,
+  );
+  // Seed the static database before the first master can poll it, so a Class 0
+  // read never reports placeholder values on a freshly started outstation. The
+  // seed is the outstation's STARTING STATE, not a set of changes, so the events
+  // it enqueues are discarded — reporting them would tell a master that every
+  // point changed at boot.
+  await poller.pollOnce();
+  outstation.ctx.eventBuffer.clear();
+
+  await outstation.start();
+  poller.start();
+
+  log(
+    `DNP3 Outstation Mode started — ${describeDnp3OutstationConfig(config)}, ` +
+      `${pointMapConfig.points.length} mapped points, ` +
+      `polling ${poller.mappedTagIds.length} tag(s) every ${config.pollIntervalMs}ms`,
+    LOG_SCOPE,
+  );
+
+  return {
+    outstation,
+    poller,
+    async stop(): Promise<void> {
+      poller.stop();
+      await outstation.stop();
+    },
+  };
 }

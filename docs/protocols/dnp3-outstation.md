@@ -5,21 +5,33 @@ front-end processors running [opendnp3](https://github.com/dnp3/opendnp3)) poll
 0xSCADA over DNP3 (IEEE 1815-2012) as if it were a conventional RTU/outstation.
 Required for the utility-consortium pilots.
 
-> **Status: working outstation for reads, events and controls.** A master can
-> run an integrity poll (Class 0), poll Class 1/2/3 and receive **real
-> timestamped event objects**, confirm them, and issue **SELECT/OPERATE or
-> DIRECT-OPERATE** controls that reach live tag state — provided controls are
-> explicitly enabled (they are off by default; see
-> [Controls](#controls-select--operate--direct-operate)). Some framing details
-> remain explicit TODOs (see "Implemented vs TODO" below), and the outstation is
-> **not started by server startup** — see
-> [Not wired into startup](#not-wired-into-server-startup).
+> **Status: working outstation for reads, events and controls, with a gated
+> listener wired into server startup.** A master can run an integrity poll
+> (Class 0), poll Class 1/2/3 and receive **real timestamped event objects**,
+> confirm them, and issue **SELECT/OPERATE or DIRECT-OPERATE** controls that
+> reach live tag state — provided controls are explicitly enabled (they are off
+> by default; see [Controls](#controls-select--operate--direct-operate)). The
+> listener is started by `server/index.ts` **only** when
+> `DNP3_OUTSTATION_ENABLED=true`; with no new environment set, no socket is
+> created and startup is unchanged — see
+> [Enabling the listener](#enabling-the-listener). Some framing details remain
+> explicit TODOs (see "Implemented vs TODO" below).
+>
+> **Nothing here has been tested against opendnp3 or any real utility master.**
+> Every claim on this page is backed by this repository's own tests over real
+> loopback TCP sockets; see
+> [Conformance smoke test](#conformance-smoke-test-opendnp3--cannot-run-in-ci-here).
 
 ## Module layout
 
 ```
 server/protocols/dnp3-outstation/
-  index.ts          TCP outstation server (default port 20000) + pure request handler
+  index.ts          outstation object + pure request handler + startDnp3Outstation() bootstrap
+  server.ts         TCP listener: peer allowlist, connection cap, socket timeout,
+                    bounded link-frame reassembly with 0x0564 resynchronisation
+  config.ts         env -> Zod-validated deployment config; point-map file loader
+  tag-store-bridge.ts  live tag poller (reads) + tag-store control sink (writes)
+  session.ts        per-association application state (fragment queue / awaited CONFIRM)
   app-objects.ts    DNP3 object groups/variations, status-flag (quality) octets, IIN, encoders, DNP3 time
   point-map.ts      tag -> DNP3 point mapping for all 5 static groups (+ flags, scaling, deadband)
   event-buffer.ts   Class 0/1/2/3 event buffering, overflow, unsolicited-trigger evaluation
@@ -41,6 +53,7 @@ DNP3 is a four-layer stack. Here is exactly what is real today.
 | **Data Link** | start bytes, length, CONTROL, addresses | header build/parse implemented |
 | | CRC-DNP (poly 0x3D65) | **fully implemented + tested** (verified against the canonical reset-link vector → CRC `0x21E9`) |
 | | 16-octet block CRC interleave | implemented for build + extract |
+| | TCP stream → frame reassembly, bounded, with resync | **implemented + tested** (`server.ts`; see [Framing on a byte stream](#framing-on-a-byte-stream)) |
 | | secondary link-confirm / FCB state machine | **TODO** |
 | **Transport** | FIR/FIN/SEQ segmentation + reassembly | **fully implemented + tested** |
 | **Application** | request header parse (FIR/FIN/CON/UNS/SEQ + func) | implemented |
@@ -104,10 +117,18 @@ await outstation.start();
 outstation.updateTag('tank.level', { value: 12.4, quality: 'good', timestamp: Date.now() });
 ```
 
+> Embedding the class directly gets the same fail-closed transport defaults as
+> the startup path: `host` is `127.0.0.1`, the peer allowlist is loopback-only,
+> `maxConnections` is 2, `socketTimeoutMs` is 60 s and `maxRxBufferBytes` is
+> 8192. Pass `allowedPeers` explicitly to serve anything else; a wildcard rule
+> makes `start()` throw.
+
 > **INTEGRATION (#464):** `updateTag` is the seam where the 0xSCADA tag/event
-> pipeline feeds the outstation. A sibling issue owns the bridge that subscribes
-> to tag changes and calls `updateTag`; this module defines the minimal
-> `PointSample` contract for that seam.
+> pipeline feeds the outstation. A deployment started through
+> `startDnp3Outstation()` gets that seam driven for it by
+> `Dnp3TagStorePoller` (see
+> [Reads and writes against the tag store](#reads-and-writes-against-the-tag-store));
+> embedding the class directly leaves `updateTag` for the embedder to call.
 
 ## Event classes & unsolicited responses
 
@@ -237,26 +258,171 @@ A CROB `count` of 0 is a spec-defined no-op: the outstation answers `SUCCESS`
 and does **not** call the sink. The deprecated queue bit and the clear bit are
 refused with `NOT_SUPPORTED` rather than being silently ignored.
 
-## Not wired into server startup
+## Enabling the listener
 
-`createDnp3Outstation()` does not listen; only an explicit `start()` does, and
-nothing in `server/` calls it. Exposing the outstation on a network interface is
-deliberately a separate change: it needs its own network-policy review because
-any master that can reach the port can drive the control path. Until then this
-module is a library that a deployment must opt into.
+`server/index.ts` calls `startDnp3Outstation()` inside its `httpServer.listen`
+callback, next to `startModbusServer()`. **It returns immediately, having created
+no socket and no timer, unless `DNP3_OUTSTATION_ENABLED=true`.** A deployment
+that sets none of the variables below behaves exactly as it did before.
+
+### What DNP3 authenticates — and what it does not
+
+DNP3 over TCP **does not authenticate the TCP peer at all**, and it does not
+authenticate reads. Anything that can open the socket can read every mapped
+point. Secure Authentication v5 authenticates **critical function codes only**
+(SELECT, OPERATE, DIRECT_OPERATE, WRITE, restarts, (en|dis)able-unsolicited) and
+only when an Update Key is provisioned for the user. There is no confidentiality
+anywhere in this implementation. The compensations therefore live at the
+deployment boundary, and every one of them is off by default.
+
+### Environment variables
+
+| Variable | Default | Meaning |
+|---|---|---|
+| `DNP3_OUTSTATION_ENABLED` | *(unset)* | Must be exactly `true` to create a listener. |
+| `DNP3_OUTSTATION_SITE_ID` | — | **Required.** Site whose tags back the point map. |
+| `DNP3_OUTSTATION_POINT_MAP_FILE` | — | **Required.** Path to the JSON point map (`{ "points": [...] }`, validated with Zod). |
+| `DNP3_OUTSTATION_BIND_HOST` | `127.0.0.1` | Bind address. Anything non-loopback additionally requires the allowlist below. |
+| `DNP3_OUTSTATION_PORT` | `20000` | Bind port (the registered DNP3 port). |
+| `DNP3_OUTSTATION_ALLOWED_PEERS` | loopback | Comma-separated IPs/CIDRs, enforced at accept time. `/0` wildcards are refused. |
+| `DNP3_OUTSTATION_LINK_ADDRESS` | `10` | This outstation's DNP3 link address. |
+| `DNP3_OUTSTATION_MAX_CONNECTIONS` | `2` | Hard cap on simultaneous master associations. |
+| `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS` | `60000` | Idle socket timeout (`0` disables). |
+| `DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES` | `8192` | Per-connection receive bound; must be ≥ 292 (one maximum link frame). |
+| `DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES` | `1048576` | Per-connection bound on unread response bytes; see [Bounding a peer that stops reading](#bounding-a-peer-that-stops-reading). |
+| `DNP3_OUTSTATION_POLL_INTERVAL_MS` | `1000` | How often mapped tags are re-read from the tag store. |
+| `DNP3_OUTSTATION_UNSOLICITED_ENABLED` | `false` | Enable unsolicited responses at startup. |
+| `DNP3_OUTSTATION_ALLOW_CONTROLS` | `false` | **Separate opt-in** before SELECT/OPERATE/DIRECT-OPERATE execute. |
+| `DNP3_OUTSTATION_SELECT_TIMEOUT_MS` | `5000` | How long a SELECT stays armed. |
+| `DNP3_OUTSTATION_SAV5_UPDATE_KEY` | *(unset)* | Hex-encoded SAv5 Update Key (≥ 16 octets). Provisioning it turns on challenge/response for critical functions. |
+| `DNP3_OUTSTATION_SAV5_USER` | `1` | SAv5 user number the key belongs to. |
+| `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS` | `false` | Required to run controls with **no** Update Key. |
+
+Configuration is validated with Zod and **fails closed**: an invalid value throws
+`Dnp3OutstationConfigError`, the failure is logged, and no socket is bound. It is
+never downgraded to defaults.
+
+### Network-policy expectations
+
+- The default bind is `127.0.0.1`. Moving it is a deliberate act, and the loader
+  **refuses to start** a non-loopback listener that does not name its masters in
+  `DNP3_OUTSTATION_ALLOWED_PEERS`.
+- The allowlist is checked at accept time, before a protocol byte is read, and a
+  wildcard (`0.0.0.0/0`, `::/0`) is rejected outright — it is not an allowlist.
+- Keep the listener on a segmented control network. The allowlist is IP-based and
+  offers no defence against a peer that can spoof or occupy an allowed address.
+- Concurrent masters are capped (default 2) and idle sockets are closed.
+
+### What an unauthenticated peer can actuate
+
+- **With `DNP3_OUTSTATION_ALLOW_CONTROLS` unset (the default):** nothing. Every
+  SELECT/OPERATE/DIRECT-OPERATE is echoed with CommandStatus `NOT_SUPPORTED` (4).
+  An allowlisted peer can still **read** every mapped point.
+- **With it set:** exactly the `binaryOutput`/`analogOutput` points that the
+  point map marks `"writable": true`. Mapping a point makes its status readable;
+  only `writable` makes it controllable. The boot log names them:
+
+  ```
+  DNP3 Outstation Mode has CONTROLS ENABLED: 1 of 4 mapped points are writable
+  by a master (binaryOutput:0→valve.cmd). SAv5 is NOT provisioned, so these
+  commands carry no authentication at all — the peer allowlist and network
+  segmentation are the only controls in front of these tags.
+  ```
+
+- Enabling controls **requires** either `DNP3_OUTSTATION_SAV5_UPDATE_KEY` or an
+  explicit `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. There is no
+  configuration in which plant outputs become writable by accident.
+
+### Reads and writes against the tag store
+
+`tag-store-bridge.ts` supplies both directions:
+
+- **Reads.** `Dnp3TagStorePoller` re-reads every mapped tag every
+  `DNP3_OUTSTATION_POLL_INTERVAL_MS` and calls `updateTag()` for the ones whose
+  value or quality changed, so Class 0 reflects live values and Class 1/2/3
+  carry real changes. The initial snapshot taken at startup is the outstation's
+  starting state, so the events it would produce are discarded rather than
+  reported to a master as boot-time changes.
+- **Writes.** `createTagStoreControlSink()` is installed **only** when controls
+  are enabled. It refuses any point not marked `writable`.
+
+### Framing on a byte stream
+
+DNP3 over TCP is a byte stream, so `Dnp3LinkFrameReader` recovers frames itself.
+It never trusts a LENGTH octet it has not CRC-validated: it scans to the next
+`0x05 0x64`, waits for the whole 10-octet header block, verifies the header CRC,
+rejects a structurally impossible LENGTH (< 5), and only then waits for exactly
+that many octets. A failed header CRC resynchronises on the next candidate start
+pattern. The retained buffer is bounded by `DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES`;
+a peer that exceeds it without completing a frame has its connection closed.
+
+The bound is applied to the whole incoming chunk before it is buffered, so a
+single TCP read larger than `DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES` closes the
+connection **even if every octet of it is a valid frame** (at the default that is
+roughly 480 pipelined requests in one segment). That is deliberate — it fails
+closed — but it is a real limit on how hard a master may pipeline.
+
+### Bounding a peer that stops reading
+
+The receive bound does not bound outstation memory on its own. A Class 0 READ is
+17 octets on the wire and asks for the **entire static database**, so a peer can
+buy several hundred full responses inside one bounded read and then simply never
+drain its socket; the responses would otherwise queue in the process indefinitely.
+Two defences engage, in order:
+
+1. when the kernel stops accepting a response write, the outstation **pauses
+   reading** that connection until it drains, so no further responses are
+   generated;
+2. if the unflushed queue still passes `DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES`, the
+   connection is dropped, exactly as an oversized receive buffer is.
+
+`server.test.ts` asserts this against a real socket that is connected, pipelining
+Class 0 reads, and never reading a single response octet.
 
 ## Known limitations
 
+- **Not verified against a real DNP3 master.** No opendnp3, pydnp3, or utility
+  front-end processor has been pointed at this outstation. Interoperability is
+  therefore unproven; what is proven is the behaviour asserted by the tests
+  listed below.
 - **One master association.** Application-confirm state is per connection, but
   the event buffer is shared, so with two masters connected at once the first
   CONFIRM drains events for both. DNP3 outstations conventionally serve a single
-  master.
+  master. The default connection cap of 2 does not change that — raise it only
+  if you understand the consequence.
+- **A control's `SUCCESS` means "accepted for writing", not "written".** The
+  `Dnp3ControlSink` contract is synchronous (DNP3 needs a CommandStatus in the
+  OPERATE response) while the tag store is asynchronous, so the sink answers for
+  the enqueue onto an in-process, strictly ordered queue. That queue is **not**
+  durable: if the process dies between the response and the store write, the
+  master will have been told SUCCESS for a write that did not land. A later
+  failure is logged (`control write to … failed AFTER the master was told
+  SUCCESS`) but cannot be un-reported.
+- **Event resolution is the poll interval.** The tag cache exposes no change
+  feed, so the bridge polls. A change that comes and goes inside one interval is
+  never observed, and event timestamps are the store's sample timestamps as seen
+  at poll time.
+- **The per-point `deadband` is not applied by the poller.** It is accepted and
+  validated in the point map, but the production data source forwards any change,
+  however small.
 - Unconfirmed events are re-sent on the next Class poll, but there is no
   independent retry timer.
 - The secondary link-confirm / frame-count-bit (FCB) state machine is not
   implemented.
 - `WRITE g80v1` (the master clearing `DEVICE_RESTART`) is not handled, so that
   IIN bit stays set for the lifetime of the process.
+- The point map is read once at startup from
+  `DNP3_OUTSTATION_POINT_MAP_FILE`; there is no reload path.
+- **The idle timeout does not evict a peer that keeps talking.**
+  `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS` is an *inactivity* timer, so an allowlisted
+  peer that dribbles one octet every few seconds holds its slot indefinitely.
+  With the default cap of 2, two such peers can keep a legitimate master out.
+  The allowlist is the control for this; the timeout is not.
+- A truncated frame costs the frame that follows it. The header CRC fixes the
+  frame length, so a frame that is cut short consumes the head of the next one,
+  which then fails its block CRC and is dropped. The reader resynchronises and
+  the frame after that is served normally — this is inherent to length-prefixed
+  framing, not a recoverable case.
 - TCP only; DNP3 serial is a separate task.
 
 ## Secure Authentication v5
@@ -283,13 +449,23 @@ tampered-ASDU, CSQ-mismatch, and expiry rejection paths.
 
 > No new dependency: HMAC uses Node's built-in `crypto`.
 
+**Scope of SAv5, stated plainly.** It authenticates the listed *critical function
+codes* and nothing else. READs are not authenticated. The TCP peer is not
+authenticated. Nothing is encrypted. When no Update Key is provisioned the
+outstation runs in open mode and there is **no authentication at all** — which is
+why `DNP3_OUTSTATION_ALLOW_CONTROLS=true` refuses to start without either a key
+or an explicit `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. Set the key
+with `DNP3_OUTSTATION_SAV5_UPDATE_KEY` (hex, ≥ 16 octets) and
+`DNP3_OUTSTATION_SAV5_USER`.
+
 ## Conformance smoke test (opendnp3) — CANNOT run in CI here
 
 The acceptance criterion calls for a smoke test against an open-source DNP3
-master. **This cannot run in this environment** (no opendnp3 toolchain, no
-Docker network namespace for a real master, and node_modules is absent in the
-worktree). The procedure below is documented so it can be run on a host with
-opendnp3 available; do not treat it as executed.
+master. **This has not been run** — there is no opendnp3 toolchain and no Docker
+network namespace for a real master in this environment. The procedure below is
+documented so it can be run on a host with opendnp3 available; do not treat it as
+executed, and do not read any statement on this page as evidence of
+interoperability with a real master.
 
 ### Procedure
 
@@ -343,6 +519,27 @@ from IEEE 1815** and annotated octet by octet:
 - `outstation.test.ts` — fail-closed defaults, the SAv5 challenge→verify→execute
   round trip, and a **live localhost TCP round trip** in which a real master
   frame produces real g2v2 event octets on the wire.
+
+Added for the listener/wiring work:
+
+- `frame-reader.test.ts` — link-frame recovery from a byte stream: a frame split
+  at **every** offset, one byte per segment, several frames per segment, garbage
+  before a start pattern, a false `0x0564` whose header CRC fails, a
+  CRC-consistent but structurally impossible LENGTH, and the buffer bound.
+- `server.test.ts` — the listener over **real loopback sockets**: loopback bind
+  by default, wildcard allowlist refused, a disallowed peer dropped at accept
+  time, the connection cap, the idle timeout, pathological segmentation on the
+  wire, a bad user-data CRC dropped without wedging the connection, the receive
+  bound closing a connection, a Class 0 poll returning live values, Class 1/2/3
+  event polls, controls refused with `NOT_SUPPORTED` until opted in and then
+  executed only for `writable` points, and shutdown releasing the port.
+- `config.test.ts` — every gate in the environment contract, including the
+  refusal to run controls without an authentication decision.
+- `tag-store-bridge.test.ts` — the poller's change detection and error
+  tolerance, and everything the control sink refuses.
+- `bootstrap.test.ts` — `startDnp3Outstation()` end to end: nothing at all when
+  the flag is absent, a refusal (and no bound port) for every invalid
+  configuration, and a real master reading live tag values off the socket.
 
 ## References
 
