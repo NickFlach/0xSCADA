@@ -6,85 +6,155 @@
  * The TCP test uses a real socket and real DNP3 framing — no mocks, no stubs.
  * The outstation binds port 0 so the OS picks a free port.
  */
-import { describe, test, expect, afterEach } from 'vitest';
-import net from 'net';
+import { describe, test, expect, afterEach } from "vitest";
+import net from "net";
 import {
   createDnp3Outstation,
   createOutstationContext,
+  createSession,
   handleApplicationRequest,
   handleSecureAuthReply,
   Dnp3Outstation,
-} from '../index';
-import { parseRequest } from '../app-layer';
-import { Dnp3PointMap } from '../point-map';
-import { Sav5Outstation, computeMac, decodeChallengeObject, encodeReplyObject } from '../secure-auth';
-import { DNP3_COMMAND_STATUS, DNP3_FUNCTION } from '../app-objects';
-import { buildLinkFrame, extractPayload } from '../link-layer';
-import { segment, TransportReassembler } from '../transport';
-import type { Dnp3ControlCommand } from '../controls';
+} from "../index";
+import { buildFreeFormat16Object, parseRequest } from "../app-layer";
+import { Dnp3PointMap } from "../point-map";
+import {
+  Sav5Outstation,
+  computeMac,
+  decodeChallengeObject,
+  encodeReplyObject,
+} from "../secure-auth";
+import { DNP3_COMMAND_STATUS, DNP3_FUNCTION, DNP3_IIN } from "../app-objects";
+import { buildLinkFrame, extractPayload } from "../link-layer";
+import { segment, TransportReassembler } from "../transport";
+import type { Dnp3ControlCommand } from "../controls";
 
 const T0 = 0xabcdef;
 
 /** OPERATE of a LATCH_ON CROB on binary output 0, application sequence 1. */
 const OPERATE_LATCH_ON = Buffer.from([
-  0xc1, DNP3_FUNCTION.OPERATE, 0x0c, 0x01, 0x17, 0x01, 0x00,
-  0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xc1,
+  DNP3_FUNCTION.OPERATE,
+  0x0c,
+  0x01,
+  0x17,
+  0x01,
+  0x00,
+  0x03,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
 ]);
 /** The same objects as a SELECT at sequence 0. */
 const SELECT_LATCH_ON = Buffer.from([
-  0xc0, DNP3_FUNCTION.SELECT, 0x0c, 0x01, 0x17, 0x01, 0x00,
-  0x03, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0xc0,
+  DNP3_FUNCTION.SELECT,
+  0x0c,
+  0x01,
+  0x17,
+  0x01,
+  0x00,
+  0x03,
+  0x01,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
+  0x00,
 ]);
 
 const POINTS = [
-  { tagId: 'pump.run', type: 'binaryInput' as const, index: 3, eventClass: 1 as const },
-  { tagId: 'valve.cmd', type: 'binaryOutput' as const, index: 0 },
+  {
+    tagId: "pump.run",
+    type: "binaryInput" as const,
+    index: 3,
+    eventClass: 1 as const,
+  },
+  { tagId: "valve.cmd", type: "binaryOutput" as const, index: 0 },
 ];
 
-describe('fail-closed defaults', () => {
-  test('a default outstation is read-only and is not listening', () => {
+describe("fail-closed defaults", () => {
+  test("a default outstation is read-only and is not listening", () => {
     const os = createDnp3Outstation({ pointMap: { points: POINTS } });
     expect(os.config.controls.enabled).toBe(false);
     expect(os.controlsWritable).toBe(false);
     expect(os.listeningPort).toBeNull();
   });
 
-  test('a sink alone does not enable controls', () => {
+  test("a sink alone does not enable controls", () => {
     const os = createDnp3Outstation({ pointMap: { points: POINTS } });
     os.setControlSink(() => ({ ok: true }));
     expect(os.controlsWritable).toBe(false);
 
-    const result = handleApplicationRequest(os.ctx, parseRequest(OPERATE_LATCH_ON));
+    const result = handleApplicationRequest(
+      os.ctx,
+      parseRequest(OPERATE_LATCH_ON),
+    );
     // Echoed CROB, status octet last: NOT_SUPPORTED.
-    expect(result.response[result.response.length - 1]).toBe(DNP3_COMMAND_STATUS.NOT_SUPPORTED);
+    expect(result.response[result.response.length - 1]).toBe(
+      DNP3_COMMAND_STATUS.NOT_SUPPORTED,
+    );
   });
 
-  test('enabling the flag alone does not enable controls either', () => {
-    const os = createDnp3Outstation({ pointMap: { points: POINTS }, controls: { enabled: true } });
+  test("enabling the flag alone does not enable controls either", () => {
+    const os = createDnp3Outstation({
+      pointMap: { points: POINTS },
+      controls: { enabled: true },
+    });
     expect(os.controlsWritable).toBe(false);
     os.setControlSink(() => ({ ok: true }));
     expect(os.controlsWritable).toBe(true);
   });
 
-  test('both together let a SELECT/OPERATE pair reach the sink', () => {
+  test("both together let a SELECT/OPERATE pair reach the sink", () => {
     const calls: Dnp3ControlCommand[] = [];
-    const os = createDnp3Outstation({ pointMap: { points: POINTS }, controls: { enabled: true } });
+    const os = createDnp3Outstation({
+      pointMap: { points: POINTS },
+      controls: { enabled: true },
+    });
     os.setControlSink((cmd) => {
       calls.push(cmd);
       return { ok: true };
     });
 
-    handleApplicationRequest(os.ctx, parseRequest(SELECT_LATCH_ON), { now: 1000 });
+    handleApplicationRequest(os.ctx, parseRequest(SELECT_LATCH_ON), {
+      now: 1000,
+    });
     expect(calls).toEqual([]);
-    const operate = handleApplicationRequest(os.ctx, parseRequest(OPERATE_LATCH_ON), { now: 1100 });
-    expect(operate.response[operate.response.length - 1]).toBe(DNP3_COMMAND_STATUS.SUCCESS);
+    const operate = handleApplicationRequest(
+      os.ctx,
+      parseRequest(OPERATE_LATCH_ON),
+      { now: 1100 },
+    );
+    expect(operate.response[operate.response.length - 1]).toBe(
+      DNP3_COMMAND_STATUS.SUCCESS,
+    );
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ kind: 'binaryOutput', index: 0, tagId: 'valve.cmd', value: true });
+    expect(calls[0]).toMatchObject({
+      kind: "binaryOutput",
+      index: 0,
+      tagId: "valve.cmd",
+      value: true,
+    });
   });
 
-  test('DIRECT_OPERATE_NR executes but transmits nothing', () => {
+  test("DIRECT_OPERATE_NR executes but transmits nothing", () => {
     const calls: Dnp3ControlCommand[] = [];
-    const os = createDnp3Outstation({ pointMap: { points: POINTS }, controls: { enabled: true } });
+    const os = createDnp3Outstation({
+      pointMap: { points: POINTS },
+      controls: { enabled: true },
+    });
     os.setControlSink((cmd) => {
       calls.push(cmd);
       return { ok: true };
@@ -97,21 +167,49 @@ describe('fail-closed defaults', () => {
     expect(calls).toHaveLength(1);
   });
 
-  test('a restart disarms any pending SELECT', () => {
-    const os = createDnp3Outstation({ pointMap: { points: POINTS }, controls: { enabled: true } });
+  test("a restart disarms any pending SELECT", () => {
+    const os = createDnp3Outstation({
+      pointMap: { points: POINTS },
+      controls: { enabled: true },
+    });
     os.setControlSink(() => ({ ok: true }));
-    handleApplicationRequest(os.ctx, parseRequest(SELECT_LATCH_ON), { now: 1000 });
+    handleApplicationRequest(os.ctx, parseRequest(SELECT_LATCH_ON), {
+      now: 1000,
+    });
     expect(os.ctx.controls.armedSelect).not.toBeNull();
-    handleApplicationRequest(os.ctx, parseRequest(Buffer.from([0xc0, DNP3_FUNCTION.WARM_RESTART])));
+    handleApplicationRequest(
+      os.ctx,
+      parseRequest(Buffer.from([0xc0, DNP3_FUNCTION.WARM_RESTART])),
+    );
     expect(os.ctx.controls.armedSelect).toBeNull();
   });
 });
 
-describe('Secure Authentication v5 gates and then dispatches a control', () => {
-  test('an OPERATE is challenged, and the verified ASDU actually executes', () => {
+describe("Secure Authentication v5 gates and then dispatches a control", () => {
+  test("the live dispatcher challenges with the configured non-default SAv5 user", () => {
+    const os = createDnp3Outstation({ sav5UserNumber: 7 });
+    os.setControlDirectionKey(7, Buffer.alloc(16, 0x77));
+    os.ctx.restartPending = true;
+    const clearRestart = parseRequest(
+      Buffer.from([0xc0, DNP3_FUNCTION.WRITE, 80, 1, 0x00, 7, 7, 0]),
+    );
+
+    const session = createSession();
+    const response = os.dispatch(clearRestart, session);
+
+    expect(response[1]).toBe(DNP3_FUNCTION.AUTH_RESPONSE);
+    expect(response.subarray(4, 10)).toEqual(
+      Buffer.from([120, 1, 0x5b, 1, response.length - 10, 0]),
+    );
+    expect(decodeChallengeObject(response.subarray(10)).userNumber).toBe(0);
+    expect(os.ctx.secureAuth.hasPending(session.sav5AssociationId)).toBe(true);
+    expect(os.ctx.restartPending).toBe(true);
+  });
+
+  test("an OPERATE is challenged, and the verified ASDU actually executes", () => {
     const key = Buffer.alloc(16, 0xab);
     const secureAuth = new Sav5Outstation();
-    secureAuth.setUpdateKey(1, key);
+    secureAuth.setControlDirectionKey(1, key);
     const calls: Dnp3ControlCommand[] = [];
     const ctx = createOutstationContext({
       pointMap: new Dnp3PointMap({ points: POINTS }),
@@ -127,37 +225,50 @@ describe('Secure Authentication v5 gates and then dispatches a control', () => {
     const direct = Buffer.from(OPERATE_LATCH_ON);
     direct[1] = DNP3_FUNCTION.DIRECT_OPERATE;
     const req = parseRequest(direct);
-    const challenge = handleApplicationRequest(ctx, req, { userNumber: 1, now: 1000 });
+    const challenge = handleApplicationRequest(ctx, req, {
+      userNumber: 1,
+      now: 1000,
+    });
     expect(challenge.challenged).toBe(true);
     expect(calls).toEqual([]);
 
     // 2. The master computes the MAC over the whole critical ASDU.
-    const challengeObject = decodeChallengeObject(challenge.response.subarray(8));
-    const mac = computeMac(key, challengeObject, req.raw);
+    const challengeObject = decodeChallengeObject(
+      challenge.response.subarray(10),
+    );
+    const mac = computeMac(key, challengeObject, challenge.response, req.raw);
     const verify = handleSecureAuthReply(
       ctx,
-      encodeReplyObject({ challengeSeq: challengeObject.challengeSeq, userNumber: 1, mac }),
+      encodeReplyObject({
+        challengeSeq: challengeObject.challengeSeq,
+        userNumber: 1,
+        mac,
+      }),
+      req.seq,
+      ctx.session,
       1200,
     );
     expect(verify.ok).toBe(true);
 
     // 3. The authorised ASDU is re-dispatched and now reaches the sink.
-    if (!verify.ok) throw new Error('unreachable');
+    if (!verify.ok) throw new Error("unreachable");
     const authorised = parseRequest(verify.criticalAsdu);
     const executed = handleApplicationRequest(ctx, authorised, {
       userNumber: verify.userNumber,
       now: 1200,
       skipSecureAuth: true,
     });
-    expect(executed.response[executed.response.length - 1]).toBe(DNP3_COMMAND_STATUS.SUCCESS);
+    expect(executed.response[executed.response.length - 1]).toBe(
+      DNP3_COMMAND_STATUS.SUCCESS,
+    );
     expect(calls).toHaveLength(1);
-    expect(calls[0]).toMatchObject({ tagId: 'valve.cmd', value: true });
+    expect(calls[0]).toMatchObject({ tagId: "valve.cmd", value: true });
   });
 
-  test('a MAC computed over the wrong ASDU is rejected and nothing executes', () => {
+  test("a MAC computed over the wrong ASDU is rejected and nothing executes", () => {
     const key = Buffer.alloc(16, 0xab);
     const secureAuth = new Sav5Outstation();
-    secureAuth.setUpdateKey(1, key);
+    secureAuth.setControlDirectionKey(1, key);
     const calls: Dnp3ControlCommand[] = [];
     const ctx = createOutstationContext({
       pointMap: new Dnp3PointMap({ points: POINTS }),
@@ -170,23 +281,163 @@ describe('Secure Authentication v5 gates and then dispatches a control', () => {
     });
 
     const req = parseRequest(OPERATE_LATCH_ON);
-    const challenge = handleApplicationRequest(ctx, req, { userNumber: 1, now: 1000 });
-    const challengeObject = decodeChallengeObject(challenge.response.subarray(8));
+    const challenge = handleApplicationRequest(ctx, req, {
+      userNumber: 1,
+      now: 1000,
+    });
+    const challengeObject = decodeChallengeObject(
+      challenge.response.subarray(10),
+    );
     // Sign a LATCH_OFF while the challenged ASDU was LATCH_ON.
     const tampered = Buffer.from(req.raw);
     tampered[7] = 0x04;
-    const mac = computeMac(key, challengeObject, tampered);
+    const mac = computeMac(key, challengeObject, challenge.response, tampered);
     const verify = handleSecureAuthReply(
       ctx,
-      encodeReplyObject({ challengeSeq: challengeObject.challengeSeq, userNumber: 1, mac }),
+      encodeReplyObject({
+        challengeSeq: challengeObject.challengeSeq,
+        userNumber: 1,
+        mac,
+      }),
+      req.seq,
+      ctx.session,
       1200,
     );
     expect(verify.ok).toBe(false);
     expect(calls).toEqual([]);
   });
+
+  test.each([
+    ["free-format header without count", Buffer.from([0x78, 0x02, 0x5b])],
+    ["free-format object without size", Buffer.from([0x78, 0x02, 0x5b, 0x01])],
+    ["unknown object qualifier", Buffer.from([0xff, 0xff, 0xff])],
+  ])(
+    "rejects a valid control followed by a truncated %s",
+    (_label, trailing) => {
+      const calls: Dnp3ControlCommand[] = [];
+      const os = createDnp3Outstation({
+        sav5UserNumber: 1,
+        controls: { enabled: true },
+        pointMap: { points: POINTS },
+      });
+      os.setControlDirectionKey(1, Buffer.alloc(16, 0x5a));
+      os.setControlSink((cmd) => {
+        calls.push(cmd);
+        return { ok: true };
+      });
+      const session = createSession();
+      const direct = Buffer.from(OPERATE_LATCH_ON);
+      direct[1] = DNP3_FUNCTION.DIRECT_OPERATE;
+      const malformed = parseRequest(Buffer.concat([direct, trailing]));
+
+      expect(malformed.objectsComplete).toBe(false);
+      const response = os.dispatch(malformed, session);
+      expect(response[1]).toBe(DNP3_FUNCTION.RESPONSE);
+      expect(response.readUInt16LE(2) & DNP3_IIN.PARAMETER_ERROR).toBe(
+        DNP3_IIN.PARAMETER_ERROR,
+      );
+      expect(os.ctx.secureAuth.hasPending(session.sav5AssociationId)).toBe(
+        false,
+      );
+      expect(calls).toEqual([]);
+    },
+  );
+
+  test("standard AUTH_REQUEST + qualifier-0x5B g120v2 executes the queued ASDU", () => {
+    const key = Buffer.alloc(16, 0x5a);
+    const calls: Dnp3ControlCommand[] = [];
+    const os = createDnp3Outstation({
+      sav5UserNumber: 1,
+      controls: { enabled: true },
+      pointMap: { points: POINTS },
+    });
+    os.setControlDirectionKey(1, key);
+    os.setControlSink((cmd) => {
+      calls.push(cmd);
+      return { ok: true };
+    });
+    const session = createSession();
+    const direct = Buffer.from(OPERATE_LATCH_ON);
+    direct[1] = DNP3_FUNCTION.DIRECT_OPERATE;
+
+    const challengeFragment = os.dispatch(parseRequest(direct), session);
+    const challenge = decodeChallengeObject(challengeFragment.subarray(10));
+    const mac = computeMac(key, challenge, challengeFragment, direct);
+    const replyBody = encodeReplyObject({
+      challengeSeq: challenge.challengeSeq,
+      userNumber: 1,
+      mac,
+    });
+    const authRequest = parseRequest(
+      Buffer.concat([
+        Buffer.from([0xc1, DNP3_FUNCTION.AUTH_REQUEST]),
+        buildFreeFormat16Object(120, 2, replyBody),
+      ]),
+    );
+
+    const response = os.dispatchSecureAuthReply(authRequest, session);
+
+    expect(response[1]).toBe(DNP3_FUNCTION.RESPONSE);
+    expect(response[response.length - 1]).toBe(DNP3_COMMAND_STATUS.SUCCESS);
+    expect(calls).toHaveLength(1);
+  });
+
+  test("0x21 or trailing data cannot authorize a g120v2 reply", () => {
+    const key = Buffer.alloc(16, 0x5a);
+    const calls: Dnp3ControlCommand[] = [];
+    const os = createDnp3Outstation({
+      sav5UserNumber: 1,
+      controls: { enabled: true },
+      pointMap: { points: POINTS },
+    });
+    os.setControlDirectionKey(1, key);
+    os.setControlSink((cmd) => {
+      calls.push(cmd);
+      return { ok: true };
+    });
+    const session = createSession();
+    const direct = Buffer.from(OPERATE_LATCH_ON);
+    direct[1] = DNP3_FUNCTION.DIRECT_OPERATE;
+    const challengeFragment = os.dispatch(parseRequest(direct), session);
+    const challenge = decodeChallengeObject(challengeFragment.subarray(10));
+    const mac = computeMac(key, challenge, challengeFragment, direct);
+    const object = buildFreeFormat16Object(
+      120,
+      2,
+      encodeReplyObject({
+        challengeSeq: challenge.challengeSeq,
+        userNumber: 1,
+        mac,
+      }),
+    );
+
+    const noAck = parseRequest(
+      Buffer.concat([
+        Buffer.from([0xc2, DNP3_FUNCTION.AUTH_REQUEST_NO_ACK]),
+        object,
+      ]),
+    );
+    expect(os.dispatchSecureAuthReply(noAck, session)).toEqual(Buffer.alloc(0));
+    expect(calls).toEqual([]);
+    expect(os.ctx.secureAuth.hasPending(session.sav5AssociationId)).toBe(true);
+
+    const trailing = parseRequest(
+      Buffer.concat([
+        Buffer.from([0xc2, DNP3_FUNCTION.AUTH_REQUEST]),
+        object,
+        Buffer.from([0xff]),
+      ]),
+    );
+    expect(trailing.objectsComplete).toBe(false);
+    expect(os.dispatchSecureAuthReply(trailing, session)).toEqual(
+      Buffer.alloc(0),
+    );
+    expect(calls).toEqual([]);
+    expect(os.ctx.secureAuth.hasPending(session.sav5AssociationId)).toBe(false);
+  });
 });
 
-describe('live TCP round trip', () => {
+describe("live TCP round trip", () => {
   let outstation: Dnp3Outstation | null = null;
   let client: net.Socket | null = null;
 
@@ -198,7 +449,11 @@ describe('live TCP round trip', () => {
   });
 
   /** Frame an application fragment the way a master would (DIR=1, PRM=1). */
-  function masterFrame(appFragment: Buffer, source: number, destination: number): Buffer {
+  function masterFrame(
+    appFragment: Buffer,
+    source: number,
+    destination: number,
+  ): Buffer {
     const parts = segment(appFragment).map((seg) =>
       buildLinkFrame({ control: 0xc4, destination, source, payload: seg }),
     );
@@ -211,8 +466,8 @@ describe('live TCP round trip', () => {
       const reassembler = new TransportReassembler();
       let buffered = Buffer.alloc(0);
       const timer = setTimeout(() => {
-        socket.off('data', onData);
-        reject(new Error('timed out waiting for a DNP3 response'));
+        socket.off("data", onData);
+        reject(new Error("timed out waiting for a DNP3 response"));
       }, 5000);
       function onData(chunk: Buffer): void {
         buffered = Buffer.concat([buffered, chunk]);
@@ -226,27 +481,27 @@ describe('live TCP round trip', () => {
           const extracted = extractPayload(frame);
           if (!extracted) {
             clearTimeout(timer);
-            socket.off('data', onData);
-            reject(new Error('response frame failed CRC'));
+            socket.off("data", onData);
+            reject(new Error("response frame failed CRC"));
             return;
           }
           const result = reassembler.accept(extracted.payload);
           if (result.fragment) {
             clearTimeout(timer);
-            socket.off('data', onData);
+            socket.off("data", onData);
             resolve(result.fragment);
             return;
           }
         }
       }
-      socket.on('data', onData);
+      socket.on("data", onData);
     });
   }
 
-  test('a master polling Class 1 over a real socket receives real g2v2 event octets', async () => {
+  test("a master polling Class 1 over a real socket receives real g2v2 event octets", async () => {
     outstation = createDnp3Outstation({
       port: 0,
-      host: '127.0.0.1',
+      host: "127.0.0.1",
       localAddress: 10,
       pointMap: { points: POINTS },
     });
@@ -255,18 +510,28 @@ describe('live TCP round trip', () => {
     expect(port).not.toBeNull();
 
     // A real value change on the tag layer becomes a buffered Class-1 event.
-    outstation.updateTag('pump.run', { value: true, quality: 'good', timestamp: T0 });
+    outstation.updateTag("pump.run", {
+      value: true,
+      quality: "good",
+      timestamp: T0,
+    });
     expect(outstation.ctx.eventBuffer.classSize(1)).toBe(1);
 
-    client = net.createConnection({ port: port!, host: '127.0.0.1' });
+    client = net.createConnection({ port: port!, host: "127.0.0.1" });
     await new Promise<void>((resolve, reject) => {
-      client!.once('connect', resolve);
-      client!.once('error', reject);
+      client!.once("connect", resolve);
+      client!.once("error", reject);
     });
 
     // READ g60v2 (Class 1), qualifier 0x06, application sequence 0.
     const pending = nextFragment(client);
-    client.write(masterFrame(Buffer.from([0xc0, DNP3_FUNCTION.READ, 0x3c, 0x02, 0x06]), 1, 10));
+    client.write(
+      masterFrame(
+        Buffer.from([0xc0, DNP3_FUNCTION.READ, 0x3c, 0x02, 0x06]),
+        1,
+        10,
+      ),
+    );
     const fragment = await pending;
 
     expect([...fragment]).toEqual([
@@ -275,27 +540,45 @@ describe('live TCP round trip', () => {
       // IIN1 0x82: CLASS1_EVENTS (0x02) plus DEVICE_RESTART (0x80), which a
       // freshly started outstation must report until the
       // master clears it.
-      0x82, 0x00,
-      0x02, 0x02, 0x17, 0x01, // g2v2, qualifier 0x17, count 1
+      0x82,
+      0x00,
+      0x02,
+      0x02,
+      0x17,
+      0x01, // g2v2, qualifier 0x17, count 1
       0x03, // index 3
       0x81, // flags ONLINE|STATE
-      0xef, 0xcd, 0xab, 0x00, 0x00, 0x00, // DNP3 time T0
+      0xef,
+      0xcd,
+      0xab,
+      0x00,
+      0x00,
+      0x00, // DNP3 time T0
     ]);
 
     // The event is still buffered until the master confirms.
     expect(outstation.ctx.eventBuffer.classSize(1)).toBe(1);
-    client.write(masterFrame(Buffer.from([0xc0, DNP3_FUNCTION.CONFIRM]), 1, 10));
+    client.write(
+      masterFrame(Buffer.from([0xc0, DNP3_FUNCTION.CONFIRM]), 1, 10),
+    );
     await new Promise((resolve) => setTimeout(resolve, 100));
     expect(outstation.ctx.eventBuffer.classSize(1)).toBe(0);
   });
 
-  test('a control over a real socket is refused while the outstation is read-only', async () => {
-    outstation = createDnp3Outstation({ port: 0, host: '127.0.0.1', pointMap: { points: POINTS } });
+  test("a control over a real socket is refused while the outstation is read-only", async () => {
+    outstation = createDnp3Outstation({
+      port: 0,
+      host: "127.0.0.1",
+      pointMap: { points: POINTS },
+    });
     await outstation.start();
-    client = net.createConnection({ port: outstation.listeningPort!, host: '127.0.0.1' });
+    client = net.createConnection({
+      port: outstation.listeningPort!,
+      host: "127.0.0.1",
+    });
     await new Promise<void>((resolve, reject) => {
-      client!.once('connect', resolve);
-      client!.once('error', reject);
+      client!.once("connect", resolve);
+      client!.once("error", reject);
     });
 
     const direct = Buffer.from(OPERATE_LATCH_ON);
@@ -306,6 +589,8 @@ describe('live TCP round trip', () => {
 
     expect(fragment[1]).toBe(DNP3_FUNCTION.RESPONSE);
     // Echoed CROB with CommandStatus NOT_SUPPORTED in its final octet.
-    expect(fragment[fragment.length - 1]).toBe(DNP3_COMMAND_STATUS.NOT_SUPPORTED);
+    expect(fragment[fragment.length - 1]).toBe(
+      DNP3_COMMAND_STATUS.NOT_SUPPORTED,
+    );
   });
 });

@@ -26,14 +26,15 @@ import {
   DNP3_GROUP,
   DNP3_VARIATION,
   DNP3_IIN,
-} from './app-objects';
+  type Dnp3FunctionCode,
+} from "./app-objects";
 import {
   Dnp3PointMap,
   serializeStaticPoint,
   type Dnp3PointType,
   type PointGroupVariation,
-} from './point-map';
-import { commandObjectSize } from './controls';
+} from "./point-map";
+import { commandObjectSize } from "./controls";
 
 export const APP_CTRL_FIR = 0x80;
 export const APP_CTRL_FIN = 0x40;
@@ -52,6 +53,8 @@ export interface ParsedRequest {
   func: number;
   /** object headers found (group/variation + qualifier), best-effort */
   objects: ParsedObjectHeader[];
+  /** True only when every octet after the function code was consumed. */
+  objectsComplete: boolean;
   /** raw bytes after the function code (for SAv5 critical-ASDU MAC input) */
   rawObjects: Buffer;
   /**
@@ -91,6 +94,12 @@ export interface ParsedObjectHeader {
    * Internal Indication bits.
    */
   data?: Buffer;
+  /**
+   * Variable-length object bodies carried by qualifier 0x5B. The range field
+   * is an 8-bit object count and every object is prefixed by a 16-bit
+   * little-endian byte length.
+   */
+  freeFormat?: Buffer[];
 }
 
 /**
@@ -104,13 +113,14 @@ export interface ParsedObjectHeader {
  * object (g12v1, g41v1..v4). Anything else stops the scan rather than
  * misinterpreting octets.
  *
- * TODO: free-format qualifiers (0x5B) used by the group-120 objects. The one
- * non-prefixed write object required for normal master startup, g80v1, is
- * decoded explicitly below.
+ * The 16-bit free-format qualifier (0x5B) used by group-120 Secure
+ * Authentication objects is decoded as count8 followed by size16 + body for
+ * each object. The one non-prefixed write object required for normal master
+ * startup, g80v1, is decoded explicitly below.
  */
 export function parseRequest(fragment: Buffer): ParsedRequest {
   if (fragment.length < 2) {
-    throw new Error('DNP3 application fragment too short');
+    throw new Error("DNP3 application fragment too short");
   }
   const appControl = fragment[0];
   const func = fragment[1];
@@ -130,36 +140,58 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
     const rangeCode = qualifier & 0x0f;
     let count: number | null = null;
 
+    if (qualifier === 0x5b) {
+      if (off + 1 > fragment.length) return finish(false);
+      count = fragment[off];
+      header.count = count;
+      off += 1;
+      const bodies: Buffer[] = [];
+      for (let n = 0; n < count; n++) {
+        if (off + 2 > fragment.length) return finish(false);
+        const length = fragment.readUInt16LE(off);
+        off += 2;
+        if (off + length > fragment.length) return finish(false);
+        bodies.push(Buffer.from(fragment.subarray(off, off + length)));
+        off += length;
+      }
+      header.freeFormat = bodies;
+      continue;
+    }
+
     switch (rangeCode) {
       case 0x00: // start/stop, 1-octet indices
-        if (off + 2 > fragment.length) return finish();
+        if (off + 2 > fragment.length) return finish(false);
         header.range = { start: fragment[off], stop: fragment[off + 1] };
         count = header.range.stop - header.range.start + 1;
         off += 2;
         break;
       case 0x01: // start/stop, 2-octet indices
-        if (off + 4 > fragment.length) return finish();
-        header.range = { start: fragment.readUInt16LE(off), stop: fragment.readUInt16LE(off + 2) };
+        if (off + 4 > fragment.length) return finish(false);
+        header.range = {
+          start: fragment.readUInt16LE(off),
+          stop: fragment.readUInt16LE(off + 2),
+        };
         count = header.range.stop - header.range.start + 1;
         off += 4;
         break;
       case 0x06: // all objects — no range field, no object data
         break;
       case 0x07: // 1-octet count
-        if (off + 1 > fragment.length) return finish();
+        if (off + 1 > fragment.length) return finish(false);
         count = fragment[off];
         off += 1;
         break;
       case 0x08: // 2-octet count
-        if (off + 2 > fragment.length) return finish();
+        if (off + 2 > fragment.length) return finish(false);
         count = fragment.readUInt16LE(off);
         off += 2;
         break;
       default:
         // Unknown range specifier: object data of unknown length follows, so
         // stop scanning rather than misparsing.
-        return finish();
+        return finish(false);
     }
+    if (count !== null && count < 0) return finish(false);
     if (count !== null) header.count = count;
 
     // Index-prefixed object data (qualifiers 0x17 / 0x28).
@@ -168,7 +200,7 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
       const objectSize = commandObjectSize(group, variation);
       if (objectSize === null || count === null || count < 0) {
         // We cannot compute where this header's data ends.
-        return finish();
+        return finish(false);
       }
       const items: ParsedPrefixedObject[] = [];
       let ok = true;
@@ -177,15 +209,18 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
           ok = false;
           break;
         }
-        const index = prefixLen === 1 ? fragment[off] : fragment.readUInt16LE(off);
-        const data = Buffer.from(fragment.subarray(off + prefixLen, off + prefixLen + objectSize));
+        const index =
+          prefixLen === 1 ? fragment[off] : fragment.readUInt16LE(off);
+        const data = Buffer.from(
+          fragment.subarray(off + prefixLen, off + prefixLen + objectSize),
+        );
         items.push({ index, data });
         off += prefixLen + objectSize;
       }
       if (!ok) {
         // Truncated object data: leave `items` unset so callers reject the
         // header with a format error instead of acting on a partial command.
-        return finish();
+        return finish(false);
       }
       header.items = items;
     } else if (
@@ -197,21 +232,21 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
       // g80v1 is a packed bit string. OpenDNP3 and other conforming masters
       // write IIN1.7 = 0 after observing DEVICE_RESTART, so consuming this data
       // is required to keep startup from retrying integrity polls forever.
-      if (count < 0) return finish();
+      if (count < 0) return finish(false);
       const byteLength = Math.ceil(count / 8);
-      if (off + byteLength > fragment.length) return finish();
+      if (off + byteLength > fragment.length) return finish(false);
       header.data = Buffer.from(fragment.subarray(off, off + byteLength));
       off += byteLength;
     } else if (prefixCode !== 0) {
       // 4-octet index prefixes and the free-format/object-size prefixes are not
       // modelled; their object data length is unknown to us.
-      return finish();
+      return finish(false);
     }
   }
 
   return finish();
 
-  function finish(): ParsedRequest {
+  function finish(parseValid = true): ParsedRequest {
     return {
       appControl,
       fir: (appControl & APP_CTRL_FIR) !== 0,
@@ -221,6 +256,7 @@ export function parseRequest(fragment: Buffer): ParsedRequest {
       seq: appControl & APP_CTRL_SEQ_MASK,
       func,
       objects,
+      objectsComplete: parseValid && off === fragment.length,
       rawObjects,
       raw: Buffer.from(fragment),
     };
@@ -234,6 +270,7 @@ export function buildResponseHeader(opts: {
   fin?: boolean;
   con?: boolean;
   unsolicited?: boolean;
+  functionCode?: Dnp3FunctionCode;
   iin: number;
 }): Buffer {
   let appControl = opts.seq & APP_CTRL_SEQ_MASK;
@@ -244,9 +281,35 @@ export function buildResponseHeader(opts: {
 
   const buf = Buffer.alloc(4);
   buf.writeUInt8(appControl, 0);
-  buf.writeUInt8(opts.unsolicited ? DNP3_FUNCTION.UNSOLICITED_RESPONSE : DNP3_FUNCTION.RESPONSE, 1);
+  buf.writeUInt8(
+    opts.functionCode ??
+      (opts.unsolicited
+        ? DNP3_FUNCTION.UNSOLICITED_RESPONSE
+        : DNP3_FUNCTION.RESPONSE),
+    1,
+  );
   buf.writeUInt16LE(opts.iin & 0xffff, 2);
   return buf;
+}
+
+/** Build one qualifier-0x5B object (count8=1, size16LE, body). */
+export function buildFreeFormat16Object(
+  group: number,
+  variation: number,
+  body: Buffer,
+): Buffer {
+  if (body.length > 0xffff) {
+    throw new Error(
+      `DNP3 free-format object exceeds 65535 octets: ${body.length}`,
+    );
+  }
+  const header = Buffer.alloc(6);
+  header.writeUInt8(group & 0xff, 0);
+  header.writeUInt8(variation & 0xff, 1);
+  header.writeUInt8(0x5b, 2);
+  header.writeUInt8(1, 3);
+  header.writeUInt16LE(body.length, 4);
+  return Buffer.concat([header, body]);
 }
 
 /**
@@ -290,11 +353,11 @@ export function buildObjectHeaderRange16(
 
 /** Mapping of the five point types to read order for Class 0. */
 const STATIC_READ_ORDER: Dnp3PointType[] = [
-  'binaryInput',
-  'binaryOutput',
-  'counter',
-  'analogInput',
-  'analogOutput',
+  "binaryInput",
+  "binaryOutput",
+  "counter",
+  "analogInput",
+  "analogOutput",
 ];
 
 /** A contiguous run of same-variation static points being assembled. */

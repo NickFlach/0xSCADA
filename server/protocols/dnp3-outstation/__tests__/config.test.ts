@@ -34,12 +34,24 @@ function baseEnv(extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
 describe("isDnp3OutstationEnabled", () => {
   it("is off unless the flag is exactly 'true'", () => {
     expect(isDnp3OutstationEnabled({})).toBe(false);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "" })).toBe(false);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "1" })).toBe(false);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "TRUE" })).toBe(false);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "yes" })).toBe(false);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: " true " })).toBe(true);
-    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "true" })).toBe(true);
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "" })).toBe(
+      false,
+    );
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "1" })).toBe(
+      false,
+    );
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "TRUE" })).toBe(
+      false,
+    );
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "yes" })).toBe(
+      false,
+    );
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: " true " })).toBe(
+      true,
+    );
+    expect(isDnp3OutstationEnabled({ DNP3_OUTSTATION_ENABLED: "true" })).toBe(
+      true,
+    );
   });
 });
 
@@ -52,10 +64,10 @@ describe("loadDnp3OutstationConfig", () => {
     expect(config.allowControls).toBe(false);
     expect(config.allowUnauthenticatedControls).toBe(false);
     expect(config.unsolicitedEnabled).toBe(false);
-    expect(config.maxConnections).toBe(2);
+    expect(config.maxConnections).toBe(1);
     expect(config.socketTimeoutMs).toBe(60_000);
     expect(config.localAddress).toBe(10);
-    expect(config.sav5UpdateKeyHex).toBeUndefined();
+    expect(config.sav5ControlKeyHex).toBeUndefined();
   });
 
   it("requires a site id and a point map file", () => {
@@ -75,7 +87,9 @@ describe("loadDnp3OutstationConfig", () => {
 
   it("refuses a non-loopback bind with no peer allowlist", () => {
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_BIND_HOST: "0.0.0.0" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_BIND_HOST: "0.0.0.0" }),
+      ),
     ).toThrow(/DNP3_OUTSTATION_ALLOWED_PEERS must list the DNP3 masters/);
   });
 
@@ -114,7 +128,9 @@ describe("loadDnp3OutstationConfig", () => {
 
   it("refuses controls with no SAv5 key unless that is explicitly accepted", () => {
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_ALLOW_CONTROLS: "true" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_ALLOW_CONTROLS: "true" }),
+      ),
     ).toThrow(/no\s+cryptographic authentication/);
 
     const accepted = loadDnp3OutstationConfig(
@@ -124,40 +140,62 @@ describe("loadDnp3OutstationConfig", () => {
       }),
     );
     expect(accepted.allowControls).toBe(true);
-    expect(accepted.sav5UpdateKeyHex).toBeUndefined();
+    expect(accepted.sav5ControlKeyHex).toBeUndefined();
 
     const keyed = loadDnp3OutstationConfig(
       baseEnv({
         DNP3_OUTSTATION_ALLOW_CONTROLS: "true",
-        DNP3_OUTSTATION_SAV5_UPDATE_KEY: KEY,
+        DNP3_OUTSTATION_SAV5_CONTROL_KEY: KEY,
         DNP3_OUTSTATION_SAV5_USER: "7",
       }),
     );
-    expect(keyed.sav5UpdateKeyHex).toBe(KEY);
+    expect(keyed.sav5ControlKeyHex).toBe(KEY);
     expect(keyed.sav5UserNumber).toBe(7);
   });
 
   it("refuses an SAv5 key that is not usable key material", () => {
-    for (const bad of ["zz112233445566778899aabbccddeeff", "00112233", "0011223"]) {
-      expect(() =>
-        loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_SAV5_UPDATE_KEY: bad })),
+    for (const bad of [
+      "zz112233445566778899aabbccddeeff",
+      "00112233",
+      "0011223",
+    ]) {
+      expect(
+        () =>
+          loadDnp3OutstationConfig(
+            baseEnv({ DNP3_OUTSTATION_SAV5_CONTROL_KEY: bad }),
+          ),
         `key ${bad}`,
       ).toThrow(Dnp3OutstationConfigError);
     }
+  });
+
+  it("requires one association when an SAv5 session key is provisioned", () => {
+    expect(() =>
+      loadDnp3OutstationConfig(
+        baseEnv({
+          DNP3_OUTSTATION_SAV5_CONTROL_KEY: KEY,
+          DNP3_OUTSTATION_MAX_CONNECTIONS: "2",
+        }),
+      ),
+    ).toThrow(/association-scoped/);
   });
 
   it("refuses a receive-buffer bound that cannot hold one link frame", () => {
     expect(() =>
       loadDnp3OutstationConfig(
         baseEnv({
-          DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES: String(DNP3_MAX_LINK_FRAME_BYTES - 1),
+          DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES: String(
+            DNP3_MAX_LINK_FRAME_BYTES - 1,
+          ),
         }),
       ),
     ).toThrow(Dnp3OutstationConfigError);
     expect(
       loadDnp3OutstationConfig(
         baseEnv({
-          DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES: String(DNP3_MAX_LINK_FRAME_BYTES),
+          DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES: String(
+            DNP3_MAX_LINK_FRAME_BYTES,
+          ),
         }),
       ).maxRxBufferBytes,
     ).toBe(DNP3_MAX_LINK_FRAME_BYTES);
@@ -166,13 +204,16 @@ describe("loadDnp3OutstationConfig", () => {
   it("defaults and validates the transmit-queue bound", () => {
     expect(loadDnp3OutstationConfig(baseEnv()).maxTxQueueBytes).toBe(1_048_576);
     expect(
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES: "65536" }))
-        .maxTxQueueBytes,
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES: "65536" }),
+      ).maxTxQueueBytes,
     ).toBe(65_536);
     // Too small to hold even a handful of maximum-size fragments, and absurdly
     // large, are both refused rather than clamped.
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES: "1024" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES: "1024" }),
+      ),
     ).toThrow(Dnp3OutstationConfigError);
     expect(() =>
       loadDnp3OutstationConfig(
@@ -186,13 +227,19 @@ describe("loadDnp3OutstationConfig", () => {
       loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_PORT: "70000" })),
     ).toThrow(Dnp3OutstationConfigError);
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_MAX_CONNECTIONS: "0" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_MAX_CONNECTIONS: "0" }),
+      ),
     ).toThrow(Dnp3OutstationConfigError);
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_POLL_INTERVAL_MS: "10" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_POLL_INTERVAL_MS: "10" }),
+      ),
     ).toThrow(Dnp3OutstationConfigError);
     expect(() =>
-      loadDnp3OutstationConfig(baseEnv({ DNP3_OUTSTATION_LINK_ADDRESS: "abc" })),
+      loadDnp3OutstationConfig(
+        baseEnv({ DNP3_OUTSTATION_LINK_ADDRESS: "abc" }),
+      ),
     ).toThrow(Dnp3OutstationConfigError);
   });
 
@@ -202,7 +249,7 @@ describe("loadDnp3OutstationConfig", () => {
         DNP3_OUTSTATION_BIND_HOST: "   ",
         DNP3_OUTSTATION_PORT: "",
         DNP3_OUTSTATION_ALLOWED_PEERS: " , ",
-        DNP3_OUTSTATION_SAV5_UPDATE_KEY: "",
+        DNP3_OUTSTATION_SAV5_CONTROL_KEY: "",
       }),
     );
     expect(config.host).toBe("127.0.0.1");
@@ -216,7 +263,7 @@ describe("describeDnp3OutstationConfig", () => {
     const config = loadDnp3OutstationConfig(
       baseEnv({
         DNP3_OUTSTATION_ALLOW_CONTROLS: "true",
-        DNP3_OUTSTATION_SAV5_UPDATE_KEY: KEY,
+        DNP3_OUTSTATION_SAV5_CONTROL_KEY: KEY,
       }),
     );
     const summary = describeDnp3OutstationConfig(config);
@@ -236,7 +283,9 @@ describe("loadDnp3PointMapFile", () => {
   };
 
   it("parses a valid map, preserving the writable opt-in", () => {
-    const parsed = loadDnp3PointMapFile("map.json", () => JSON.stringify(goodMap));
+    const parsed = loadDnp3PointMapFile("map.json", () =>
+      JSON.stringify(goodMap),
+    );
     expect(parsed.points).toHaveLength(2);
     expect(parsed.points[1].writable).toBe(true);
     expect(parsed.points[0].writable).toBeUndefined();
@@ -251,8 +300,12 @@ describe("loadDnp3PointMapFile", () => {
 
   it("names the file when it cannot be read", () => {
     const missing = path.join(tmpdir(), "definitely-not-here-dnp3.json");
-    expect(() => loadDnp3PointMapFile(missing)).toThrow(Dnp3OutstationConfigError);
-    expect(() => loadDnp3PointMapFile(missing)).toThrow(new RegExp(escape(missing)));
+    expect(() => loadDnp3PointMapFile(missing)).toThrow(
+      Dnp3OutstationConfigError,
+    );
+    expect(() => loadDnp3PointMapFile(missing)).toThrow(
+      new RegExp(escape(missing)),
+    );
   });
 
   it("rejects invalid JSON", () => {
@@ -263,11 +316,13 @@ describe("loadDnp3PointMapFile", () => {
 
   it("rejects a map that does not match the point schema", () => {
     expect(() =>
-      loadDnp3PointMapFile("map.json", () => JSON.stringify({ points: [{ tagId: "x" }] })),
+      loadDnp3PointMapFile("map.json", () =>
+        JSON.stringify({ points: [{ tagId: "x" }] }),
+      ),
     ).toThrow(/not a valid point map/);
-    expect(() => loadDnp3PointMapFile("map.json", () => JSON.stringify([]))).toThrow(
-      /not a valid point map/,
-    );
+    expect(() =>
+      loadDnp3PointMapFile("map.json", () => JSON.stringify([])),
+    ).toThrow(/not a valid point map/);
   });
 
   it("rejects a duplicated (type,index) pair", () => {

@@ -2,12 +2,14 @@
  * DNP3 Secure Authentication v5 (SAv5) — HMAC Challenge/Response
  * Issue #464: DNP3 Outstation Mode
  *
- * FULLY IMPLEMENTED + UNIT TESTED (the HMAC challenge/response core).
+ * Implements the interoperable challenge/reply portion of SAv5 with a
+ * pre-provisioned Control Direction Session Key.
  *
  * DNP3 Secure Authentication v5 (IEEE 1815-2012 Annex / IEC 62351-5) protects
  * "critical" application-layer messages (e.g. control operations) from spoofing
- * by requiring the requester to prove possession of a shared Update Key via an
- * HMAC over the challenged data.
+ * by requiring the requester to prove possession of the current Control
+ * Direction Session Key via an HMAC over the exact challenge fragment followed
+ * by the challenged data.
  *
  * Flow (challenge-response mode, the testable core implemented here):
  *
@@ -17,46 +19,51 @@
  *     |  --- g120v2 Reply (HMAC over data) -->  |
  *     |  <----- result / OPERATE executed ----- |   outstation verifies HMAC
  *
- * The MAC is computed over: challenge-sequence-number || user-number ||
- * MAC-algorithm || reason || challenge-data || the critical ASDU bytes. We
- * implement HMAC-SHA-256 (truncated per algorithm) and HMAC-SHA-1, the two
- * algorithms an opendnp3 master commonly negotiates.
+ * IEEE 1815 Table A-3 defines the MAC input as the entire serialized
+ * Authentication Challenge application fragment followed by the entire
+ * critical ASDU. This module retains those exact octets and never reconstructs
+ * them for verification.
  *
  * IMPLEMENTED here:
  *   - Challenge object (g120v1) build/parse
  *   - Challenge-Reply MAC computation + constant-time verification (g120v2)
- *   - Session-key wrap is OUT OF SCOPE for this core (Update Key used directly);
- *     see TODO. Aggressive mode and key-change (g120v6/v5) are TODO.
+ *   - Session-key establishment/key wrap is outside this module. The embedder
+ *     provisions the already-established Control Direction Session Key.
+ *     Aggressive mode and in-band key change remain separate extensions.
  *
  * Crypto uses Node's built-in `crypto` (no new dependency).
  */
 
-import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from "crypto";
 
 /** MAC algorithm identifiers as used on the wire (IEEE 1815 Table). */
 export const SAV5_MAC_ALGORITHM = {
-  /** HMAC-SHA-1 truncated to 4 octets (legacy, discouraged) */
-  HMAC_SHA1_TRUNC_4: 1,
+  /** HMAC-SHA-1 truncated to 10 octets (networked) */
+  HMAC_SHA1_TRUNC_10: 2,
   /** HMAC-SHA-256 truncated to 8 octets */
   HMAC_SHA256_TRUNC_8: 3,
   /** HMAC-SHA-256 truncated to 16 octets */
   HMAC_SHA256_TRUNC_16: 4,
-  /** HMAC-SHA-256 full 32 octets */
-  HMAC_SHA256_FULL: 7,
+  /** HMAC-SHA-1 truncated to 8 octets (serial) */
+  HMAC_SHA1_TRUNC_8: 5,
 } as const;
 
-export type Sav5MacAlgorithm = (typeof SAV5_MAC_ALGORITHM)[keyof typeof SAV5_MAC_ALGORITHM];
+export type Sav5MacAlgorithm =
+  (typeof SAV5_MAC_ALGORITHM)[keyof typeof SAV5_MAC_ALGORITHM];
 
 /** Reason a challenge is issued (g120v1 "reason for challenge"). */
 export const SAV5_CHALLENGE_REASON = {
   CRITICAL: 1, // the received ASDU was critical
 } as const;
 
-const ALGO_SPEC: Record<Sav5MacAlgorithm, { hash: 'sha1' | 'sha256'; truncate: number }> = {
-  [SAV5_MAC_ALGORITHM.HMAC_SHA1_TRUNC_4]: { hash: 'sha1', truncate: 4 },
-  [SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_8]: { hash: 'sha256', truncate: 8 },
-  [SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_16]: { hash: 'sha256', truncate: 16 },
-  [SAV5_MAC_ALGORITHM.HMAC_SHA256_FULL]: { hash: 'sha256', truncate: 32 },
+const ALGO_SPEC: Record<
+  Sav5MacAlgorithm,
+  { hash: "sha1" | "sha256"; truncate: number }
+> = {
+  [SAV5_MAC_ALGORITHM.HMAC_SHA1_TRUNC_10]: { hash: "sha1", truncate: 10 },
+  [SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_8]: { hash: "sha256", truncate: 8 },
+  [SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_16]: { hash: "sha256", truncate: 16 },
+  [SAV5_MAC_ALGORITHM.HMAC_SHA1_TRUNC_8]: { hash: "sha1", truncate: 8 },
 };
 
 /** A g120v1 Authentication Challenge object. */
@@ -82,32 +89,30 @@ export interface Sav5Reply {
 }
 
 /**
- * Compute the SAv5 MAC over the canonical input:
- *   CSQ(4 LE) || userNumber(2 LE) || macAlgorithm(1) || reason(1) ||
- *   challengeData || criticalAsdu
+ * Compute the SAv5 reply MAC over the exact Table A-3 input:
+ *   complete serialized challenge application fragment || criticalAsdu
  *
- * The Update/Session key is the HMAC key. Returns the truncated MAC per the
- * negotiated algorithm.
+ * `criticalAsdu` is included only for a critical-function challenge. The HMAC
+ * key is the current Control Direction Session Key.
  */
 export function computeMac(
   key: Buffer,
-  challenge: Pick<Sav5Challenge, 'challengeSeq' | 'userNumber' | 'macAlgorithm' | 'reason' | 'challengeData'>,
+  challenge: Pick<Sav5Challenge, "macAlgorithm" | "reason">,
+  challengeFragment: Buffer,
   criticalAsdu: Buffer,
 ): Buffer {
   const spec = ALGO_SPEC[challenge.macAlgorithm];
   if (!spec) {
-    throw new Error(`Unsupported SAv5 MAC algorithm: ${challenge.macAlgorithm}`);
+    throw new Error(
+      `Unsupported SAv5 MAC algorithm: ${challenge.macAlgorithm}`,
+    );
   }
-  const header = Buffer.alloc(8);
-  header.writeUInt32LE(challenge.challengeSeq >>> 0, 0);
-  header.writeUInt16LE(challenge.userNumber & 0xffff, 4);
-  header.writeUInt8(challenge.macAlgorithm & 0xff, 6);
-  header.writeUInt8(challenge.reason & 0xff, 7);
 
   const hmac = createHmac(spec.hash, key);
-  hmac.update(header);
-  hmac.update(challenge.challengeData);
-  hmac.update(criticalAsdu);
+  hmac.update(challengeFragment);
+  if (challenge.reason === SAV5_CHALLENGE_REASON.CRITICAL) {
+    hmac.update(criticalAsdu);
+  }
   const full = hmac.digest();
   return full.subarray(0, spec.truncate);
 }
@@ -123,17 +128,28 @@ export function macEquals(a: Buffer, b: Buffer): boolean {
 
 /**
  * Outstation-side Secure Authentication v5 state machine. Tracks per-user
- * Update Keys, issues challenges with fresh nonces, and verifies replies.
+ * Control Direction Session Keys, issues challenges with fresh nonces, and
+ * verifies replies.
  *
  * This is the fully-implemented, unit-testable core. Wiring it into the APDU
  * pipeline (deciding which function codes are "critical", emitting g120v1/v2
  * objects on the wire) lives in index.ts and is documented as partial there.
  */
 export class Sav5Outstation {
-  /** userNumber -> Update Key */
-  private keys = new Map<number, Buffer>();
-  /** pending challenge per userNumber awaiting a reply */
-  private pending = new Map<number, { challenge: Sav5Challenge; criticalAsdu: Buffer; issuedAt: number }>();
+  /** userNumber -> current Control Direction Session Key */
+  private controlDirectionKeys = new Map<number, Buffer>();
+  /** pending challenge per DNP association awaiting a reply */
+  private pending = new Map<
+    number,
+    {
+      challenge: Sav5Challenge;
+      expectedUserNumber: number;
+      expectedAppSeq: number;
+      challengeFragment?: Buffer;
+      criticalAsdu: Buffer;
+      issuedAt: number;
+    }
+  >();
   private csqCounter = 0;
   private readonly nonceBytes: number;
   private readonly defaultAlgorithm: Sav5MacAlgorithm;
@@ -145,20 +161,33 @@ export class Sav5Outstation {
     challengeTimeoutMs?: number;
   }) {
     this.nonceBytes = opts?.nonceBytes ?? 16;
-    this.defaultAlgorithm = opts?.defaultAlgorithm ?? SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_16;
+    if (this.nonceBytes < 4) {
+      throw new Error("SAv5 challenge data must be at least 4 octets");
+    }
+    this.defaultAlgorithm =
+      opts?.defaultAlgorithm ?? SAV5_MAC_ALGORITHM.HMAC_SHA256_TRUNC_16;
     this.challengeTimeoutMs = opts?.challengeTimeoutMs ?? 5000;
   }
 
-  /** Provision (or rotate) the Update Key for a user. */
-  setUpdateKey(userNumber: number, key: Buffer): void {
-    if (key.length < 16) {
-      throw new Error('SAv5 Update Key must be at least 16 bytes');
+  /** Provision (or rotate) the current Control Direction Session Key. */
+  setControlDirectionKey(userNumber: number, key: Buffer): void {
+    if (
+      !Number.isInteger(userNumber) ||
+      userNumber < 1 ||
+      userNumber > 0xffff
+    ) {
+      throw new Error("SAv5 user number must be in the range 1..65535");
     }
-    this.keys.set(userNumber, Buffer.from(key));
+    if (key.length < 16) {
+      throw new Error(
+        "SAv5 Control Direction Session Key must be at least 16 bytes",
+      );
+    }
+    this.controlDirectionKeys.set(userNumber, Buffer.from(key));
   }
 
   hasUser(userNumber: number): boolean {
-    return this.keys.has(userNumber);
+    return this.controlDirectionKeys.has(userNumber);
   }
 
   /**
@@ -169,26 +198,74 @@ export class Sav5Outstation {
    * @param now epoch ms (injected for deterministic expiry tests)
    */
   issueChallenge(
-    userNumber: number,
+    expectedUserNumber: number,
+    associationId: number,
     criticalAsdu: Buffer,
-    opts?: { nonce?: Buffer; algorithm?: Sav5MacAlgorithm; now?: number },
+    opts?: {
+      nonce?: Buffer;
+      algorithm?: Sav5MacAlgorithm;
+      now?: number;
+      appSeq?: number;
+    },
   ): Sav5Challenge {
-    if (!this.keys.has(userNumber)) {
-      throw new Error(`SAv5: unknown user ${userNumber}`);
+    if (!this.controlDirectionKeys.has(expectedUserNumber)) {
+      throw new Error(`SAv5: unknown user ${expectedUserNumber}`);
+    }
+    if (opts?.nonce && opts.nonce.length < 4) {
+      throw new Error("SAv5 challenge data must be at least 4 octets");
+    }
+    const issuedAt = opts?.now ?? Date.now();
+    const existing = this.pending.get(associationId);
+    if (existing && issuedAt - existing.issuedAt > this.challengeTimeoutMs) {
+      this.pending.delete(associationId);
+    } else if (existing) {
+      throw new Error(
+        `SAv5: association ${associationId} is already waiting for a reply`,
+      );
     }
     const challenge: Sav5Challenge = {
       challengeSeq: ++this.csqCounter >>> 0,
-      userNumber,
+      // An outstation-initiated challenge cannot know which master user is
+      // responding; IEEE 1815 requires USR=0 and the g120v2 reply supplies it.
+      userNumber: 0,
       macAlgorithm: opts?.algorithm ?? this.defaultAlgorithm,
       reason: SAV5_CHALLENGE_REASON.CRITICAL,
       challengeData: opts?.nonce ?? randomBytes(this.nonceBytes),
     };
-    this.pending.set(userNumber, {
+    this.pending.set(associationId, {
       challenge,
+      expectedUserNumber,
+      expectedAppSeq: opts?.appSeq ?? criticalAsdu[0] & 0x0f,
       criticalAsdu: Buffer.from(criticalAsdu),
-      issuedAt: opts?.now ?? Date.now(),
+      issuedAt,
     });
     return challenge;
+  }
+
+  /**
+   * Bind the exact serialized AUTH_RESPONSE fragment to a pending challenge.
+   * Verification intentionally MACs these received-on-the-wire-equivalent
+   * octets rather than reconstructing the fragment from object fields.
+   */
+  bindChallengeFragment(associationId: number, fragment: Buffer): void {
+    const pending = this.pending.get(associationId);
+    if (!pending) {
+      throw new Error(
+        `SAv5: no pending challenge for association ${associationId}`,
+      );
+    }
+    const encodedBody = encodeChallengeObject(pending.challenge);
+    if (
+      fragment.length < encodedBody.length ||
+      !fragment
+        .subarray(fragment.length - encodedBody.length)
+        .equals(encodedBody)
+    ) {
+      throw new Error(
+        "SAv5 challenge fragment does not contain the pending challenge body",
+      );
+    }
+    pending.challengeFragment = Buffer.from(fragment);
   }
 
   /**
@@ -199,40 +276,91 @@ export class Sav5Outstation {
    *
    * @param now epoch ms (injected for deterministic expiry tests)
    */
-  verifyReply(reply: Sav5Reply, now: number = Date.now()): Sav5VerifyResult {
-    const pending = this.pending.get(reply.userNumber);
+  verifyReply(
+    reply: Sav5Reply,
+    associationId: number,
+    replyAppSeq: number,
+    now: number = Date.now(),
+  ): Sav5VerifyResult {
+    const pending = this.pending.get(associationId);
     if (!pending) {
-      return { ok: false, error: 'no-pending-challenge' };
+      return { ok: false, error: "no-pending-challenge" };
     }
-    // Single-use: consume regardless of outcome.
-    this.pending.delete(reply.userNumber);
-
+    // Any syntactically valid reply received for this association completes
+    // Wait-for-Reply. Invalid CSQ/user/MAC values discard the queued critical
+    // ASDU rather than leaving a challenge reusable.
+    this.pending.delete(associationId);
+    if ((replyAppSeq & 0x0f) !== pending.expectedAppSeq) {
+      return { ok: false, error: "app-seq-mismatch" };
+    }
     if (pending.challenge.challengeSeq !== reply.challengeSeq) {
-      return { ok: false, error: 'csq-mismatch' };
+      return { ok: false, error: "csq-mismatch" };
+    }
+    if (reply.userNumber !== pending.expectedUserNumber) {
+      return { ok: false, error: "unexpected-user" };
     }
     if (now - pending.issuedAt > this.challengeTimeoutMs) {
-      return { ok: false, error: 'challenge-expired' };
+      return { ok: false, error: "challenge-expired" };
     }
-    const key = this.keys.get(reply.userNumber);
+    if (!pending.challengeFragment) {
+      return { ok: false, error: "challenge-fragment-not-bound" };
+    }
+    const key = this.controlDirectionKeys.get(reply.userNumber);
     if (!key) {
-      return { ok: false, error: 'unknown-user' };
+      return { ok: false, error: "unknown-user" };
     }
-    const expected = computeMac(key, pending.challenge, pending.criticalAsdu);
+    const expected = computeMac(
+      key,
+      pending.challenge,
+      pending.challengeFragment,
+      pending.criticalAsdu,
+    );
     if (!macEquals(expected, reply.mac)) {
-      return { ok: false, error: 'mac-mismatch' };
+      return { ok: false, error: "mac-mismatch" };
     }
-    return { ok: true, criticalAsdu: pending.criticalAsdu, userNumber: reply.userNumber };
+    return {
+      ok: true,
+      criticalAsdu: pending.criticalAsdu,
+      userNumber: reply.userNumber,
+    };
   }
 
-  /** Whether a challenge is currently outstanding for a user. */
-  hasPending(userNumber: number): boolean {
-    return this.pending.has(userNumber);
+  /** Whether a challenge is currently outstanding for an association. */
+  hasPending(associationId: number): boolean {
+    return this.pending.has(associationId);
+  }
+
+  /** Return Wait-for-Reply state, expiring a lost challenge at its deadline. */
+  isWaiting(associationId: number, now: number = Date.now()): boolean {
+    const pending = this.pending.get(associationId);
+    if (!pending) return false;
+    if (now - pending.issuedAt > this.challengeTimeoutMs) {
+      this.pending.delete(associationId);
+      return false;
+    }
+    return true;
+  }
+
+  /** Drop authentication state when an association closes. */
+  clearAssociation(associationId: number): void {
+    this.pending.delete(associationId);
   }
 }
 
 export type Sav5VerifyResult =
   | { ok: true; criticalAsdu: Buffer; userNumber: number }
-  | { ok: false; error: 'no-pending-challenge' | 'csq-mismatch' | 'challenge-expired' | 'unknown-user' | 'mac-mismatch' };
+  | {
+      ok: false;
+      error:
+        | "no-pending-challenge"
+        | "csq-mismatch"
+        | "app-seq-mismatch"
+        | "challenge-expired"
+        | "challenge-fragment-not-bound"
+        | "unexpected-user"
+        | "unknown-user"
+        | "mac-mismatch";
+    };
 
 /** Function codes treated as "critical" and therefore requiring SAv5. */
 export const SAV5_CRITICAL_FUNCTIONS = new Set<number>([
@@ -253,9 +381,7 @@ export function isCriticalFunction(fc: number): boolean {
 }
 
 // ─── g120v1 / g120v2 object (de)serialisation ────────────────────────────────
-// Minimal wire encoding used by the integration seam in index.ts. Sufficient
-// for round-trip tests; full object-header framing is handled by the APDU
-// assembler.
+// Object body encoding. Qualifier-0x5B framing is handled by app-layer.ts.
 
 /** Serialise a g120v1 Challenge object body (without object header). */
 export function encodeChallengeObject(c: Sav5Challenge): Buffer {
@@ -269,7 +395,7 @@ export function encodeChallengeObject(c: Sav5Challenge): Buffer {
 
 /** Parse a g120v1 Challenge object body. */
 export function decodeChallengeObject(buf: Buffer): Sav5Challenge {
-  if (buf.length < 8) throw new Error('SAv5 challenge object too short');
+  if (buf.length < 8) throw new Error("SAv5 challenge object too short");
   return {
     challengeSeq: buf.readUInt32LE(0),
     userNumber: buf.readUInt16LE(4),
@@ -289,7 +415,7 @@ export function encodeReplyObject(r: Sav5Reply): Buffer {
 
 /** Parse a g120v2 Reply object body. */
 export function decodeReplyObject(buf: Buffer): Sav5Reply {
-  if (buf.length < 6) throw new Error('SAv5 reply object too short');
+  if (buf.length < 6) throw new Error("SAv5 reply object too short");
   return {
     challengeSeq: buf.readUInt32LE(0),
     userNumber: buf.readUInt16LE(4),

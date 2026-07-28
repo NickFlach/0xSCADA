@@ -50,52 +50,52 @@ server/protocols/dnp3-outstation/
 
 DNP3 is a four-layer stack. Here is exactly what is real today.
 
-| Layer | Concern | Status |
-|-------|---------|--------|
-| **Data Link** | start bytes, length, CONTROL, addresses | header build/parse implemented |
-| | CRC-DNP (poly 0x3D65) | **fully implemented + tested** (verified against the canonical reset-link vector → CRC `0x21E9`) |
-| | 16-octet block CRC interleave | implemented for build + extract |
-| | TCP stream → frame reassembly, bounded, with resync | **implemented + tested** (`server.ts`; see [Framing on a byte stream](#framing-on-a-byte-stream)) |
-| | secondary link-confirm / FCB state machine | **TODO** |
-| **Transport** | FIR/FIN/SEQ segmentation + reassembly | **fully implemented + tested** |
-| **Application** | request header parse (FIR/FIN/CON/UNS/SEQ + func) | implemented |
-| | object-header scan (qualifiers 0x00/0x01/0x06/0x07/0x08) | implemented |
-| | prefixed-index qualifiers (0x17/0x28) length decode | **implemented + tested** (for objects of known fixed size, which covers all control objects) |
-| | free-format qualifier 0x5B (group-120 objects) | **TODO** — SAv5 objects use the simple count-1 header this module also emits |
-| | response header + correctly ordered IIN1/IIN2 wire octets | **fully implemented + tested against OpenDNP3** |
-| | Class 0 static read (BI/AI/Counter/BO/AO + flags) | **fully implemented + tested**, split into fragment-sized object blocks, non-contiguous indices and 16-bit ranges handled |
-| | Class 1/2/3 event read | **fully implemented + tested** — g2v1/v2/v3, g11v1/v2, g22v1/v5, g32v1/v3/v5/v7, g42, with g51v1 CTO for relative time |
-| | multi-fragment responses (FIR/FIN/CON + per-fragment CONFIRM) | **implemented + tested** |
-| | SELECT/OPERATE/DIRECT-OPERATE (g12v1, g41v1..v4) | **implemented + tested**, fail-closed and off by default |
-| | WRITE g80v1 (clear DEVICE_RESTART IIN) | **implemented + tested against OpenDNP3** |
-| | per-variation read selection (master asks for a variation, not a class) | **TODO** |
-| **Secure Auth v5** | HMAC over critical ASDU (challenge/response) | **fully implemented + tested** |
-| | dispatch of the ASDU once its reply verifies | **implemented + tested** |
-| | session-key wrap (g120v6), aggressive mode, key-change | **TODO** (Update Key used directly today) |
+| Layer              | Concern                                                                                | Status                                                                                                                    |
+| ------------------ | -------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| **Data Link**      | start bytes, length, CONTROL, addresses                                                | header build/parse implemented                                                                                            |
+|                    | CRC-DNP (poly 0x3D65)                                                                  | **fully implemented + tested** (verified against the canonical reset-link vector → CRC `0x21E9`)                          |
+|                    | 16-octet block CRC interleave                                                          | implemented for build + extract                                                                                           |
+|                    | TCP stream → frame reassembly, bounded, with resync                                    | **implemented + tested** (`server.ts`; see [Framing on a byte stream](#framing-on-a-byte-stream))                         |
+|                    | secondary link-confirm / FCB state machine                                             | **TODO**                                                                                                                  |
+| **Transport**      | FIR/FIN/SEQ segmentation + reassembly                                                  | **fully implemented + tested**                                                                                            |
+| **Application**    | request header parse (FIR/FIN/CON/UNS/SEQ + func)                                      | implemented                                                                                                               |
+|                    | object-header scan (qualifiers 0x00/0x01/0x06/0x07/0x08)                               | implemented                                                                                                               |
+|                    | prefixed-index qualifiers (0x17/0x28) length decode                                    | **implemented + tested** (for objects of known fixed size, which covers all control objects)                              |
+|                    | free-format qualifier 0x5B (count8 + size16LE + body)                                  | **implemented + tested** for g120v1/v2                                                                                    |
+|                    | response header + correctly ordered IIN1/IIN2 wire octets                              | **fully implemented + tested against OpenDNP3**                                                                           |
+|                    | Class 0 static read (BI/AI/Counter/BO/AO + flags)                                      | **fully implemented + tested**, split into fragment-sized object blocks, non-contiguous indices and 16-bit ranges handled |
+|                    | Class 1/2/3 event read                                                                 | **fully implemented + tested** — g2v1/v2/v3, g11v1/v2, g22v1/v5, g32v1/v3/v5/v7, g42, with g51v1 CTO for relative time    |
+|                    | multi-fragment responses (FIR/FIN/CON + per-fragment CONFIRM)                          | **implemented + tested**                                                                                                  |
+|                    | SELECT/OPERATE/DIRECT-OPERATE (g12v1, g41v1..v4)                                       | **implemented + tested**, fail-closed and off by default                                                                  |
+|                    | WRITE g80v1 (clear DEVICE_RESTART IIN)                                                 | **implemented + tested against OpenDNP3**                                                                                 |
+|                    | per-variation read selection (master asks for a variation, not a class)                | **TODO**                                                                                                                  |
+| **Secure Auth v5** | AUTH_RESPONSE g120v1 → AUTH_REQUEST g120v2 challenge/reply, exact Table A-3 HMAC input | **implemented + tested**                                                                                                  |
+|                    | dispatch of the ASDU once its reply verifies                                           | **implemented + tested**                                                                                                  |
+|                    | in-band session-key establishment/wrap (g120v4/v5/v6), aggressive mode, key-change     | **TODO**; deploy with the already-established Control Direction Session Key                                               |
 
 ## Point mapping
 
 Each 0xSCADA tag is mapped to a DNP3 point in one of the five static groups.
 Indices are 0-based and contiguous **per group**.
 
-| DNP3 group | Type | Direction | Default variation |
-|-----------|------|-----------|-------------------|
-| 1  | Binary Input | read | v2 (with flags) |
-| 30 | Analog Input | read | v5 (float, w/ flag) or v1 (int32) |
-| 20 | Counter | read | v1 (32-bit, w/ flag) |
-| 10 | Binary Output Status | read/write | v2 (with flags) |
-| 40 | Analog Output Status | read/write | v3 (float) or v1 (int32) |
+| DNP3 group | Type                 | Direction  | Default variation                 |
+| ---------- | -------------------- | ---------- | --------------------------------- |
+| 1          | Binary Input         | read       | v2 (with flags)                   |
+| 30         | Analog Input         | read       | v5 (float, w/ flag) or v1 (int32) |
+| 20         | Counter              | read       | v1 (32-bit, w/ flag)              |
+| 10         | Binary Output Status | read/write | v2 (with flags)                   |
+| 40         | Analog Output Status | read/write | v3 (float) or v1 (int32)          |
 
 Status flags are derived from 0xSCADA point quality:
 
-| Quality | DNP3 flags |
-|---------|-----------|
-| `good` | `ONLINE` (+ binary `STATE` bit 7) |
-| `uncertain` | `ONLINE` + `LOCAL_FORCED` |
-| `bad` | `COMM_LOST` (ONLINE cleared) |
+| Quality     | DNP3 flags                        |
+| ----------- | --------------------------------- |
+| `good`      | `ONLINE` (+ binary `STATE` bit 7) |
+| `uncertain` | `ONLINE` + `LOCAL_FORCED`         |
+| `bad`       | `COMM_LOST` (ONLINE cleared)      |
 
 ```ts
-import { createDnp3Outstation } from '@server/protocols/dnp3-outstation';
+import { createDnp3Outstation } from "@server/protocols/dnp3-outstation";
 
 const outstation = createDnp3Outstation({
   port: 20000,
@@ -103,26 +103,39 @@ const outstation = createDnp3Outstation({
   unsolicitedEnabled: true,
   pointMap: {
     points: [
-      { tagId: 'pump.run',  type: 'binaryInput', index: 0, eventClass: 1 },
-      { tagId: 'tank.level', type: 'analogInput', index: 0, eventClass: 2, encoding: 'float32', deadband: 0.5 },
-      { tagId: 'flow.total', type: 'counter',     index: 0, eventClass: 0 },
+      { tagId: "pump.run", type: "binaryInput", index: 0, eventClass: 1 },
+      {
+        tagId: "tank.level",
+        type: "analogInput",
+        index: 0,
+        eventClass: 2,
+        encoding: "float32",
+        deadband: 0.5,
+      },
+      { tagId: "flow.total", type: "counter", index: 0, eventClass: 0 },
     ],
   },
 });
 
-// Provision a Secure Authentication v5 Update Key for user 1 (>= 16 bytes).
-outstation.setUpdateKey(1, Buffer.from(process.env.DNP3_SAV5_KEY!, 'hex'));
+// Provision the already-established SAv5 Control Direction Session Key.
+outstation.setControlDirectionKey(
+  1,
+  Buffer.from(process.env.DNP3_SAV5_CONTROL_KEY!, "hex"),
+);
 
 await outstation.start();
 
 // Feed live values in from the tag layer:
-outstation.updateTag('tank.level', { value: 12.4, quality: 'good', timestamp: Date.now() });
+outstation.updateTag("tank.level", {
+  value: 12.4,
+  quality: "good",
+  timestamp: Date.now(),
+});
 ```
 
 > Embedding the class directly gets the same fail-closed transport defaults as
 > the startup path: `host` is `127.0.0.1`, the peer allowlist is loopback-only,
-> `maxConnections` is 2, `socketTimeoutMs` is 60 s and `maxRxBufferBytes` is
-> 8192. Pass `allowedPeers` explicitly to serve anything else; a wildcard rule
+> `maxConnections` is 1, `socketTimeoutMs` is 60 s and `maxRxBufferBytes` is 8192. Pass `allowedPeers` explicitly to serve anything else; a wildcard rule
 > makes `start()` throw.
 
 > **INTEGRATION (#464):** `updateTag` is the seam where the 0xSCADA tag/event
@@ -154,14 +167,14 @@ run is ≤ 255, otherwise `0x28` (2-octet prefix + 2-octet count). Consecutive
 events sharing a group/variation share one header; a change of group starts a
 new one, so chronological order is preserved across headers.
 
-| Point type | Group | No time | Absolute time | Relative time |
-|-----------|-------|---------|---------------|---------------|
-| Binary Input | 2 | v1 | v2 | v3 (+ g51v1 CTO) |
-| Binary Output | 11 | v1 | v2 | — |
-| Counter | 22 | v1 | v5 | — |
-| Analog Input (int32) | 32 | v1 | v3 | — |
-| Analog Input (float32) | 32 | v5 | v7 | — |
-| Analog Output | 42 | v1 / v5 | v3 / v7 | — |
+| Point type             | Group | No time | Absolute time | Relative time    |
+| ---------------------- | ----- | ------- | ------------- | ---------------- |
+| Binary Input           | 2     | v1      | v2            | v3 (+ g51v1 CTO) |
+| Binary Output          | 11    | v1      | v2            | —                |
+| Counter                | 22    | v1      | v5            | —                |
+| Analog Input (int32)   | 32    | v1      | v3            | —                |
+| Analog Input (float32) | 32    | v5      | v7            | —                |
+| Analog Output          | 42    | v1 / v5 | v3 / v7       | —                |
 
 The numeric width is **not** configurable: it follows the point's own
 `encoding`, so an event never truncates a value the static read reports at full
@@ -170,7 +183,11 @@ precision. The time representation is chosen per event type with
 
 ```ts
 createDnp3Outstation({
-  eventVariations: { binary: 'absolute-time', counter: 'absolute-time', analog: 'absolute-time' },
+  eventVariations: {
+    binary: "absolute-time",
+    counter: "absolute-time",
+    analog: "absolute-time",
+  },
 });
 ```
 
@@ -180,7 +197,7 @@ Time Of Occurrence object, so a `g51v1` CTO is emitted immediately before each
 relative run and a fresh CTO is started whenever the 16-bit offset would
 overflow. Group 11 (Binary Output Event) has no relative-time variation in IEEE
 1815 — only `v1` and `v2` — so a `relative-time` policy degrades to `g11v2` for
-binary *output* events while binary *inputs* still use `g2v3`.
+binary _output_ events while binary _inputs_ still use `g2v3`.
 
 ### Fragmentation and confirmation
 
@@ -216,7 +233,9 @@ points, 32/16-bit integer and single/double float).
 ```ts
 const outstation = createDnp3Outstation({
   controls: { enabled: true, selectTimeoutMs: 5000 },
-  pointMap: { points: [{ tagId: 'valve.cmd', type: 'binaryOutput', index: 0 }] },
+  pointMap: {
+    points: [{ tagId: "valve.cmd", type: "binaryOutput", index: 0 }],
+  },
 });
 
 // The sink is the seam to the tag store. It is synchronous because DNP3 needs a
@@ -246,15 +265,15 @@ reproduce the armed objects exactly **and** carry an application sequence number
 one greater than the SELECT's (IEEE 1815 §4.4.2.1). The arm is single-use: it is
 consumed whatever the outcome, so a rejected OPERATE cannot be replayed.
 
-| Situation | CommandStatus |
-|-----------|---------------|
-| Control executed | `SUCCESS` (0) |
-| Armed selection expired (matching objects) | `TIMEOUT` (1) |
-| No arm, wrong objects, or wrong sequence number | `NO_SELECT` (2) |
-| Malformed object body | `FORMAT_ERROR` (3) |
-| Controls disabled / no sink / unmapped point / unsupported op type | `NOT_SUPPORTED` (4) |
-| Pulse still running on that output | `ALREADY_ACTIVE` (5) |
-| Sink threw, or refused without a status | `HARDWARE_ERROR` (6) |
+| Situation                                                          | CommandStatus        |
+| ------------------------------------------------------------------ | -------------------- |
+| Control executed                                                   | `SUCCESS` (0)        |
+| Armed selection expired (matching objects)                         | `TIMEOUT` (1)        |
+| No arm, wrong objects, or wrong sequence number                    | `NO_SELECT` (2)      |
+| Malformed object body                                              | `FORMAT_ERROR` (3)   |
+| Controls disabled / no sink / unmapped point / unsupported op type | `NOT_SUPPORTED` (4)  |
+| Pulse still running on that output                                 | `ALREADY_ACTIVE` (5) |
+| Sink threw, or refused without a status                            | `HARDWARE_ERROR` (6) |
 
 A CROB `count` of 0 is a spec-defined no-op: the outstation answers `SUCCESS`
 and does **not** call the sink. The deprecated queue bit and the clear bit are
@@ -273,32 +292,33 @@ DNP3 over TCP **does not authenticate the TCP peer at all**, and it does not
 authenticate reads. Anything that can open the socket can read every mapped
 point. Secure Authentication v5 authenticates **critical function codes only**
 (SELECT, OPERATE, DIRECT_OPERATE, WRITE, restarts, (en|dis)able-unsolicited) and
-only when an Update Key is provisioned for the user. There is no confidentiality
+only when the current Control Direction Session Key is provisioned for the user.
+There is no confidentiality
 anywhere in this implementation. The compensations therefore live at the
 deployment boundary, and every one of them is off by default.
 
 ### Environment variables
 
-| Variable | Default | Meaning |
-|---|---|---|
-| `DNP3_OUTSTATION_ENABLED` | *(unset)* | Must be exactly `true` to create a listener. |
-| `DNP3_OUTSTATION_SITE_ID` | — | **Required.** Site whose tags back the point map. |
-| `DNP3_OUTSTATION_POINT_MAP_FILE` | — | **Required.** Path to the JSON point map (`{ "points": [...] }`, validated with Zod). |
-| `DNP3_OUTSTATION_BIND_HOST` | `127.0.0.1` | Bind address. Anything non-loopback additionally requires the allowlist below. |
-| `DNP3_OUTSTATION_PORT` | `20000` | Bind port (the registered DNP3 port). |
-| `DNP3_OUTSTATION_ALLOWED_PEERS` | loopback | Comma-separated IPs/CIDRs, enforced at accept time. `/0` wildcards are refused. |
-| `DNP3_OUTSTATION_LINK_ADDRESS` | `10` | This outstation's DNP3 link address. |
-| `DNP3_OUTSTATION_MAX_CONNECTIONS` | `2` | Hard cap on simultaneous master associations. |
-| `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS` | `60000` | Idle socket timeout (`0` disables). |
-| `DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES` | `8192` | Per-connection receive bound; must be ≥ 292 (one maximum link frame). |
-| `DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES` | `1048576` | Per-connection bound on unread response bytes; see [Bounding a peer that stops reading](#bounding-a-peer-that-stops-reading). |
-| `DNP3_OUTSTATION_POLL_INTERVAL_MS` | `1000` | How often mapped tags are re-read from the tag store. |
-| `DNP3_OUTSTATION_UNSOLICITED_ENABLED` | `false` | Enable unsolicited responses at startup. |
-| `DNP3_OUTSTATION_ALLOW_CONTROLS` | `false` | **Separate opt-in** before SELECT/OPERATE/DIRECT-OPERATE execute. |
-| `DNP3_OUTSTATION_SELECT_TIMEOUT_MS` | `5000` | How long a SELECT stays armed. |
-| `DNP3_OUTSTATION_SAV5_UPDATE_KEY` | *(unset)* | Hex-encoded SAv5 Update Key (≥ 16 octets). Provisioning it turns on challenge/response for critical functions. |
-| `DNP3_OUTSTATION_SAV5_USER` | `1` | SAv5 user number the key belongs to. |
-| `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS` | `false` | Required to run controls with **no** Update Key. |
+| Variable                                         | Default     | Meaning                                                                                                                                        |
+| ------------------------------------------------ | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DNP3_OUTSTATION_ENABLED`                        | _(unset)_   | Must be exactly `true` to create a listener.                                                                                                   |
+| `DNP3_OUTSTATION_SITE_ID`                        | —           | **Required.** Site whose tags back the point map.                                                                                              |
+| `DNP3_OUTSTATION_POINT_MAP_FILE`                 | —           | **Required.** Path to the JSON point map (`{ "points": [...] }`, validated with Zod).                                                          |
+| `DNP3_OUTSTATION_BIND_HOST`                      | `127.0.0.1` | Bind address. Anything non-loopback additionally requires the allowlist below.                                                                 |
+| `DNP3_OUTSTATION_PORT`                           | `20000`     | Bind port (the registered DNP3 port).                                                                                                          |
+| `DNP3_OUTSTATION_ALLOWED_PEERS`                  | loopback    | Comma-separated IPs/CIDRs, enforced at accept time. `/0` wildcards are refused.                                                                |
+| `DNP3_OUTSTATION_LINK_ADDRESS`                   | `10`        | This outstation's DNP3 link address.                                                                                                           |
+| `DNP3_OUTSTATION_MAX_CONNECTIONS`                | `1`         | Hard cap on simultaneous master associations. Must remain 1 when SAv5 is provisioned because session keys are association-scoped.              |
+| `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS`              | `60000`     | Idle socket timeout (`0` disables).                                                                                                            |
+| `DNP3_OUTSTATION_MAX_RX_BUFFER_BYTES`            | `8192`      | Per-connection receive bound; must be ≥ 292 (one maximum link frame).                                                                          |
+| `DNP3_OUTSTATION_MAX_TX_QUEUE_BYTES`             | `1048576`   | Per-connection bound on unread response bytes; see [Bounding a peer that stops reading](#bounding-a-peer-that-stops-reading).                  |
+| `DNP3_OUTSTATION_POLL_INTERVAL_MS`               | `1000`      | How often mapped tags are re-read from the tag store.                                                                                          |
+| `DNP3_OUTSTATION_UNSOLICITED_ENABLED`            | `false`     | Enable unsolicited responses at startup.                                                                                                       |
+| `DNP3_OUTSTATION_ALLOW_CONTROLS`                 | `false`     | **Separate opt-in** before SELECT/OPERATE/DIRECT-OPERATE execute.                                                                              |
+| `DNP3_OUTSTATION_SELECT_TIMEOUT_MS`              | `5000`      | How long a SELECT stays armed.                                                                                                                 |
+| `DNP3_OUTSTATION_SAV5_CONTROL_KEY`               | _(unset)_   | Hex-encoded active SAv5 Control Direction Session Key (≥ 16 octets). Provisioning it turns on standard challenge/reply for critical functions. |
+| `DNP3_OUTSTATION_SAV5_USER`                      | `1`         | SAv5 user number the key belongs to.                                                                                                           |
+| `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS` | `false`     | Required to run controls with **no** SAv5 Control Direction Session Key.                                                                       |
 
 Configuration is validated with Zod and **fails closed**: an invalid value throws
 `Dnp3OutstationConfigError`, the failure is logged, and no socket is bound. It is
@@ -313,7 +333,7 @@ never downgraded to defaults.
   wildcard (`0.0.0.0/0`, `::/0`) is rejected outright — it is not an allowlist.
 - Keep the listener on a segmented control network. The allowlist is IP-based and
   offers no defence against a peer that can spoof or occupy an allowed address.
-- Concurrent masters are capped (default 2) and idle sockets are closed.
+- Master associations are capped (default 1) and idle sockets are closed.
 
 ### What an unauthenticated peer can actuate
 
@@ -331,7 +351,7 @@ never downgraded to defaults.
   segmentation are the only controls in front of these tags.
   ```
 
-- Enabling controls **requires** either `DNP3_OUTSTATION_SAV5_UPDATE_KEY` or an
+- Enabling controls **requires** either `DNP3_OUTSTATION_SAV5_CONTROL_KEY` or an
   explicit `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. There is no
   configuration in which plant outputs become writable by accident.
 
@@ -395,7 +415,7 @@ Class 0 reads, and never reading a single response octet.
   durable: if the process dies between the response and the store write, the
   master will have been told SUCCESS for a write that did not land. A later
   failure is logged (`control write to … failed AFTER the master was told
-  SUCCESS`) but cannot be un-reported.
+SUCCESS`) but cannot be un-reported.
 - **Event resolution is the poll interval.** The tag cache exposes no change
   feed, so the bridge polls. A change that comes and goes inside one interval is
   never observed, and event timestamps are the store's sample timestamps as seen
@@ -410,9 +430,9 @@ Class 0 reads, and never reading a single response octet.
 - The point map is read once at startup from
   `DNP3_OUTSTATION_POINT_MAP_FILE`; there is no reload path.
 - **The idle timeout does not evict a peer that keeps talking.**
-  `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS` is an *inactivity* timer, so an allowlisted
+  `DNP3_OUTSTATION_SOCKET_TIMEOUT_MS` is an _inactivity_ timer, so an allowlisted
   peer that dribbles one octet every few seconds holds its slot indefinitely.
-  With the default cap of 2, two such peers can keep a legitimate master out.
+  With the default cap of 1, one such peer can keep a legitimate master out.
   The allowlist is the control for this; the timeout is not.
 - A truncated frame costs the frame that follows it. The header CRC fixes the
   frame length, so a frame that is cut short consumes the head of the next one,
@@ -424,34 +444,42 @@ Class 0 reads, and never reading a single response octet.
 ## Secure Authentication v5
 
 Critical function codes (SELECT, OPERATE, DIRECT_OPERATE, WRITE, restarts,
-(en|dis)able-unsolicited) are challenged before execution **when an Update Key
-is provisioned for the user** (open mode otherwise, for pilots without keys):
+(en|dis)able-unsolicited) are challenged before execution **when the current
+Control Direction Session Key is provisioned for the user** (open mode
+otherwise, for pilots without keys):
 
 ```
 master                                   outstation
   |  --- OPERATE (critical ASDU) ------->  |
-  |  <---- g120v1 Challenge (CSQ, nonce) - |   issueChallenge()
-  |  --- g120v2 Reply (HMAC over ASDU) ->  |
+  |  <-- 0x83 g120v1/0x5B Challenge ------ |   issueChallenge(), USR=0
+  |  --- 0x20 g120v2/0x5B Reply -------->  |   reply supplies USR
   |  <----- result / control executed ---- |   verifyReply() -> dispatch
 ```
 
-The MAC is `HMAC(key, CSQ‖userNumber‖algorithm‖reason‖nonce‖criticalASDU)`,
-truncated per the negotiated algorithm. Supported: HMAC-SHA-256 (8/16/32 octet
-truncations) and HMAC-SHA-1 (4-octet, legacy). Verification is constant-time
-(`crypto.timingSafeEqual`). Challenges are single-use (nonce consumed on any
-reply) and expire after `challengeTimeoutMs`. Implemented and tested in
-`secure-auth.ts` / `secure-auth.test.ts`, including impostor-key,
-tampered-ASDU, CSQ-mismatch, and expiry rejection paths.
+The MAC follows IEEE 1815 Table A-3 exactly:
+`HMAC(controlDirectionSessionKey, completeChallengeApplicationFragment ‖ criticalASDU)`,
+truncated per the negotiated algorithm. Supported algorithm identifiers are 2
+(SHA-1/10), 3 (SHA-256/8), 4 (SHA-256/16, default), and 5 (SHA-1/8).
+Verification is constant-time (`crypto.timingSafeEqual`). Challenges are bound
+to one DNP association, single-use, and expire after `challengeTimeoutMs`.
+While waiting for a reply, a second critical ASDU is discarded rather than
+replacing the queued one. Malformed/trailing g120v2 data, function 0x21,
+wrong-user, CSQ, MAC, and expiry paths all fail closed in tests.
 
 > No new dependency: HMAC uses Node's built-in `crypto`.
 
-**Scope of SAv5, stated plainly.** It authenticates the listed *critical function
-codes* and nothing else. READs are not authenticated. The TCP peer is not
-authenticated. Nothing is encrypted. When no Update Key is provisioned the
-outstation runs in open mode and there is **no authentication at all** — which is
-why `DNP3_OUTSTATION_ALLOW_CONTROLS=true` refuses to start without either a key
-or an explicit `DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. Set the key
-with `DNP3_OUTSTATION_SAV5_UPDATE_KEY` (hex, ≥ 16 octets) and
+**Scope of SAv5, stated plainly.** It authenticates the listed _critical function
+codes_ and nothing else. READs are not authenticated. The TCP peer is not
+authenticated. Nothing is encrypted. This implementation performs standard
+challenge/reply but does not perform in-band session-key establishment or
+g120v6 key wrap; provision the already-established active Control Direction
+Session Key out of band on both peers. It therefore enforces a single
+authenticated association (`DNP3_OUTSTATION_MAX_CONNECTIONS=1`). When no key is
+provisioned the outstation runs in open mode and there is **no authentication at
+all** — which is why `DNP3_OUTSTATION_ALLOW_CONTROLS=true` refuses to start
+without either a key or an explicit
+`DNP3_OUTSTATION_ALLOW_UNAUTHENTICATED_CONTROLS=true`. Set the key with
+`DNP3_OUTSTATION_SAV5_CONTROL_KEY` (hex, ≥ 16 octets) and
 `DNP3_OUTSTATION_SAV5_USER`.
 
 ## OpenDNP3 conformance smoke

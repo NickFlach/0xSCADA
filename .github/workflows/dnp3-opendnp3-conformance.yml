@@ -6,6 +6,8 @@ on:
       - "server/protocols/dnp3-outstation/**"
       - "test/conformance/dnp3/**"
       - "scripts/run-dnp3-opendnp3-smoke.sh"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/dnp3-opendnp3-conformance.yml"
   push:
     branches: [main]
@@ -13,6 +15,8 @@ on:
       - "server/protocols/dnp3-outstation/**"
       - "test/conformance/dnp3/**"
       - "scripts/run-dnp3-opendnp3-smoke.sh"
+      - "package.json"
+      - "package-lock.json"
       - ".github/workflows/dnp3-opendnp3-conformance.yml"
   workflow_dispatch:
 
