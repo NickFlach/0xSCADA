@@ -12,7 +12,7 @@
  * performed with real-time scheduling fully enabled in the environment.
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeAll } from 'vitest';
 
 const { spawnSyncMock } = vi.hoisted(() => ({
   spawnSyncMock: vi.fn(() => ({
@@ -49,6 +49,30 @@ afterEach(() => {
   vi.resetModules();
 });
 
+/**
+ * Cost of compiling `server/blueprint/index.ts` — the whole blueprint module
+ * graph — for the first time in a worker. Measured at ~18 s on a loaded Windows
+ * dev box (`vitest --reporter=verbose` on this file alone), against a 5 s
+ * default `testTimeout`, which is what actually made this file red in a full
+ * local run while it stayed green in CI (#622): every test here re-imports the
+ * barrel, so the very first one absorbed the entire cold transform.
+ *
+ * Paying it once in a hook with an explicit budget keeps the tests themselves on
+ * the strict default timeout — a test that becomes slow for a real reason still
+ * fails.
+ */
+const COLD_TRANSFORM_BUDGET_MS = 120_000;
+
+beforeAll(async () => {
+  // Warm the transform cache only. Every test below still does its own
+  // `vi.resetModules()` + `import()`, so the module graph each one observes is
+  // freshly evaluated under its own environment — this import asserts nothing
+  // and is deliberately not allowed to count towards the spawn assertions.
+  await import('../index');
+  spawnSyncMock.mockClear();
+  vi.resetModules();
+}, COLD_TRANSFORM_BUDGET_MS);
+
 describe('server/blueprint import safety (#458)', () => {
   it('importing the barrel with real-time ENABLED spawns no process', async () => {
     setEnv({
@@ -66,11 +90,40 @@ describe('server/blueprint import safety (#458)', () => {
     // an import-time apply() would fall back before reaching chrt and would slip
     // through. `status()` is the host-independent discriminator: it throws until
     // apply() has recorded a decision, so this fails on ANY host the moment an
-    // import-time apply() is reintroduced.
+    // import-time apply() is reintroduced. The `vi.resetModules()` above is what
+    // makes that read order-independent; the next test proves it.
     expect(() => mod.getScheduler().status()).toThrow(/before apply\(\)/);
     // …and the shared scheduler must still report the honest, unapplied state.
     expect(mod.getScheduler().healthSummary().schedulingMode).toBe('fallback');
     expect(mod.getScheduler().healthSummary().applied).toBe(false);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  it('the status() discriminator cannot be poisoned by an earlier apply() (#622)', async () => {
+    setEnv({ OXSCADA_RT_ENABLED: 'true', OXSCADA_RT_PRIORITY: '50' });
+    vi.resetModules();
+
+    const polluted = await import('../index');
+    const pollutedLogger = await import('../../logger');
+    const warnSpy = vi.spyOn(pollutedLogger, 'logWarn').mockImplementation(() => {});
+
+    // Pollute the shared singleton the way a composition root would. Applying to
+    // our own pid is refused, but the refusal is still a recorded decision — so
+    // `status()` stops throwing. This half proves the discriminator used by the
+    // test above is genuinely sensitive to a recorded apply(), i.e. it would go
+    // green for the wrong reason if the singleton arrived dirty.
+    polluted.applyScheduler({ kind: 'dedicated-control-process', pid: process.pid });
+    expect(() => polluted.getScheduler().status()).not.toThrow();
+    expect(polluted.getScheduler().status().applied).toBe(false);
+    warnSpy.mockRestore();
+
+    // The other half: resetting the module registry — which every test in this
+    // file does before importing — yields a genuinely pristine singleton, so no
+    // apply() recorded earlier in the process can flip the guard.
+    vi.resetModules();
+    const fresh = await import('../index');
+    expect(fresh.getScheduler()).not.toBe(polluted.getScheduler());
+    expect(() => fresh.getScheduler().status()).toThrow(/before apply\(\)/);
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
 

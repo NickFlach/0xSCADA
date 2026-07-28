@@ -16,14 +16,19 @@
  * the one-line {@link TickFn}:
  *
  * ```ts
- * const loop = new BlueprintTickLoop({ blueprintId: bp.id, periodMs: 10 });
+ * const loop = new BlueprintTickLoop({
+ *   blueprintId: bp.id,
+ *   periodMs: 10,
+ *   scheduler: getScheduler(), // explicit: see TickLoopOptions.scheduler
+ * });
  * loop.setTickFn(() => runtime.tickFast());
  * loop.start();
  * ```
  *
  * ## Scheduling
- * The loop does NOT elevate anything by itself. It asks the scheduler for a
- * decision at {@link BlueprintTickLoop.start} time, passing through whatever
+ * The loop does NOT elevate anything by itself, and it owns no scheduler: the
+ * composition root passes one in. It asks that scheduler for a decision at
+ * {@link BlueprintTickLoop.start} time, passing through whatever
  * {@link TickLoopOptions.schedulerTarget} the composition root supplied. When
  * the loop runs inside the API server process (the current deployment shape) no
  * target is available, the scheduler stays in `fallback`, and Express/WebSocket
@@ -34,7 +39,6 @@
 
 import {
   TickScheduler,
-  getScheduler,
   type DedicatedSchedulerTarget,
   type SchedulerHealthSummary,
   type SchedulerStatus,
@@ -64,12 +68,16 @@ export interface TickLoopOptions {
   /** Rolling window (tick count) over which WCET is computed. Default 1000. */
   wcetWindow?: number;
   /**
-   * Scheduler instance to consult. Defaults to the lazily-constructed
-   * process-wide singleton, which is off unless `OXSCADA_RT_ENABLED=true`.
-   * Injectable so tests (and a future dedicated control process) can supply
-   * their own configuration and host probe.
+   * Scheduler instance to consult. REQUIRED and never defaulted.
+   *
+   * `start()` calls `apply()` on whatever instance it is given, and `apply()`
+   * permanently records a decision on that instance. Defaulting to the
+   * process-wide singleton (`getScheduler()`) therefore made merely
+   * constructing and starting a loop mutate shared process state — the
+   * implicit coupling behind #622. A composition root that genuinely wants the
+   * process-wide scheduler must now say so: `scheduler: getScheduler()`.
    */
-  scheduler?: TickScheduler;
+  scheduler: TickScheduler;
   /**
    * Dedicated control-process target handed to the scheduler at `start()`.
    * Omitted by default — without it the scheduler stays in `fallback` and no
@@ -114,6 +122,14 @@ export class BlueprintTickLoop {
   constructor(options: TickLoopOptions) {
     if (!options.blueprintId) throw new Error('blueprintId is required');
     if (!(options.periodMs > 0)) throw new Error('periodMs must be > 0');
+    // Runtime guard as well as a type-level one: the whole point of dropping
+    // the `getScheduler()` default is that no caller can silently apply the
+    // process-wide scheduler, and a JS caller must not be able to opt back in.
+    if (!options.scheduler) {
+      throw new Error(
+        'scheduler is required; pass getScheduler() explicitly to use the process-wide instance',
+      );
+    }
 
     this.blueprintId = options.blueprintId;
     this.periodMs = options.periodMs;
@@ -121,9 +137,10 @@ export class BlueprintTickLoop {
     this.schedulerTarget = options.schedulerTarget;
     this.nowNs = options.nowNs ?? (() => process.hrtime.bigint());
 
-    // Constructing the loop must not probe the host or touch scheduling policy;
-    // `getScheduler()` is lazy and `apply()` only runs from `start()`.
-    this.scheduler = options.scheduler ?? getScheduler();
+    // Constructing the loop must not probe the host or touch scheduling policy:
+    // the instance is supplied by the caller and `apply()` only runs from
+    // `start()`.
+    this.scheduler = options.scheduler;
     this.accountant = new TickAccountant({
       targetPeriodNs: this.periodMs * MS_TO_NS,
       deadlineNs: this.deadlineMs * MS_TO_NS,

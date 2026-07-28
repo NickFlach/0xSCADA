@@ -9,7 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { BlueprintTickLoop } from '../tick-loop';
-import { TickScheduler, type HostProbe } from '../scheduler';
+import { TickScheduler, getScheduler, type HostProbe } from '../scheduler';
 import { resetBlueprintMetrics } from '../../metrics/blueprint';
 import * as logger from '../../logger';
 
@@ -223,6 +223,39 @@ describe('BlueprintTickLoop', () => {
           scheduler: optedInScheduler(stockProbe()),
         }),
     ).toThrow();
+  });
+
+  it('refuses to be constructed without an explicit scheduler (#622)', () => {
+    // `start()` records a decision on whatever scheduler it is handed. When the
+    // option defaulted to the process-wide `getScheduler()` singleton, merely
+    // starting a loop mutated shared state that other code — and other test
+    // files — observe. The option is now required at the type level; this
+    // covers the runtime guard for callers that are not type-checked.
+    const withoutScheduler = {
+      blueprintId: 'x',
+      periodMs: 10,
+    } as unknown as ConstructorParameters<typeof BlueprintTickLoop>[0];
+    expect(() => new BlueprintTickLoop(withoutScheduler)).toThrow(/scheduler is required/);
+  });
+
+  it('never touches the process-wide scheduler singleton (#622)', () => {
+    // The shared instance must still be un-applied after a loop has been fully
+    // constructed, started and stopped with an injected scheduler — i.e. the
+    // loop reaches for no global. `status()` throwing is the discriminator:
+    // it only stops throwing once `apply()` has recorded a decision.
+    const loop = new BlueprintTickLoop({
+      blueprintId: 'bp-no-global',
+      periodMs: 10,
+      scheduler: optedInScheduler(stockProbe()),
+      nowNs: scriptedClock([0, 1 * MS]),
+    });
+    loop.setTickFn(() => {});
+    loop.start();
+    loop.runOneTick();
+    loop.stop();
+
+    expect(() => getScheduler().status()).toThrow(/before apply\(\)/);
+    expect(getScheduler().healthSummary().applied).toBe(false);
   });
 
   it('requires a tick function before start', () => {
