@@ -113,6 +113,10 @@ export { NLQueryService, nlQueryService } from './nlquery';
 // No singleton is exported: capability verification and the physical action
 // executor are deployment-owned dependencies and must fail closed if absent.
 export * from './ghostos';
+// ── Intelligent Reporting (ADR-0013 [13.8], #219) ───────────────────────────
+// The engine has no process-global singleton: historian, scheduler and delivery
+// transports are injected by the deployment.
+export * from './reporting';
 
 /**
  * Initialize all services
