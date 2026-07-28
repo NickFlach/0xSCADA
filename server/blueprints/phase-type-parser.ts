@@ -169,7 +169,7 @@ export function parsePhaseTypeMarkdown(content: string, sourceFile?: string): Pa
       }
       
       // Parse data row based on section
-      const row: Record<string, string> = {};
+      const row: Record<string, string> = Object.create(null); // null-prototype: header cells are untrusted keys
       headerRow.forEach((header, idx) => {
         row[header] = cells[idx] || "";
       });
