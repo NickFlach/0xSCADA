@@ -27,6 +27,21 @@ The implementation depends only on the shared deterministic hashing helpers in
 their database and NATS/Kafka clients; no network or storage implementation is
 silently selected by this module.
 
+`server/scaling/horizontal-runtime.ts` makes those bindings reachable from the
+running server. Enable it with:
+
+```text
+HORIZONTAL_SCALING_ENABLED=true
+HORIZONTAL_SCALING_REQUIRED=true
+HORIZONTAL_SCALING_BINDINGS_MODULE=/absolute/path/to/horizontal-bindings.mjs
+```
+
+The module may export `createHorizontalScaleBindings`,
+`horizontalScaleBindings`, or a default bindings object. Startup validates all
+four services before accepting traffic and fails closed when an enabled binding
+is incomplete. `/health` exposes the binding health and can make it
+readiness-critical with `HORIZONTAL_SCALING_REQUIRED=true`.
+
 Changing ring membership is a control-plane operation. Capture the current
 assignment, change membership, call `rebalance(tags, oldAssignment)`, move the
 listed tags, and only then publish the new ring generation. Two generations
@@ -38,6 +53,7 @@ Run:
 
 ```bash
 npx vitest run server/scaling/__tests__/horizontal.test.ts
+npx vitest run server/scaling/__tests__/horizontal-runtime.test.ts
 npm run typecheck
 npm run build
 ```

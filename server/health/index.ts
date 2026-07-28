@@ -28,6 +28,7 @@ import type { Response } from 'express';
 // applied only by an explicit `applyScheduler()` call from a composition root
 // that owns a dedicated control process (see server/blueprint/scheduler.ts).
 import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
+import { horizontalScaleRuntime } from '../scaling/horizontal-runtime';
 
 // Control-loop latency telemetry (#460): publish the sentinel probe's liveness
 // gauge as part of normal server composition so `scada_control_loop_probe_up`
@@ -138,6 +139,25 @@ healthManager.registerSimple(
   },
   true, // Required for edge deployments
 );
+
+healthManager.register({
+  name: 'horizontal-scaling',
+  required: horizontalScaleRuntime.isRequired(),
+  check: async () => {
+    const health = await horizontalScaleRuntime.health();
+    return {
+      name: 'horizontal-scaling',
+      status: health.healthy
+        ? health.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: health.message,
+      details: health.details ? { ...health.details } : undefined,
+    };
+  },
+});
 
 // 8. Bridge modules (event-anchor, state-sync)
 healthManager.registerSimple(

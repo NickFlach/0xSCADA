@@ -57,6 +57,7 @@ describe("startup singleton module identity", () => {
         "./services/flux",
         "./services/nats",
         "./bridge/anchor-backend",
+        "./scaling/horizontal-runtime",
       ],
     },
     {
@@ -65,6 +66,7 @@ describe("startup singleton module identity", () => {
         "../simulator",
         "../gateway/store-and-forward",
         "../bridge",
+        "../scaling/horizontal-runtime",
       ],
     },
     {
