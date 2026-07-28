@@ -11,13 +11,23 @@
 import { HealthManager, createDatabaseCheck, createBlockchainCheck, createGatewayCheck } from './health-manager';
 import { storage } from '../storage';
 import { blockchainService } from '../blockchain';
-import { registry, metricsHandler } from '../metrics';
+import { registry, collectProcessMetrics } from '../metrics';
 import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
 import { getBridgeHealthStatus } from '../bridge';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
 import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
+import type { Response } from 'express';
+// Tick-aware scheduler (#458): surface schedulingMode in /health and append
+// blueprint tick telemetry to /metrics.
+//
+// This module only READS the scheduling posture. Applying real-time scheduling
+// is deliberately NOT a health-module import side effect: pinning the process
+// that serves Express/WebSocket to SCHED_FIFO can starve the box. Scheduling is
+// applied only by an explicit `applyScheduler()` call from a composition root
+// that owns a dedicated control process (see server/blueprint/scheduler.ts).
+import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
 
 // Control-loop latency telemetry (#460): publish the sentinel probe's liveness
 // gauge as part of normal server composition so `scada_control_loop_probe_up`
@@ -188,6 +198,11 @@ healthManager.register({
     };
   },
 });
+// 11. Tick-aware scheduler (#458) — REPORTS schedulingMode (realtime|fallback).
+//     Read-only by construction: the check calls healthSummary(), which never
+//     probes the kernel and never applies a policy. Real-time scheduling stays
+//     off unless a dedicated control process opts in via OXSCADA_RT_ENABLED.
+healthManager.register(createSchedulerCheck());
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {
@@ -203,5 +218,13 @@ healthManager.onCheckComplete((result) => {
 // ── Export the pre-built router ──────────────────────────────────────────────
 export const healthRouter = healthManager.createRouter();
 
-// Expose Prometheus metrics alongside health routes so /metrics works
-healthRouter.get('/metrics', metricsHandler);
+// Expose Prometheus metrics alongside health routes so /metrics works.
+// Blueprint tick telemetry (#458) is appended to the same scrape: the shared
+// metrics use the `scada_` prefix while the blueprint tick gauges/histogram
+// carry their authoritative un-prefixed / `oxscada_` names, so both coexist in
+// one exposition document.
+healthRouter.get('/metrics', (_req, res: Response) => {
+  collectProcessMetrics();
+  res.setHeader('Content-Type', 'text/plain; version=0.0.4; charset=utf-8');
+  res.send(`${registry.metrics()}\n${exposeBlueprintMetrics()}`);
+});

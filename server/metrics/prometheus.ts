@@ -468,7 +468,7 @@ export const processCpuUsage = registry.gauge(
 /**
  * Collect process metrics
  */
-function collectProcessMetrics(): void {
+export function collectProcessMetrics(): void {
   processUptime.set(process.uptime());
   
   const memUsage = process.memoryUsage();
