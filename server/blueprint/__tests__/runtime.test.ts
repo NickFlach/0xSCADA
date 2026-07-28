@@ -213,6 +213,10 @@ describe("BlueprintRuntime — control-farm fixture end-to-end", () => {
   it("runs a 1000-tag blueprint deterministically (same inputs -> same outputs)", () => {
     const bp = makeControlFarmBlueprint(1000);
     const program = compileBlueprint(bp);
+    expect(bp.tags).toHaveLength(1000);
+    expect(program.tagCount).toBe(1000);
+    expect(bp.nodes).toHaveLength(800);
+    expect(program.instructionCount).toBe(800);
     const rt = new BlueprintRuntime(program);
 
     const inputs = makeInputVector(rt.inputCount, 12345);
@@ -246,12 +250,11 @@ describe("BlueprintRuntime — control-farm fixture end-to-end", () => {
 });
 
 describe("BlueprintRuntime — bounded-allocation invariant", () => {
-  // The defining requirement of #457: a steady-state tick allocates nothing.
-  // We can't observe V8's nursery directly without --expose-gc, so this test is
-  // conditional: it only asserts when GC is exposed (run via the bench harness
-  // or `node --expose-gc`). Under a plain `vitest` run it self-skips with a note
-  // rather than producing a flaky/false signal.
-  it("does not grow the heap across many ticks (requires --expose-gc)", () => {
+  // This complements allocation.bench.ts's isolated GC gate by catching
+  // retained heap growth. It is conditional because a stable before/after
+  // comparison requires forced GC; required ARM CI proves GC is exposed before
+  // invoking this file.
+  it("does not retain heap growth across many ticks (requires --expose-gc)", () => {
     const gc = (globalThis as { gc?: () => void }).gc;
     if (typeof gc !== "function") {
       // Documented skip — see header. Not a silent pass: we record why.
@@ -272,8 +275,8 @@ describe("BlueprintRuntime — bounded-allocation invariant", () => {
     gc();
     const after = process.memoryUsage().heapUsed;
 
-    // Allow a small slack for measurement noise; a per-tick allocation would
-    // grow heapUsed by megabytes over 50k iterations.
+    // Allow a small slack for measurement noise. Transient allocations may be
+    // reclaimed here; those are detected separately by the benchmark GC gate.
     const growth = after - before;
     expect(growth).toBeLessThan(512 * 1024);
   });
