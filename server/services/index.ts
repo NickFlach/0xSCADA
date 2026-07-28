@@ -46,9 +46,25 @@ export * from './gr-listen';
 export * from './geometry';
 export { geometryService } from './geometry';
 
-// ── Machine Learning Service ─────────────────────────────────────────────────
-export * from './ml';
-export { mlService } from './ml';
+// ── Machine Learning Service — REMOVED (#605) ────────────────────────────────
+// `server/services/ml` was deleted, not disabled. Its inference path returned
+// `Math.random()` draws as anomaly scores, maintenance scores and confidences,
+// its "training" was `setTimeout(resolve, 2000)` followed by
+// `accuracy = 0.85 + Math.random() * 0.1`, and its healthCheck() reported all
+// of that as `healthy: true` because two hard-coded models were in a Map.
+//
+// #599 removed its only HTTP exposure, after which it had no consumer anywhere
+// in the repo. What remained was a live symbol: `export * from './ml'`
+// constructed the singleton at import time, `initializeServices()` listed it in
+// the boot sequence, and `getServicesHealthStatus()` published it as a
+// subsystem. (Neither of those two functions has a startup caller on `main` —
+// see the notes in server/routes.ts — but both are exported, and a caller would
+// have started a fabricator and then reported it healthy.) The service, its
+// boot entry, its health key and its registry entry are all gone, so nothing
+// can import `mlService` and mistake a PRNG for an inference backend.
+//
+// The /api/intelligence/ml/* routes stay 501 (server/routes/intelligence.ts).
+// Reintroduce ML against a real model runtime, not before.
 
 // ── Ubiquity Service ─────────────────────────────────────────────────────────
 export * from './ubiquity';
@@ -100,7 +116,8 @@ export async function initializeServices(): Promise<void> {
   const services = [
     { name: 'Compliance', service: () => import('./compliance').then(m => m.complianceService.initialize()) },
     { name: 'Geometry', service: () => import('./geometry').then(m => m.geometryService.initialize()) },
-    { name: 'Machine Learning', service: () => import('./ml').then(m => m.mlService.initialize()) },
+    // 'Machine Learning' removed (#605) — the service it booted fabricated its
+    // output; see the removal note above.
     { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
     { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
@@ -161,14 +178,10 @@ export async function getServicesHealthStatus(): Promise<{
         return { healthy: false, message: 'Geometry service not available' };
       }
     },
-    ml: async () => {
-      try {
-        const { mlService } = await import('./ml');
-        return await mlService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'ML service not available' };
-      }
-    },
+    // No `ml` key (#605). The removed check reported `healthy: true` whenever
+    // two hard-coded models were present, which said nothing about whether
+    // anything could infer — there was no inference. An absent key is the
+    // honest answer: the platform has no ML subsystem to report on.
     ubiquity: async () => {
       try {
         const { ubiquityService } = await import('./ubiquity');
@@ -261,7 +274,6 @@ export const serviceRegistry = {
   compliance: () => import('./compliance'),
   flux: () => import('./flux'),
   geometry: () => import('./geometry'),
-  ml: () => import('./ml'),
   ubiquity: () => import('./ubiquity'),
   l2Rollup: () => import('./l2-rollup'),
   optimization: () => import('./optimization'),

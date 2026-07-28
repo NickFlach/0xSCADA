@@ -8,7 +8,11 @@
  */
 
 export * from './adapters';
-export * from './ml';
+// './ml' removed with server/services/ml (#605). The module it described was a
+// simulation harness whose "predictions" were PRNG draws; the types had no
+// other consumer, so they are gone rather than left as a shape for anything to
+// re-fill. Reintroduce a model/prediction vocabulary alongside a real inference
+// backend, not before it.
 export * from './blockchain';
 export * from './compliance';
 export * from './geometry';
