@@ -1,8 +1,4 @@
-import type {
-  DeliveryChannel,
-  DeliveryPayload,
-  DeliveryReceipt,
-} from "./types";
+import type { DeliveryChannel, DeliveryPayload, DeliveryReceipt } from "./types";
 
 export class DeliveryChannelError extends Error {
   constructor(
@@ -44,13 +40,18 @@ export class WebhookDeliveryChannel implements DeliveryChannel {
 
   async send(payload: DeliveryPayload): Promise<DeliveryReceipt> {
     const target = validateWebhookTarget(payload.target);
-    validateHeaders(payload.headers);
+    validateHeaders(payload.headers, [
+      "content-type",
+      "x-0xscada-delivery-id",
+      "x-0xscada-report-id",
+    ]);
     const response = await this.transport.post({
       url: target,
       headers: {
-        "content-type": "application/json",
-        "x-0xscada-report-id": payload.report.id,
         ...payload.headers,
+        "content-type": "application/json",
+        "x-0xscada-delivery-id": payload.deliveryId,
+        "x-0xscada-report-id": payload.report.id,
       },
       body: payload.json,
     });
@@ -81,22 +82,23 @@ export class EmailDeliveryChannel implements DeliveryChannel {
     if (/[\r\n]/.test(payload.subject)) {
       throw new DeliveryChannelError("Email subject contains a newline", false);
     }
-    validateHeaders(payload.headers);
+    validateHeaders(payload.headers, ["x-0xscada-delivery-id", "x-0xscada-report-id"]);
     try {
       const response = await this.transport.send({
         to: payload.target,
         subject: payload.subject,
         html: payload.html,
         text: payload.text,
-        headers: payload.headers,
+        headers: {
+          ...payload.headers,
+          "x-0xscada-delivery-id": payload.deliveryId,
+          "x-0xscada-report-id": payload.report.id,
+        },
       });
       return { providerId: response.messageId };
     } catch (error) {
       if (error instanceof DeliveryChannelError) throw error;
-      throw new DeliveryChannelError(
-        error instanceof Error ? error.message : String(error),
-        true,
-      );
+      throw new DeliveryChannelError(error instanceof Error ? error.message : String(error), true);
     }
   }
 }
@@ -121,10 +123,17 @@ function isPlausibleEmail(value: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 
-function validateHeaders(headers: Readonly<Record<string, string>>): void {
+function validateHeaders(
+  headers: Readonly<Record<string, string>>,
+  reserved: readonly string[] = [],
+): void {
+  const reservedNames = new Set(reserved.map((name) => name.toLowerCase()));
   for (const [name, value] of Object.entries(headers)) {
     if (!name || /[\r\n:]/.test(name) || /[\r\n]/.test(value)) {
       throw new DeliveryChannelError("Invalid delivery header", false);
+    }
+    if (reservedNames.has(name.toLowerCase())) {
+      throw new DeliveryChannelError(`Delivery header ${name} is reserved`, false);
     }
   }
 }

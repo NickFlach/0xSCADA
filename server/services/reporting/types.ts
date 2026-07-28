@@ -2,11 +2,7 @@
  * Public contracts for the ADR-0013 intelligent reporting engine.
  */
 
-export type ReportType =
-  | "shift-summary"
-  | "compliance-audit"
-  | "trend-analysis"
-  | "custom";
+export type ReportType = "shift-summary" | "compliance-audit" | "trend-analysis" | "custom";
 
 export type OutputFormat = "html" | "json" | "text";
 export type DeliveryMethod = "webhook" | "email";
@@ -63,11 +59,7 @@ export interface HistoricalDataProvider {
 
 /** Adapter shape supported for callers of the original issue prototype. */
 export interface LegacyDataProvider {
-  queryTags(
-    pattern: string,
-    start: number,
-    end: number,
-  ): Promise<Record<string, number[]>>;
+  queryTags(pattern: string, start: number, end: number): Promise<Record<string, number[]>>;
   queryAlarms(
     start: number,
     end: number,
@@ -83,14 +75,7 @@ export interface LegacyDataProvider {
 }
 
 export type ReportSectionKind =
-  | "summary"
-  | "alarm-list"
-  | "kpi"
-  | "statistics"
-  | "trend-data"
-  | "compliance"
-  | "notes"
-  | "text";
+  "summary" | "alarm-list" | "kpi" | "statistics" | "trend-data" | "compliance" | "notes" | "text";
 
 export interface ReportSection {
   id: string;
@@ -146,6 +131,8 @@ export interface GeneratedReport {
 }
 
 export interface DeliveryPayload {
+  /** Stable across every retry of this delivery operation. */
+  deliveryId: string;
   report: Readonly<GeneratedReport>;
   target: string;
   subject: string;
@@ -204,11 +191,7 @@ export interface ScheduledHandle {
 }
 
 export interface ReportScheduler {
-  every(
-    id: string,
-    intervalMs: number,
-    task: () => void | Promise<void>,
-  ): ScheduledHandle;
+  every(id: string, intervalMs: number, task: () => void | Promise<void>): ScheduledHandle;
 }
 
 export interface ReportSchedule {

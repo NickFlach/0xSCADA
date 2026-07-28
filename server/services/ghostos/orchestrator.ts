@@ -81,20 +81,17 @@ export class GhostOSOrchestrator extends EventEmitter {
       options.defaultEnvelope ?? DEFAULT_OPERATIONAL_ENVELOPE,
     );
     this.maxDecisions = positiveInteger(options.maxDecisions ?? 1_000, "maxDecisions");
-    this.maxAuditEvents = positiveInteger(
-      options.maxAuditEvents ?? 5_000,
-      "maxAuditEvents",
-    );
+    this.maxAuditEvents = positiveInteger(options.maxAuditEvents ?? 5_000, "maxAuditEvents");
 
     this.bridge.on("signal", (signal: Signal) => {
-      this.record("signal.accepted", { signalId: signal.id, source: signal.source });
+      this.record("signal.accepted", {
+        signalId: signal.id,
+        source: signal.source,
+      });
     });
-    this.bridge.on(
-      "signal-rejected",
-      (details: { signalId: string; reason: string }) => {
-        this.record("signal.rejected", details);
-      },
-    );
+    this.bridge.on("signal-rejected", (details: { signalId: string; reason: string }) => {
+      this.record("signal.rejected", details);
+    });
     this.bridge.on("resonance", (pattern: { id: string; strength: number }) => {
       this.record("resonance.detected", {
         patternId: pattern.id,
@@ -104,9 +101,7 @@ export class GhostOSOrchestrator extends EventEmitter {
   }
 
   registerAgent(registration: AgentRegistration): void {
-    const envelope = cloneAndValidateEnvelope(
-      registration.envelope ?? this.defaultEnvelope,
-    );
+    const envelope = cloneAndValidateEnvelope(registration.envelope ?? this.defaultEnvelope);
     this.bridge.registerAgent(registration);
     this.envelopes.set(registration.agentId, envelope);
     this.record(
@@ -171,7 +166,24 @@ export class GhostOSOrchestrator extends EventEmitter {
     resonanceWindowMs = 10_000,
   ): () => void {
     const listener = (event: PipelineEventLike): void => {
-      this.ingestPipelineEvent(event, mapper, resonanceWindowMs);
+      try {
+        this.ingestPipelineEvent(event, mapper, resonanceWindowMs);
+      } catch (error) {
+        // GhostOS is an optional observer of the canonical pipeline. A custom
+        // mapper or coordination listener must never make an already accepted
+        // industrial event look dropped to the core ingestion path.
+        try {
+          this.record("signal.rejected", {
+            source: event.source_id,
+            sequence: event.sequence_number,
+            reason: "ghostos-pipeline-adapter-error",
+            error: error instanceof Error ? error.message : String(error),
+          });
+        } catch {
+          // Audit EventEmitter listeners are deployment code too; isolate them
+          // at this boundary for the same reason.
+        }
+      }
     };
     pipeline.on("event:processed", listener);
     return () => {
@@ -219,9 +231,7 @@ export class GhostOSOrchestrator extends EventEmitter {
       proposal.action.kind === "notify" &&
       envelope.allowAutonomousNotifications &&
       envelope.requiredApprovals === 0;
-    const requiredApprovals = autonomousNotification
-      ? 0
-      : Math.max(1, envelope.requiredApprovals);
+    const requiredApprovals = autonomousNotification ? 0 : Math.max(1, envelope.requiredApprovals);
 
     const decision: EmergentDecision = {
       id: `ED-${String(++this.decisionCounter).padStart(6, "0")}`,
@@ -230,11 +240,7 @@ export class GhostOSOrchestrator extends EventEmitter {
       action: cloneAction(proposal.action),
       confidence: proposal.confidence,
       createdAt: now,
-      status: !permitted
-        ? "blocked"
-        : requiredApprovals === 0
-          ? "approved"
-          : "pending-approval",
+      status: !permitted ? "blocked" : requiredApprovals === 0 ? "approved" : "pending-approval",
       requiredApprovals,
       approvals: [],
       envelopeCheck: {
@@ -268,70 +274,62 @@ export class GhostOSOrchestrator extends EventEmitter {
   ): Promise<EmergentDecision> {
     assertAuthenticated(principal);
     return this.withDecisionLock(decisionId, async () => {
-    const decision = this.requireDecision(decisionId);
-    if (
-      decision.status !== "pending-approval" &&
-      decision.status !== "approved"
-    ) {
-      throw new Error(`Decision ${decisionId} cannot be approved from ${decision.status}`);
-    }
-    if (decision.agentId === principal.id) {
-      this.recordApprovalDenial(decision, principal.id, "separation-of-duties");
-      throw new Error("An agent may not approve its own recommendation");
-    }
-    if (decision.approvals.some((approval) => approval.principalId === principal.id)) {
-      throw new Error(`Principal ${principal.id} already approved ${decisionId}`);
-    }
-    const now = this.clock.now();
-    if (isExpired(decision, this.envelopeFor(decision.agentId), now)) {
-      decision.status = "expired";
+      const decision = this.requireDecision(decisionId);
+      if (decision.status !== "pending-approval" && decision.status !== "approved") {
+        throw new Error(`Decision ${decisionId} cannot be approved from ${decision.status}`);
+      }
+      if (decision.agentId === principal.id) {
+        this.recordApprovalDenial(decision, principal.id, "separation-of-duties");
+        throw new Error("An agent may not approve its own recommendation");
+      }
+      if (decision.approvals.some((approval) => approval.principalId === principal.id)) {
+        throw new Error(`Principal ${principal.id} already approved ${decisionId}`);
+      }
+      const now = this.clock.now();
+      if (isExpired(decision, this.envelopeFor(decision.agentId), now)) {
+        decision.status = "expired";
+        this.record("decision.expired", { phase: "approval" }, decision.agentId, decision.id);
+        this.emit("decision", cloneDecision(decision));
+        throw new Error(`Decision ${decisionId} has expired`);
+      }
+
+      const authorization = await this.authorizer.authorize({
+        subjectId: principal.id,
+        capability: `approve:${decision.action.kind}`,
+        target: decision.action.target,
+        at: now,
+      });
+      if (!authorization.authorized || !authorization.grantId) {
+        this.recordApprovalDenial(
+          decision,
+          principal.id,
+          authorization.reason ?? "Approval capability denied",
+        );
+        throw new Error(authorization.reason ?? "Approval capability denied");
+      }
+
+      const approval: HumanApproval = {
+        principalId: principal.id,
+        approvedAt: now,
+        ...(comment ? { comment } : {}),
+        capabilityGrantId: authorization.grantId,
+      };
+      decision.approvals = [...decision.approvals, approval];
+      if (decision.approvals.length >= decision.requiredApprovals) {
+        decision.status = "approved";
+      }
       this.record(
-        "decision.expired",
-        { phase: "approval" },
+        "decision.approved",
+        {
+          principalId: principal.id,
+          approvals: decision.approvals.length,
+          requiredApprovals: decision.requiredApprovals,
+        },
         decision.agentId,
         decision.id,
       );
       this.emit("decision", cloneDecision(decision));
-      throw new Error(`Decision ${decisionId} has expired`);
-    }
-
-    const authorization = await this.authorizer.authorize({
-      subjectId: principal.id,
-      capability: `approve:${decision.action.kind}`,
-      target: decision.action.target,
-      at: now,
-    });
-    if (!authorization.authorized || !authorization.grantId) {
-      this.recordApprovalDenial(
-        decision,
-        principal.id,
-        authorization.reason ?? "Approval capability denied",
-      );
-      throw new Error(authorization.reason ?? "Approval capability denied");
-    }
-
-    const approval: HumanApproval = {
-      principalId: principal.id,
-      approvedAt: now,
-      ...(comment ? { comment } : {}),
-      capabilityGrantId: authorization.grantId,
-    };
-    decision.approvals = [...decision.approvals, approval];
-    if (decision.approvals.length >= decision.requiredApprovals) {
-      decision.status = "approved";
-    }
-    this.record(
-      "decision.approved",
-      {
-        principalId: principal.id,
-        approvals: decision.approvals.length,
-        requiredApprovals: decision.requiredApprovals,
-      },
-      decision.agentId,
-      decision.id,
-    );
-    this.emit("decision", cloneDecision(decision));
-    return cloneDecision(decision);
+      return cloneDecision(decision);
     });
   }
 
@@ -343,127 +341,108 @@ export class GhostOSOrchestrator extends EventEmitter {
     assertAuthenticated(principal);
     if (!reason.trim()) throw new Error("A rejection reason is required");
     return this.withDecisionLock(decisionId, async () => {
-    const decision = this.requireDecision(decisionId);
-    if (
-      decision.status !== "pending-approval" &&
-      decision.status !== "approved"
-    ) {
-      throw new Error(`Decision ${decisionId} cannot be rejected from ${decision.status}`);
-    }
-    const now = this.clock.now();
-    const authorization = await this.authorizer.authorize({
-      subjectId: principal.id,
-      capability: `approve:${decision.action.kind}`,
-      target: decision.action.target,
-      at: now,
-    });
-    if (!authorization.authorized) {
-      this.recordApprovalDenial(
-        decision,
-        principal.id,
-        authorization.reason ?? "Rejection capability denied",
-      );
-      throw new Error(authorization.reason ?? "Rejection capability denied");
-    }
-    decision.status = "rejected";
-    decision.rejection = {
-      principalId: principal.id,
-      rejectedAt: now,
-      reason: reason.trim(),
-    };
-    this.record(
-      "decision.rejected",
-      { principalId: principal.id, reason: reason.trim() },
-      decision.agentId,
-      decision.id,
-    );
-    this.emit("decision", cloneDecision(decision));
-    return cloneDecision(decision);
-    });
-  }
-
-  async executeDecision(decisionId: string): Promise<EmergentDecision> {
-    return this.withDecisionLock(decisionId, async () => {
-    const decision = this.requireDecision(decisionId);
-    return this.withAgentExecutionLock(decision.agentId, async () => {
-    if (decision.status !== "approved") {
-      throw new Error(`Decision ${decisionId} is not approved`);
-    }
-    const now = this.clock.now();
-    const envelope = this.envelopeFor(decision.agentId);
-    if (isExpired(decision, envelope, now)) {
-      decision.status = "expired";
+      const decision = this.requireDecision(decisionId);
+      if (decision.status !== "pending-approval" && decision.status !== "approved") {
+        throw new Error(`Decision ${decisionId} cannot be rejected from ${decision.status}`);
+      }
+      const now = this.clock.now();
+      const authorization = await this.authorizer.authorize({
+        subjectId: principal.id,
+        capability: `approve:${decision.action.kind}`,
+        target: decision.action.target,
+        at: now,
+      });
+      if (!authorization.authorized) {
+        this.recordApprovalDenial(
+          decision,
+          principal.id,
+          authorization.reason ?? "Rejection capability denied",
+        );
+        throw new Error(authorization.reason ?? "Rejection capability denied");
+      }
+      decision.status = "rejected";
+      decision.rejection = {
+        principalId: principal.id,
+        rejectedAt: now,
+        reason: reason.trim(),
+      };
       this.record(
-        "decision.expired",
-        { phase: "execution" },
-        decision.agentId,
-        decision.id,
-      );
-      this.emit("decision", cloneDecision(decision));
-      throw new Error(`Decision ${decisionId} has expired`);
-    }
-    const recentExecutionHistory = (
-      this.executionHistory.get(decision.agentId) ?? []
-    ).filter((timestamp) => timestamp > now - 60_000);
-    this.executionHistory.set(decision.agentId, recentExecutionHistory);
-    const executionReasons = evaluateExecutionEnvelope(
-      envelope,
-      decision,
-      this.bridge.getSynchronizationState().r,
-      recentExecutionHistory,
-      now,
-    );
-    if (executionReasons.length > 0) {
-      this.failDecision(decision, executionReasons.join("; "));
-      throw new Error(executionReasons.join("; "));
-    }
-
-    const authorization = await this.authorizer.authorize({
-      subjectId: decision.agentId,
-      capability: executionCapability(decision.action.kind),
-      target: decision.action.target,
-      at: now,
-    });
-    if (!authorization.authorized || !authorization.grantId) {
-      const error = authorization.reason ?? "Execution capability denied";
-      this.failDecision(decision, error);
-      throw new Error(error);
-    }
-    if (!this.executor) {
-      const error = "Action executor not configured; execution denied";
-      this.failDecision(decision, error);
-      throw new Error(error);
-    }
-
-    decision.status = "executing";
-    decision.executionGrantId = authorization.grantId;
-    this.record(
-      "decision.executing",
-      { target: decision.action.target },
-      decision.agentId,
-      decision.id,
-    );
-    try {
-      const result = await this.executor.execute(cloneDecision(decision));
-      decision.status = "executed";
-      decision.executedAt = this.clock.now();
-      decision.result = result;
-      recentExecutionHistory.push(decision.executedAt);
-      this.executionHistory.set(decision.agentId, recentExecutionHistory);
-      this.record(
-        "decision.executed",
-        { target: decision.action.target },
+        "decision.rejected",
+        { principalId: principal.id, reason: reason.trim() },
         decision.agentId,
         decision.id,
       );
       this.emit("decision", cloneDecision(decision));
       return cloneDecision(decision);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      this.failDecision(decision, message);
-      throw error;
-    }
     });
+  }
+
+  async executeDecision(decisionId: string): Promise<EmergentDecision> {
+    return this.withDecisionLock(decisionId, async () => {
+      const decision = this.requireDecision(decisionId);
+      return this.withAgentExecutionLock(decision.agentId, async () => {
+        if (decision.status !== "approved") {
+          throw new Error(`Decision ${decisionId} is not approved`);
+        }
+
+        const authorizationRequestedAt = this.clock.now();
+        this.assertExecutionEnvelope(decision, authorizationRequestedAt);
+        const authorization = await this.authorizer.authorize({
+          subjectId: decision.agentId,
+          capability: executionCapability(decision.action.kind),
+          target: decision.action.target,
+          at: authorizationRequestedAt,
+        });
+        if (!authorization.authorized || !authorization.grantId) {
+          const error = authorization.reason ?? "Execution capability denied";
+          this.failDecision(decision, error);
+          throw new Error(error);
+        }
+
+        // Authorization may be remote and slow. Re-read every dynamic safety
+        // input after the await, immediately before dispatch.
+        const dispatchAt = this.clock.now();
+        const recentExecutionHistory = this.assertExecutionEnvelope(decision, dispatchAt);
+        if (!this.executor) {
+          const error = "Action executor not configured; execution denied";
+          this.failDecision(decision, error);
+          throw new Error(error);
+        }
+
+        decision.status = "executing";
+        decision.executionGrantId = authorization.grantId;
+        this.record(
+          "decision.executing",
+          { target: decision.action.target },
+          decision.agentId,
+          decision.id,
+        );
+
+        let result: unknown;
+        try {
+          result = await this.executor.execute(cloneDecision(decision));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : String(error);
+          this.failDecision(decision, message);
+          throw error;
+        }
+
+        // The physical action has completed. From here on, observability or
+        // adapter-result serialization failures must never relabel it failed.
+        decision.status = "executed";
+        decision.executedAt = this.clock.now();
+        decision.result = snapshotExecutionResult(result);
+        recentExecutionHistory.push(decision.executedAt);
+        this.executionHistory.set(decision.agentId, recentExecutionHistory);
+        this.record(
+          "decision.executed",
+          { target: decision.action.target },
+          decision.agentId,
+          decision.id,
+        );
+        this.emit("decision", cloneDecision(decision));
+        return cloneDecision(decision);
+      });
     });
   }
 
@@ -537,9 +516,7 @@ export class GhostOSOrchestrator extends EventEmitter {
     this.decisions.set(decision.id, decision);
     while (this.decisions.size > this.maxDecisions) {
       const candidate = [...this.decisions.values()].find((item) =>
-        ["blocked", "executed", "rejected", "failed", "expired"].includes(
-          item.status,
-        ),
+        ["blocked", "executed", "rejected", "failed", "expired"].includes(item.status),
       );
       if (!candidate) {
         this.decisions.delete(decision.id);
@@ -554,12 +531,7 @@ export class GhostOSOrchestrator extends EventEmitter {
   private failDecision(decision: EmergentDecision, error: string): void {
     decision.status = "failed";
     decision.error = error;
-    this.record(
-      "decision.failed",
-      { error },
-      decision.agentId,
-      decision.id,
-    );
+    this.record("decision.failed", { error }, decision.agentId, decision.id);
     this.emit("decision", cloneDecision(decision));
   }
 
@@ -568,26 +540,41 @@ export class GhostOSOrchestrator extends EventEmitter {
     principalId: string,
     reason: string,
   ): void {
-    this.record(
-      "decision.approval-denied",
-      { principalId, reason },
-      decision.agentId,
-      decision.id,
-    );
+    this.record("decision.approval-denied", { principalId, reason }, decision.agentId, decision.id);
   }
 
-  private withDecisionLock<T>(
-    decisionId: string,
-    work: () => Promise<T>,
-  ): Promise<T> {
+  private withDecisionLock<T>(decisionId: string, work: () => Promise<T>): Promise<T> {
     return serializeByKey(this.decisionOperations, decisionId, work);
   }
 
-  private withAgentExecutionLock<T>(
-    agentId: string,
-    work: () => Promise<T>,
-  ): Promise<T> {
+  private withAgentExecutionLock<T>(agentId: string, work: () => Promise<T>): Promise<T> {
     return serializeByKey(this.agentExecutionOperations, agentId, work);
+  }
+
+  private assertExecutionEnvelope(decision: EmergentDecision, at: number): number[] {
+    const envelope = this.envelopeFor(decision.agentId);
+    if (isExpired(decision, envelope, at)) {
+      decision.status = "expired";
+      this.record("decision.expired", { phase: "execution" }, decision.agentId, decision.id);
+      this.emit("decision", cloneDecision(decision));
+      throw new Error(`Decision ${decision.id} has expired`);
+    }
+    const recentExecutionHistory = (this.executionHistory.get(decision.agentId) ?? []).filter(
+      (timestamp) => timestamp > at - 60_000,
+    );
+    this.executionHistory.set(decision.agentId, recentExecutionHistory);
+    const reasons = evaluateExecutionEnvelope(
+      envelope,
+      decision,
+      this.bridge.getSynchronizationState().r,
+      recentExecutionHistory,
+      at,
+    );
+    if (reasons.length > 0) {
+      this.failDecision(decision, reasons.join("; "));
+      throw new Error(reasons.join("; "));
+    }
+    return recentExecutionHistory;
   }
 
   private record(
@@ -613,21 +600,14 @@ export class GhostOSOrchestrator extends EventEmitter {
   }
 }
 
-export function defaultPipelineSignalMapper(
-  event: PipelineEventLike,
-): Signal | null {
+export function defaultPipelineSignalMapper(event: PipelineEventLike): Signal | null {
   const timestamp = new Date(event.timestamp).getTime();
   if (!Number.isFinite(timestamp)) return null;
   const payload =
     event.payload && typeof event.payload === "object"
       ? (event.payload as Record<string, unknown>)
       : undefined;
-  const candidates = [
-    event.payload,
-    payload?.value,
-    payload?.tagValue,
-    payload?.reading,
-  ];
+  const candidates = [event.payload, payload?.value, payload?.tagValue, payload?.reading];
   let value: number | undefined;
   for (const candidate of candidates) {
     if (typeof candidate === "number" && Number.isFinite(candidate)) {
@@ -681,22 +661,23 @@ function evaluateEnvelope(
     );
   }
   if (coherence < envelope.minCoherence) {
-    reasons.push(
-      `Coherence ${coherence.toFixed(3)} is below ${envelope.minCoherence.toFixed(3)}`,
-    );
+    reasons.push(`Coherence ${coherence.toFixed(3)} is below ${envelope.minCoherence.toFixed(3)}`);
   }
   if (action.kind === "control") {
     if (action.setpointDeltaPercent === undefined) {
       reasons.push("Control recommendation must declare setpointDeltaPercent");
-    } else if (
-      Math.abs(action.setpointDeltaPercent) > envelope.maxSetpointDeltaPercent
-    ) {
+    } else if (Math.abs(action.setpointDeltaPercent) > envelope.maxSetpointDeltaPercent) {
       reasons.push(
         `Setpoint delta ${action.setpointDeltaPercent}% exceeds ${envelope.maxSetpointDeltaPercent}%`,
       );
     }
   }
-  return { permitted: reasons.length === 0, reasons, evaluatedAt: at, coherence };
+  return {
+    permitted: reasons.length === 0,
+    reasons,
+    evaluatedAt: at,
+    coherence,
+  };
 }
 
 function evaluateExecutionEnvelope(
@@ -706,19 +687,11 @@ function evaluateExecutionEnvelope(
   history: readonly number[],
   at: number,
 ): string[] {
-  const check = evaluateEnvelope(
-    envelope,
-    decision.action,
-    decision.confidence,
-    coherence,
-    at,
-  );
+  const check = evaluateEnvelope(envelope, decision.action, decision.confidence, coherence, at);
   const reasons = [...check.reasons];
   const recent = history.filter((timestamp) => timestamp > at - 60_000);
   if (recent.length >= envelope.maxExecutionsPerMinute) {
-    reasons.push(
-      `Execution rate limit ${envelope.maxExecutionsPerMinute}/minute reached`,
-    );
+    reasons.push(`Execution rate limit ${envelope.maxExecutionsPerMinute}/minute reached`);
   }
   const autonomousNotification =
     decision.action.kind === "notify" &&
@@ -733,23 +706,15 @@ function evaluateExecutionEnvelope(
   return reasons;
 }
 
-function isExpired(
-  decision: EmergentDecision,
-  envelope: OperationalEnvelope,
-  at: number,
-): boolean {
+function isExpired(decision: EmergentDecision, envelope: OperationalEnvelope, at: number): boolean {
   return at - decision.createdAt > envelope.maxDecisionAgeMs;
 }
 
 function executionCapability(kind: EmergentActionKind): string {
-  return kind === "control" || kind === "configuration"
-    ? `actuate:${kind}`
-    : `execute:${kind}`;
+  return kind === "control" || kind === "configuration" ? `actuate:${kind}` : `execute:${kind}`;
 }
 
-function cloneAndValidateEnvelope(
-  envelope: OperationalEnvelope,
-): OperationalEnvelope {
+function cloneAndValidateEnvelope(envelope: OperationalEnvelope): OperationalEnvelope {
   const numeric: Array<[string, number]> = [
     ["minConfidence", envelope.minConfidence],
     ["minCoherence", envelope.minCoherence],
@@ -784,10 +749,7 @@ function validateAction(action: EmergentAction): void {
   if (!action.target || !action.summary) {
     throw new Error("Decision action target and summary are required");
   }
-  if (
-    action.setpointDeltaPercent !== undefined &&
-    !Number.isFinite(action.setpointDeltaPercent)
-  ) {
+  if (action.setpointDeltaPercent !== undefined && !Number.isFinite(action.setpointDeltaPercent)) {
     throw new Error("setpointDeltaPercent must be finite");
   }
 }
@@ -812,11 +774,19 @@ function cloneDecision(decision: EmergentDecision): EmergentDecision {
       reasons: [...decision.envelopeCheck.reasons],
     },
     rejection: decision.rejection ? { ...decision.rejection } : undefined,
-    result:
-      decision.result === undefined
-        ? undefined
-        : structuredClone(decision.result),
+    result: decision.result === undefined ? undefined : structuredClone(decision.result),
   };
+}
+
+function snapshotExecutionResult(result: unknown): unknown {
+  try {
+    return structuredClone(result);
+  } catch {
+    return {
+      unavailable: true,
+      reason: "executor returned a non-cloneable result",
+    };
+  }
 }
 
 async function serializeByKey<T>(

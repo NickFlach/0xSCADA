@@ -3,11 +3,11 @@
 Issue [#219](https://github.com/NickFlach/0xSCADA/issues/219) implements the
 ADR-0013 historical reporting engine. It ships three templates:
 
-| Template | Content |
-| --- | --- |
-| `shift-summary` | period coverage, alarms, OEE/throughput/quality KPIs, operator notes |
-| `compliance-audit` | pass/warning/fail control evidence, alarms, process-data coverage |
-| `trend-analysis` | per-tag statistics, timestamped trend points, alarms |
+| Template           | Content                                                              |
+| ------------------ | -------------------------------------------------------------------- |
+| `shift-summary`    | period coverage, alarms, OEE/throughput/quality KPIs, operator notes |
+| `compliance-audit` | pass/warning/fail control evidence, alarms, process-data coverage    |
+| `trend-analysis`   | per-tag statistics, timestamped trend points, alarms                 |
 
 Custom templates use the same section types and safe renderers as the built-ins.
 Templates contain data declarations, not executable HTML.
@@ -29,15 +29,13 @@ const reports = new ReportingEngine({
   },
 });
 
-const report = await reports.generate(
-  "shift-summary",
-  shiftStartMs,
-  shiftEndMs,
-);
+const report = await reports.generate("shift-summary", shiftStartMs, shiftEndMs);
 ```
 
 The engine validates the period, filters provider over-fetch, orders historical
 records deterministically, and fails explicitly if no provider is configured.
+Historical windows use `(start, end]` semantics so adjacent scheduled reports
+cover a boundary sample exactly once.
 It does not silently emit a successful report containing data-source errors.
 The original `queryTags`/`queryAlarms`/`queryKPIs` provider shape is supported
 through a compatibility adapter.
@@ -77,7 +75,9 @@ const reports = new ReportingEngine({
 
 Every delivery returns and retains a `DeliveryStatus` with each attempt,
 timestamps, HTTP status (when applicable), retryability, provider ID, and final
-error. Retries use bounded exponential backoff. HTTP 408/425/429 and 5xx
+error. A stable `x-0xscada-delivery-id` is supplied to webhook and email
+transports on every retry so providers can make ambiguous retries idempotent.
+Retries use bounded exponential backoff. HTTP 408/425/429 and 5xx
 responses are retryable; permanent 4xx responses are not. `Sleeper` and retry
 policy are injectable for deterministic tests.
 
@@ -96,9 +96,7 @@ reports.schedule({
   templateId: "shift-summary",
   intervalMs: 8 * 60 * 60 * 1000,
   lookbackMs: 8 * 60 * 60 * 1000,
-  deliveries: [
-    { method: "email", target: "shift-lead@example.com" },
-  ],
+  deliveries: [{ method: "email", target: "shift-lead@example.com" }],
 });
 ```
 

@@ -57,9 +57,7 @@ describe("Kuramoto coordination", () => {
     }
 
     expect(computeOrderParameter(oscillators).r).toBeGreaterThan(0.999);
-    expect(oscillators.map((oscillator) => oscillator.lastUpdate)).toEqual([
-      10_000, 10_000,
-    ]);
+    expect(oscillators.map((oscillator) => oscillator.lastUpdate)).toEqual([10_000, 10_000]);
   });
 
   it("derives reproducible initial phases instead of using randomness", () => {
@@ -159,14 +157,37 @@ describe("Signal -> Resonance bridge", () => {
     });
 
     expect(orchestrator.bridge.getSignals()).toHaveLength(1);
-    expect(
-      orchestrator
-        .getAuditTrail()
-        .map((event) => [event.sequence, event.type]),
-    ).toEqual([
+    expect(orchestrator.getAuditTrail().map((event) => [event.sequence, event.type])).toEqual([
       [1, "signal.accepted"],
       [2, "signal.rejected"],
     ]);
+  });
+
+  it("isolates mapper failures from the canonical event pipeline", () => {
+    const orchestrator = new GhostOSOrchestrator();
+    const pipeline = new EventEmitter();
+    orchestrator.attachPipeline(pipeline, () => {
+      throw new Error("deployment mapper failed");
+    });
+
+    expect(() =>
+      pipeline.emit("event:processed", {
+        timestamp: "1970-01-01T00:00:01.000Z",
+        source_id: "tank.level",
+        event_type: "tag_update",
+        sequence_number: 7,
+        payload: { value: 42 },
+      }),
+    ).not.toThrow();
+    expect(orchestrator.getAuditTrail().at(-1)).toMatchObject({
+      type: "signal.rejected",
+      details: {
+        source: "tank.level",
+        sequence: 7,
+        reason: "ghostos-pipeline-adapter-error",
+        error: "deployment mapper failed",
+      },
+    });
   });
 });
 
@@ -194,7 +215,9 @@ describe("Emergence safety gates", () => {
     }
     addGrant("approval-grant", "operator-1", ["approve:control"]);
     addGrant("agent-approval-grant", "agent-a", ["approve:control"]);
-    const executor = vi.fn(async () => ({ commandId: "cmd-1" }));
+    const executor = vi.fn(async (): Promise<unknown> => ({
+      commandId: "cmd-1",
+    }));
     const bridge = new GhostOSBridge({
       clock,
       alignmentMs: 100,
@@ -304,12 +327,8 @@ describe("Emergence safety gates", () => {
     });
 
     expect(decision.status).toBe("blocked");
-    expect(decision.envelopeCheck.reasons).toContain(
-      "Setpoint delta 12% exceeds 5%",
-    );
-    await expect(orchestrator.executeDecision(decision.id)).rejects.toThrow(
-      "is not approved",
-    );
+    expect(decision.envelopeCheck.reasons).toContain("Setpoint delta 12% exceeds 5%");
+    await expect(orchestrator.executeDecision(decision.id)).rejects.toThrow("is not approved");
     expect(executor).not.toHaveBeenCalled();
   });
 
@@ -338,7 +357,9 @@ describe("Emergence safety gates", () => {
   });
 
   it("re-checks execution capability instead of treating coherence as authority", async () => {
-    const { orchestrator, executor, pattern } = setup({ executionGrant: false });
+    const { orchestrator, executor, pattern } = setup({
+      executionGrant: false,
+    });
     const decision = await orchestrator.proposeDecision({
       patternId: pattern.id,
       agentId: "agent-a",
@@ -437,10 +458,7 @@ describe("Emergence safety gates", () => {
           setpointDeltaPercent: 1,
         },
       });
-    const [first, second] = await Promise.all([
-      propose("asset:pump-7"),
-      propose("asset:pump-8"),
-    ]);
+    const [first, second] = await Promise.all([propose("asset:pump-7"), propose("asset:pump-8")]);
     for (const decision of [first, second]) {
       await orchestrator.approveDecision(decision.id, {
         id: "operator-1",
@@ -456,11 +474,10 @@ describe("Emergence safety gates", () => {
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
     expect(results.filter((result) => result.status === "rejected")).toHaveLength(1);
     expect(executor).toHaveBeenCalledTimes(1);
-    expect(
-      [first.id, second.id]
-        .map((id) => orchestrator.getDecision(id)?.status)
-        .sort(),
-    ).toEqual(["executed", "failed"]);
+    expect([first.id, second.id].map((id) => orchestrator.getDecision(id)?.status).sort()).toEqual([
+      "executed",
+      "failed",
+    ]);
   });
 
   it("deep-clones action payloads at the orchestration boundary", async () => {
@@ -484,6 +501,159 @@ describe("Emergence safety gates", () => {
 
     expect(orchestrator.getDecision(decision.id)?.action.payload).toEqual({
       limits: { delta: 1 },
+    });
+  });
+
+  it("re-checks the operational envelope after delayed authorization", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let authorizationStarted!: () => void;
+    const started = new Promise<void>((resolve) => {
+      authorizationStarted = resolve;
+    });
+    const clock = new MutableClock(10_000);
+    const authorizer = new InMemoryCapabilityAuthorizer();
+    for (const grant of [
+      {
+        id: "recommend",
+        subjectId: "agent-a",
+        capabilities: ["recommend:control"],
+      },
+      {
+        id: "approve",
+        subjectId: "operator-1",
+        capabilities: ["approve:control"],
+      },
+      {
+        id: "actuate",
+        subjectId: "agent-a",
+        capabilities: ["actuate:control"],
+      },
+    ]) {
+      authorizer.addGrant({
+        ...grant,
+        scopes: ["asset:pump-*"],
+        issuedAt: 0,
+        expiresAt: 100_000,
+      });
+    }
+    const executor = vi.fn(async () => ({ commandId: "must-not-run" }));
+    const bridge = new GhostOSBridge({ clock });
+    const orchestrator = new GhostOSOrchestrator({
+      clock,
+      bridge,
+      executor: { execute: executor },
+      capabilityAuthorizer: {
+        authorize: async (request) => {
+          if (request.capability.startsWith("actuate:")) {
+            authorizationStarted();
+            await gate;
+          }
+          return authorizer.authorize(request);
+        },
+      },
+    });
+    orchestrator.registerAgent({
+      agentId: "agent-a",
+      naturalFrequency: 1,
+      initialPhase: 0,
+      envelope: { ...CONTROL_ENVELOPE, minCoherence: 0 },
+    });
+    const otherBridge = orchestrator.bridge;
+    otherBridge.registerAgent({
+      agentId: "agent-b",
+      naturalFrequency: 1,
+      initialPhase: 0,
+    });
+    otherBridge.ingestSignal({
+      id: "s1",
+      source: "pressure",
+      type: "sensor",
+      value: 1,
+      timestamp: 9_000,
+    });
+    otherBridge.ingestSignal({
+      id: "s2",
+      source: "flow",
+      type: "sensor",
+      value: 1,
+      timestamp: 9_000,
+    });
+    for (let index = 1; index < 4; index += 1) {
+      otherBridge.ingestSignal({
+        id: `p${index}`,
+        source: "pressure",
+        type: "sensor",
+        value: index + 1,
+        timestamp: 9_000 + index * 1_000,
+      });
+      otherBridge.ingestSignal({
+        id: `f${index}`,
+        source: "flow",
+        type: "sensor",
+        value: (index + 1) * 2,
+        timestamp: 9_000 + index * 1_000,
+      });
+    }
+    const pattern = otherBridge.detectResonance(10_000, 12_000)[0];
+    const decision = await orchestrator.proposeDecision({
+      patternId: pattern.id,
+      agentId: "agent-a",
+      confidence: 0.95,
+      action: {
+        kind: "control",
+        target: "asset:pump-7",
+        summary: "Small safe movement",
+        setpointDeltaPercent: 1,
+      },
+    });
+    await orchestrator.approveDecision(decision.id, {
+      id: "operator-1",
+      authenticated: true,
+    });
+
+    const execution = orchestrator.executeDecision(decision.id);
+    await started;
+    orchestrator.updateEnvelope("agent-a", {
+      ...CONTROL_ENVELOPE,
+      minCoherence: 0,
+      allowedTargets: [],
+    });
+    release();
+
+    await expect(execution).rejects.toThrow("not allowlisted");
+    expect(executor).not.toHaveBeenCalled();
+  });
+
+  it("records a non-cloneable executor result without relabeling actuation failed", async () => {
+    const { orchestrator, executor, pattern } = setup();
+    const decision = await orchestrator.proposeDecision({
+      patternId: pattern.id,
+      agentId: "agent-a",
+      confidence: 0.95,
+      action: {
+        kind: "control",
+        target: "asset:pump-7",
+        summary: "Small safe movement",
+        setpointDeltaPercent: 1,
+      },
+    });
+    await orchestrator.approveDecision(decision.id, {
+      id: "operator-1",
+      authenticated: true,
+    });
+    executor.mockResolvedValueOnce({ callback: () => undefined });
+
+    const executed = await orchestrator.executeDecision(decision.id);
+
+    expect(executed).toMatchObject({
+      status: "executed",
+      result: {
+        unavailable: true,
+        reason: "executor returned a non-cloneable result",
+      },
     });
   });
 });

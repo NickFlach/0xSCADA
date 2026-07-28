@@ -1,10 +1,6 @@
 import { EventEmitter } from "events";
 import { DeliveryChannelError } from "./delivery";
-import {
-  renderReportHtml,
-  renderReportJson,
-  renderReportText,
-} from "./render";
+import { renderReportHtml, renderReportJson, renderReportText } from "./render";
 import { IntervalReportScheduler, timerSleeper } from "./scheduler";
 import { BUILT_IN_TEMPLATES } from "./templates";
 import {
@@ -90,14 +86,9 @@ export class ReportingEngine extends EventEmitter {
     this.clock = options.clock ?? systemReportClock;
     this.scheduler = options.scheduler ?? new IntervalReportScheduler();
     this.sleeper = options.sleeper ?? timerSleeper;
-    this.retryPolicy = validateRetryPolicy(
-      options.retryPolicy ?? DEFAULT_RETRY_POLICY,
-    );
+    this.retryPolicy = validateRetryPolicy(options.retryPolicy ?? DEFAULT_RETRY_POLICY);
     this.maxReports = positiveInteger(options.maxReports ?? 500, "maxReports");
-    this.maxDeliveries = positiveInteger(
-      options.maxDeliveries ?? 2_000,
-      "maxDeliveries",
-    );
+    this.maxDeliveries = positiveInteger(options.maxDeliveries ?? 2_000, "maxDeliveries");
     for (const template of BUILT_IN_TEMPLATES) this.registerTemplate(template);
     for (const channel of options.deliveryChannels ?? []) {
       this.registerDeliveryChannel(channel);
@@ -106,9 +97,7 @@ export class ReportingEngine extends EventEmitter {
   }
 
   setDataProvider(provider: HistoricalDataProvider | LegacyDataProvider): void {
-    this.dataProvider = isLegacyProvider(provider)
-      ? adaptLegacyProvider(provider)
-      : provider;
+    this.dataProvider = isLegacyProvider(provider) ? adaptLegacyProvider(provider) : provider;
   }
 
   registerTemplate(template: ReportTemplate): void {
@@ -136,9 +125,7 @@ export class ReportingEngine extends EventEmitter {
     const period = validatePeriod({ start: periodStart, end: periodEnd });
     const provider = this.dataProvider;
     if (!provider) {
-      throw new ReportingConfigurationError(
-        "Historical data provider is not configured",
-      );
+      throw new ReportingConfigurationError("Historical data provider is not configured");
     }
 
     const sections: GeneratedSection[] = [];
@@ -194,10 +181,7 @@ export class ReportingEngine extends EventEmitter {
    */
   registerDeliveryHandler(
     method: DeliveryConfig["method"],
-    handler: (
-      report: GeneratedReport,
-      config: DeliveryConfig,
-    ) => Promise<void>,
+    handler: (report: GeneratedReport, config: DeliveryConfig) => Promise<void>,
   ): void {
     this.registerDeliveryChannel({
       method,
@@ -236,6 +220,7 @@ export class ReportingEngine extends EventEmitter {
     }
 
     const payload = {
+      deliveryId: delivery.id,
       report: cloneReport(report),
       target: config.target,
       subject: config.subject ?? report.title,
@@ -255,9 +240,7 @@ export class ReportingEngine extends EventEmitter {
           startedAt,
           completedAt,
           state: "delivered",
-          ...(receipt.statusCode !== undefined
-            ? { statusCode: receipt.statusCode }
-            : {}),
+          ...(receipt.statusCode !== undefined ? { statusCode: receipt.statusCode } : {}),
         });
         delivery.state = "delivered";
         delivery.attempts = attempts;
@@ -269,8 +252,7 @@ export class ReportingEngine extends EventEmitter {
         return cloneDelivery(delivery);
       } catch (error) {
         const completedAt = this.clock.now();
-        const retryable =
-          error instanceof DeliveryChannelError ? error.retryable : true;
+        const retryable = error instanceof DeliveryChannelError ? error.retryable : true;
         const message = error instanceof Error ? error.message : String(error);
         attempts.push({
           attempt,
@@ -279,17 +261,13 @@ export class ReportingEngine extends EventEmitter {
           state: "failed",
           error: message,
           retryable,
-          ...(error instanceof DeliveryChannelError &&
-          error.statusCode !== undefined
+          ...(error instanceof DeliveryChannelError && error.statusCode !== undefined
             ? { statusCode: error.statusCode }
             : {}),
         });
         delivery.error = message;
         if (!retryable || attempt === policy.maxAttempts) break;
-        const delay = Math.min(
-          policy.maxDelayMs,
-          policy.baseDelayMs * 2 ** (attempt - 1),
-        );
+        const delay = Math.min(policy.maxDelayMs, policy.baseDelayMs * 2 ** (attempt - 1));
         await this.sleeper.sleep(delay);
       }
     }
@@ -323,13 +301,9 @@ export class ReportingEngine extends EventEmitter {
     };
     this.schedules.set(spec.id, scheduled);
     try {
-      scheduled.handle = this.scheduler.every(
-        spec.id,
-        spec.intervalMs,
-        async () => {
-          await this.runSchedule(spec.id);
-        },
-      );
+      scheduled.handle = this.scheduler.every(spec.id, spec.intervalMs, async () => {
+        await this.runSchedule(spec.id);
+      });
     } catch (error) {
       this.schedules.delete(spec.id);
       throw error;
@@ -338,11 +312,7 @@ export class ReportingEngine extends EventEmitter {
   }
 
   /** Original prototype API: schedule id is the template id. */
-  scheduleReport(
-    templateId: string,
-    intervalMs: number,
-    format: OutputFormat = "html",
-  ): boolean {
+  scheduleReport(templateId: string, intervalMs: number, format: OutputFormat = "html"): boolean {
     return this.schedule({
       id: templateId,
       templateId,
@@ -374,8 +344,7 @@ export class ReportingEngine extends EventEmitter {
         throw new Error(`Template ${scheduled.spec.templateId} no longer exists`);
       }
       const template = this.templates.get(scheduled.spec.templateId)!;
-      const deliveryConfigs =
-        scheduled.spec.deliveries ?? template.delivery ?? [];
+      const deliveryConfigs = scheduled.spec.deliveries ?? template.delivery ?? [];
       const deliveryIds: string[] = [];
       const failures: string[] = [];
       for (const config of deliveryConfigs) {
@@ -396,8 +365,7 @@ export class ReportingEngine extends EventEmitter {
       }
     } catch (error) {
       scheduled.status.consecutiveFailures += 1;
-      scheduled.status.lastError =
-        error instanceof Error ? error.message : String(error);
+      scheduled.status.lastError = error instanceof Error ? error.message : String(error);
     } finally {
       scheduled.status.running = false;
       scheduled.status.lastCompletedAt = this.clock.now();
@@ -422,9 +390,7 @@ export class ReportingEngine extends EventEmitter {
   }
 
   getReports(type?: ReportType): GeneratedReport[] {
-    return this.reports
-      .filter((report) => !type || report.type === type)
-      .map(cloneReport);
+    return this.reports.filter((report) => !type || report.type === type).map(cloneReport);
   }
 
   getReport(reportId: string): GeneratedReport | undefined {
@@ -474,23 +440,19 @@ async function generateSection(
         goodQuality: points.filter(
           (point) => point.quality === undefined || point.quality === "good",
         ).length,
-        uncertainQuality: points.filter(
-          (point) => point.quality === "uncertain",
-        ).length,
+        uncertainQuality: points.filter((point) => point.quality === "uncertain").length,
         badQuality: points.filter((point) => point.quality === "bad").length,
       };
     }
     case "alarm-list":
-      return normalizeAlarms(await provider.queryAlarms(period), period).map(
-        (alarm) => ({
-          id: alarm.id ?? "",
-          tag: alarm.tag,
-          severity: alarm.severity,
-          message: alarm.message,
-          timestamp: new Date(alarm.timestamp).toISOString(),
-          acknowledged: alarm.acknowledged ?? false,
-        }),
-      );
+      return normalizeAlarms(await provider.queryAlarms(period), period).map((alarm) => ({
+        id: alarm.id ?? "",
+        tag: alarm.tag,
+        severity: alarm.severity,
+        message: alarm.message,
+        timestamp: new Date(alarm.timestamp).toISOString(),
+        acknowledged: alarm.acknowledged ?? false,
+      }));
     case "kpi":
       return provider.queryKPIs(section.kpis ?? [], period);
     case "statistics": {
@@ -519,10 +481,7 @@ async function generateSection(
         );
     }
     case "compliance": {
-      const events = normalizeCompliance(
-        await provider.queryCompliance(period),
-        period,
-      );
+      const events = normalizeCompliance(await provider.queryCompliance(period), period);
       return {
         summary: {
           total: events.length,
@@ -538,9 +497,7 @@ async function generateSection(
     }
     case "notes": {
       if (!provider.queryNotes) return [];
-      return (
-        await provider.queryNotes(section.query ?? section.dataQuery ?? "shift", period)
-      ).map(
+      return (await provider.queryNotes(section.query ?? section.dataQuery ?? "shift", period)).map(
         (note, index) => ({ index: index + 1, note }),
       );
     }
@@ -554,17 +511,33 @@ function statisticsFor(
   points: readonly HistoricalPoint[],
 ): Readonly<Record<string, unknown>> {
   if (points.length === 0) {
-    return { tag, count: 0, min: null, max: null, mean: null, first: null, last: null, delta: null };
+    return {
+      tag,
+      count: 0,
+      min: null,
+      max: null,
+      mean: null,
+      first: null,
+      last: null,
+      delta: null,
+    };
   }
-  const values = points.map((point) => point.value);
   const first = points[0].value;
   const last = points[points.length - 1].value;
+  let min = first;
+  let max = first;
+  let sum = 0;
+  for (const point of points) {
+    min = Math.min(min, point.value);
+    max = Math.max(max, point.value);
+    sum += point.value;
+  }
   return {
     tag,
     count: points.length,
-    min: Math.min(...values),
-    max: Math.max(...values),
-    mean: values.reduce((sum, value) => sum + value, 0) / values.length,
+    min,
+    max,
+    mean: sum / points.length,
     first,
     last,
     delta: last - first,
@@ -582,7 +555,7 @@ function normalizeSeries(
         (point) =>
           Number.isFinite(point.timestamp) &&
           Number.isFinite(point.value) &&
-          point.timestamp >= period.start &&
+          point.timestamp > period.start &&
           point.timestamp <= period.end,
       )
       .map((point) => ({ ...point }))
@@ -599,7 +572,7 @@ function normalizeAlarms(
     .filter(
       (alarm) =>
         Number.isFinite(alarm.timestamp) &&
-        alarm.timestamp >= period.start &&
+        alarm.timestamp > period.start &&
         alarm.timestamp <= period.end,
     )
     .map((alarm) => ({ ...alarm }))
@@ -619,14 +592,13 @@ function normalizeCompliance(
     .filter(
       (event) =>
         Number.isFinite(event.timestamp) &&
-        event.timestamp >= period.start &&
+        event.timestamp > period.start &&
         event.timestamp <= period.end,
     )
     .map((event) => ({ ...event }))
     .sort(
       (left, right) =>
-        left.timestamp - right.timestamp ||
-        left.control.localeCompare(right.control),
+        left.timestamp - right.timestamp || left.control.localeCompare(right.control),
     );
 }
 
@@ -636,8 +608,7 @@ function adaptLegacyProvider(provider: LegacyDataProvider): HistoricalDataProvid
       const values = await provider.queryTags(pattern, period.start, period.end);
       const result: Record<string, HistoricalPoint[]> = {};
       for (const [tag, samples] of Object.entries(values)) {
-        const spacing =
-          samples.length > 1 ? (period.end - period.start) / (samples.length - 1) : 0;
+        const spacing = samples.length > 1 ? (period.end - period.start) / (samples.length - 1) : 0;
         result[tag] = samples.map((value, index) => ({
           timestamp: period.start + spacing * index,
           value,
@@ -683,11 +654,7 @@ function validateTemplate(template: ReportTemplate): void {
       throw new Error(`Template ${template.id} has an invalid or duplicate section id`);
     }
     sectionIds.add(section.id);
-    if (
-      section.type === "text" &&
-      section.text === undefined &&
-      section.dataQuery === undefined
-    ) {
+    if (section.type === "text" && section.text === undefined && section.dataQuery === undefined) {
       throw new Error(`Text section ${section.id} must declare text`);
     }
   }

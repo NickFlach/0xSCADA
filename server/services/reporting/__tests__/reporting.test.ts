@@ -22,11 +22,7 @@ class ManualScheduler implements ReportScheduler {
   readonly tasks = new Map<string, () => void | Promise<void>>();
   readonly cancelled: string[] = [];
 
-  every(
-    id: string,
-    _intervalMs: number,
-    task: () => void | Promise<void>,
-  ): ScheduledHandle {
+  every(id: string, _intervalMs: number, task: () => void | Promise<void>): ScheduledHandle {
     this.tasks.set(id, task);
     return {
       cancel: () => {
@@ -63,8 +59,7 @@ function provider(overrides: Partial<HistoricalDataProvider> = {}): HistoricalDa
         timestamp: 2_500,
       },
     ],
-    queryKPIs: async (names) =>
-      Object.fromEntries(names.map((name) => [name, 95])),
+    queryKPIs: async (names) => Object.fromEntries(names.map((name) => [name, 95])),
     queryCompliance: async () => [
       {
         control: "IEC-62443-SR-3.1",
@@ -173,6 +168,118 @@ describe("ReportingEngine generation and rendering", () => {
     );
     expect(engine.getReports()).toEqual([]);
   });
+
+  it("computes statistics for high-cardinality histories without argument spreading", async () => {
+    const points = Array.from({ length: 200_000 }, (_, index) => ({
+      timestamp: index + 1,
+      value: index,
+      quality: "good" as const,
+    }));
+    const engine = new ReportingEngine({
+      clock: new MutableClock(300_000),
+      dataProvider: provider({
+        querySeries: async () => ({ highRateTag: points }),
+      }),
+    });
+    engine.registerTemplate({
+      id: "high-cardinality",
+      name: "High-cardinality statistics",
+      type: "custom",
+      sections: [
+        {
+          id: "statistics",
+          title: "Statistics",
+          type: "statistics",
+          query: "*",
+        },
+      ],
+    });
+
+    const report = await engine.generate("high-cardinality", 0, 200_000);
+
+    expect(report?.sections[0].content).toEqual([
+      {
+        tag: "highRateTag",
+        count: 200_000,
+        min: 0,
+        max: 199_999,
+        mean: 99_999.5,
+        first: 0,
+        last: 199_999,
+        delta: 199_999,
+      },
+    ]);
+  });
+
+  it("uses half-open adjacent windows without double-counting boundary records", async () => {
+    const engine = new ReportingEngine({
+      clock: new MutableClock(3_000),
+      dataProvider: provider({
+        querySeries: async () => ({
+          pressure: [
+            { timestamp: 1_000, value: 10 },
+            { timestamp: 2_000, value: 20 },
+          ],
+        }),
+        queryAlarms: async () => [
+          {
+            id: "alarm-1",
+            tag: "pressure",
+            severity: "high",
+            message: "first",
+            timestamp: 1_000,
+          },
+          {
+            id: "alarm-2",
+            tag: "pressure",
+            severity: "high",
+            message: "second",
+            timestamp: 2_000,
+          },
+        ],
+        queryCompliance: async () => [
+          {
+            control: "first",
+            status: "pass",
+            detail: "first",
+            timestamp: 1_000,
+          },
+          {
+            control: "second",
+            status: "pass",
+            detail: "second",
+            timestamp: 2_000,
+          },
+        ],
+      }),
+    });
+    engine.registerTemplate({
+      id: "boundary-check",
+      name: "Boundary check",
+      type: "custom",
+      sections: [
+        { id: "stats", title: "Stats", type: "statistics", query: "*" },
+        { id: "alarms", title: "Alarms", type: "alarm-list" },
+        { id: "compliance", title: "Compliance", type: "compliance" },
+      ],
+    });
+
+    const first = await engine.generate("boundary-check", 0, 1_000);
+    const second = await engine.generate("boundary-check", 1_000, 2_000);
+
+    expect(first?.sections[0].content).toMatchObject([{ count: 1, first: 10 }]);
+    expect(second?.sections[0].content).toMatchObject([{ count: 1, first: 20 }]);
+    expect(first?.sections[1].content).toMatchObject([{ id: "alarm-1" }]);
+    expect(second?.sections[1].content).toMatchObject([{ id: "alarm-2" }]);
+    expect(first?.sections[2].content).toMatchObject({
+      summary: { total: 1 },
+      events: [{ control: "first" }],
+    });
+    expect(second?.sections[2].content).toMatchObject({
+      summary: { total: 1 },
+      events: [{ control: "second" }],
+    });
+  });
 });
 
 describe("delivery adapters and retry status", () => {
@@ -195,9 +302,7 @@ describe("delivery adapters and retry status", () => {
       sleeper,
       dataProvider: provider(),
       retryPolicy: { maxAttempts: 3, baseDelayMs: 10, maxDelayMs: 50 },
-      deliveryChannels: [
-        new WebhookDeliveryChannel({ post }),
-      ],
+      deliveryChannels: [new WebhookDeliveryChannel({ post })],
     });
     const report = await engine.generate("shift-summary", 1_000, 3_000);
     const delivery = await engine.deliver(report!, {
@@ -212,18 +317,22 @@ describe("delivery adapters and retry status", () => {
       providerId: "req-3",
       deliveredAt: 5_030,
     });
-    expect(delivery.attempts.map((attempt) => attempt.statusCode)).toEqual([
-      500, 429, 204,
-    ]);
+    expect(delivery.attempts.map((attempt) => attempt.statusCode)).toEqual([500, 429, 204]);
     expect(sleeps).toEqual([10, 20]);
     expect(post).toHaveBeenCalledTimes(3);
     expect(post.mock.calls[0][0]).toMatchObject({
       headers: {
         "content-type": "application/json",
+        "x-0xscada-delivery-id": "DLV-000001",
         "x-0xscada-report-id": "RPT-000001",
         authorization: "Bearer injected-by-config",
       },
     });
+    expect(post.mock.calls.map((call) => call[0].headers["x-0xscada-delivery-id"])).toEqual([
+      "DLV-000001",
+      "DLV-000001",
+      "DLV-000001",
+    ]);
   });
 
   it("does not retry permanent failures and retains their error status", async () => {
@@ -281,8 +390,60 @@ describe("delivery adapters and retry status", () => {
         subject: "Shift handoff",
         html: expect.stringContaining("<!DOCTYPE html>"),
         text: expect.stringContaining("Shift Summary Report"),
+        headers: {
+          "x-0xscada-delivery-id": "DLV-000001",
+          "x-0xscada-report-id": "RPT-000001",
+        },
       }),
     );
+  });
+
+  it("keeps a stable email idempotency key across an ambiguous retry", async () => {
+    const send = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("provider response was lost"))
+      .mockResolvedValueOnce({ messageId: "mail-after-retry" });
+    const engine = new ReportingEngine({
+      clock: new MutableClock(5_000),
+      dataProvider: provider(),
+      sleeper: { sleep: async () => undefined },
+      deliveryChannels: [new EmailDeliveryChannel({ send })],
+    });
+    const report = await engine.generate("shift-summary", 1_000, 3_000);
+
+    const delivery = await engine.deliver(report!, {
+      method: "email",
+      target: "operator@example.test",
+    });
+
+    expect(delivery.state).toBe("delivered");
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls.map(([message]) => message.headers["x-0xscada-delivery-id"])).toEqual([
+      "DLV-000001",
+      "DLV-000001",
+    ]);
+  });
+
+  it("rejects case-insensitive attempts to override reserved webhook headers", async () => {
+    const post = vi.fn(async () => ({ status: 204 }));
+    const engine = new ReportingEngine({
+      clock: new MutableClock(5_000),
+      dataProvider: provider(),
+      deliveryChannels: [new WebhookDeliveryChannel({ post })],
+    });
+    const report = await engine.generate("shift-summary", 1_000, 3_000);
+
+    const delivery = await engine.deliver(report!, {
+      method: "webhook",
+      target: "https://reports.example.test/hook",
+      headers: { "Content-Type": "text/plain" },
+    });
+
+    expect(delivery).toMatchObject({
+      state: "failed",
+      error: "Delivery header Content-Type is reserved",
+    });
+    expect(post).not.toHaveBeenCalled();
   });
 });
 
@@ -311,9 +472,7 @@ describe("injectable scheduling", () => {
         templateId: "shift-summary",
         intervalMs: 3_600_000,
         lookbackMs: 8_000,
-        deliveries: [
-          { method: "webhook", target: "https://example.test/report" },
-        ],
+        deliveries: [{ method: "webhook", target: "https://example.test/report" }],
       }),
     ).toBe(true);
     await scheduler.trigger("shift-every-hour");
