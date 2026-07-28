@@ -2,6 +2,9 @@ import { describe, expect, it, vi } from 'vitest';
 import {
   AutoRemediationEngine,
   CRITICAL_PATH_SLOS,
+  RemediationAuditPersistenceError,
+  RemediationRuntime,
+  RemediationRuntimeUnavailableError,
   SloRegistry,
   createGatewayFailoverAction,
   createScaleOutAction,
@@ -163,6 +166,28 @@ describe('AutoRemediationEngine', () => {
     expect(replicas).toBe(2);
   });
 
+  it('rechecks desired state immediately before mutation and never scales down', async () => {
+    const setReplicas = vi.fn(async () => undefined);
+    let inspection = 0;
+    const action = createScaleOutAction({
+      currentReplicas: async () => {
+        inspection += 1;
+        return inspection === 1 ? 1 : 5;
+      },
+      setReplicas,
+      readyReplicas: async () => 5,
+    });
+    const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
+    const result = await engine.execute({
+      actionId: 'scale-out',
+      context: { component: 'api', desiredReplicas: 3, maximumReplicas: 4 },
+      idempotencyKey: 'concurrent-scale-out',
+    });
+    expect(result).toMatchObject({ status: 'skipped', changed: false });
+    expect(result.message).toMatch(/scale-down is forbidden/);
+    expect(setReplicas).not.toHaveBeenCalled();
+  });
+
   it('requires an approver above the automatic risk ceiling', async () => {
     const dangerous: RemediationAction<Record<string, never>> = {
       id: 'promote-database',
@@ -212,5 +237,144 @@ describe('AutoRemediationEngine', () => {
     });
     expect(result.status).toBe('blocked');
     expect(result.message).toMatch(/allowlist/);
+  });
+
+  it('starts cooldown at mutation time after a slow precondition', async () => {
+    let clock = 0;
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let firstPrecondition = true;
+    const execute = vi.fn(async () => ({ changed: true, message: 'changed' }));
+    const action: RemediationAction<Record<string, never>> = {
+      id: 'slow-check',
+      description: 'slow precondition',
+      risk: 'low',
+      scope: () => 'shared',
+      precondition: async () => {
+        if (firstPrecondition) {
+          firstPrecondition = false;
+          await gate;
+        }
+        return { needed: true, safe: true, reason: 'needed' };
+      },
+      execute,
+    };
+    const engine = new AutoRemediationEngine(
+      [action],
+      { cooldownMs: 60_000 },
+      { now: () => new Date(clock) },
+    );
+
+    const first = engine.execute({
+      actionId: action.id,
+      context: {},
+      idempotencyKey: 'slow-first',
+    });
+    clock = 10 * 60_000;
+    release();
+    expect((await first).status).toBe('succeeded');
+    const second = await engine.execute({
+      actionId: action.id,
+      context: {},
+      idempotencyKey: 'slow-second',
+    });
+    expect(second.status).toBe('blocked');
+    expect(execute).toHaveBeenCalledTimes(1);
+  });
+
+  it('snapshots request context and cached results across async boundaries', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>(resolve => { release = resolve; });
+    let observed = 0;
+    const action: RemediationAction<{ desired: number }> = {
+      id: 'snapshot',
+      description: 'snapshot input',
+      risk: 'low',
+      scope: () => 'shared',
+      precondition: async () => {
+        await gate;
+        return { needed: true, safe: true, reason: 'needed' };
+      },
+      execute: async context => {
+        observed = context.desired;
+        return { changed: true, message: 'changed' };
+      },
+    };
+    const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
+    const context = { desired: 2 };
+    const request = { actionId: action.id, context, idempotencyKey: 'snapshot-1' };
+    const running = engine.execute(request);
+    context.desired = 99;
+    release();
+    const result = await running;
+    expect(observed).toBe(2);
+    result.status = 'failed';
+    expect((await engine.execute({ ...request, context: { desired: 2 } })).status).toBe('succeeded');
+  });
+});
+
+describe('RemediationRuntime', () => {
+  it('fails closed until adapters are configured and durably audits execution', async () => {
+    const runtime = new RemediationRuntime();
+    await expect(runtime.execute({
+      actionId: 'scale-out',
+      context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
+      idempotencyKey: 'runtime-unconfigured',
+    })).rejects.toBeInstanceOf(RemediationRuntimeUnavailableError);
+
+    let replicas = 1;
+    const append = vi.fn(async () => undefined);
+    runtime.configure({
+      scaleOut: {
+        currentReplicas: async () => replicas,
+        setReplicas: async (_component, value) => { replicas = value; },
+        readyReplicas: async () => replicas,
+      },
+      auditSink: { append },
+      policy: { cooldownMs: 0 },
+    });
+    const result = await runtime.execute({
+      actionId: 'scale-out',
+      context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
+      idempotencyKey: 'runtime-configured',
+    });
+    expect(result.status).toBe('succeeded');
+    expect(runtime.status()).toMatchObject({
+      configured: true,
+      actions: [{ id: 'scale-out' }],
+    });
+    expect(append).toHaveBeenCalledWith(expect.objectContaining({
+      executionId: result.executionId,
+      status: 'succeeded',
+    }));
+  });
+
+  it('surfaces durable audit failure after preserving the idempotent action result', async () => {
+    let replicas = 1;
+    let failAudit = true;
+    const runtime = new RemediationRuntime();
+    runtime.configure({
+      scaleOut: {
+        currentReplicas: async () => replicas,
+        setReplicas: async (_component, value) => { replicas = value; },
+        readyReplicas: async () => replicas,
+      },
+      auditSink: {
+        append: async () => {
+          if (failAudit) throw new Error('disk unavailable');
+        },
+      },
+      policy: { cooldownMs: 0 },
+    });
+    const request = {
+      actionId: 'scale-out',
+      context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
+      idempotencyKey: 'audit-retry',
+    };
+    await expect(runtime.execute(request)).rejects.toBeInstanceOf(RemediationAuditPersistenceError);
+    expect(replicas).toBe(2);
+    failAudit = false;
+    const replay = await runtime.execute(request);
+    expect(replay).toMatchObject({ status: 'succeeded', reused: true });
   });
 });

@@ -120,7 +120,7 @@ export interface ScalingOption {
   strategy: ScalingStrategy;
   headroomPercent: number;
   resourceEstimate: ResourceEstimate;
-  monthlyCostByProvider: Readonly<Record<CloudProvider, number>>;
+  monthlyCostByProvider: Readonly<Partial<Record<CloudProvider, number>>>;
   cheapestProvider: CloudProvider;
   performanceTradeoff: string;
   costTradeoff: string;
@@ -163,8 +163,15 @@ export const DEFAULT_RESOURCE_COEFFICIENTS: Readonly<ResourceCoefficients> = Obj
   tagsPerHistorianShard: 250_000,
 });
 
+function frozenRateCard(card: CloudRateCard): CloudRateCard {
+  return Object.freeze({
+    ...card,
+    compute: Object.freeze({ ...card.compute }),
+  });
+}
+
 export const DEFAULT_CLOUD_RATE_CARDS: Readonly<Record<CloudProvider, CloudRateCard>> = Object.freeze({
-  aws: {
+  aws: frozenRateCard({
     provider: 'aws',
     version: '2026-07-reference',
     region: 'us-east-1',
@@ -179,8 +186,8 @@ export const DEFAULT_CLOUD_RATE_CARDS: Readonly<Record<CloudProvider, CloudRateC
     storagePerGiBMonth: 0.08,
     egressPerGiB: 0.09,
     monthlyLoadBalancer: 18.25,
-  },
-  azure: {
+  }),
+  azure: frozenRateCard({
     provider: 'azure',
     version: '2026-07-reference',
     region: 'eastus',
@@ -195,8 +202,8 @@ export const DEFAULT_CLOUD_RATE_CARDS: Readonly<Record<CloudProvider, CloudRateC
     storagePerGiBMonth: 0.09,
     egressPerGiB: 0.087,
     monthlyLoadBalancer: 18.25,
-  },
-  gcp: {
+  }),
+  gcp: frozenRateCard({
     provider: 'gcp',
     version: '2026-07-reference',
     region: 'us-central1',
@@ -211,7 +218,7 @@ export const DEFAULT_CLOUD_RATE_CARDS: Readonly<Record<CloudProvider, CloudRateC
     storagePerGiBMonth: 0.1,
     egressPerGiB: 0.12,
     monthlyLoadBalancer: 18,
-  },
+  }),
 });
 
 const HOURS_PER_MONTH = 730;
@@ -297,9 +304,16 @@ export class CapacityPlanner {
       ...DEFAULT_RESOURCE_COEFFICIENTS,
       ...(options.coefficients ?? {}),
     });
-    this.rateCards = Object.freeze({
+    const rateCards = {
       ...DEFAULT_CLOUD_RATE_CARDS,
       ...(options.rateCards ?? {}),
+    };
+    // Never retain references to exported defaults or caller-owned nested
+    // objects; later mutation must not silently rewrite a live cost model.
+    this.rateCards = Object.freeze({
+      aws: structuredClone(rateCards.aws),
+      azure: structuredClone(rateCards.azure),
+      gcp: structuredClone(rateCards.gcp),
     });
     this.now = options.now ?? (() => new Date());
     validateCoefficients(this.coefficients);
@@ -549,6 +563,7 @@ export class CapacityPlanner {
   recommendScaling(
     workloadInput: CapacityWorkload,
     forecast?: GrowthForecast,
+    providers: readonly CloudProvider[] = ['aws', 'azure', 'gcp'],
   ): ScalingRecommendation {
     const current = normalizeWorkload(workloadInput);
     const planningTagCount = Math.max(current.tagCount, forecast?.projectedTagCount ?? current.tagCount);
@@ -564,10 +579,10 @@ export class CapacityPlanner {
           tagCount: planningTagCount,
           headroomPercent,
         });
-        const costs = this.projectCloudCosts(resourceEstimate);
+        const costs = this.projectCloudCosts(resourceEstimate, providers);
         const monthlyCostByProvider = Object.fromEntries(
           costs.map(cost => [cost.provider, cost.monthly.total]),
-        ) as Record<CloudProvider, number>;
+        ) as Partial<Record<CloudProvider, number>>;
         const cheapestProvider = costs.reduce((best, candidate) =>
           candidate.monthly.total < best.monthly.total ? candidate : best).provider;
         const tradeoffs: Record<ScalingStrategy, [string, string]> = {
@@ -648,7 +663,7 @@ export class CapacityPlanner {
       forecast,
       planning,
       cloudCosts: this.projectCloudCosts(planning, input.providers),
-      scaling: this.recommendScaling(input.workload, forecast),
+      scaling: this.recommendScaling(input.workload, forecast, input.providers),
     };
   }
 }

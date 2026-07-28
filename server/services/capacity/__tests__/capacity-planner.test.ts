@@ -95,6 +95,10 @@ describe('CapacityPlanner cloud cost projections', () => {
 
     const [projection] = planner.projectCloudCosts({ tagCount: 1_000 }, ['aws']);
     expect(projection.monthly.total).toBe(0);
+
+    freeAws.aws.compute.hourlyPerNode = 10;
+    const [unchanged] = planner.projectCloudCosts({ tagCount: 1_000 }, ['aws']);
+    expect(unchanged.monthly.total).toBe(0);
   });
 });
 
@@ -162,5 +166,7 @@ describe('CapacityPlanner growth and scaling', () => {
     expect(plan.planning.workload.tagCount).toBe(plan.forecast?.projectedTagCount);
     expect(plan.cloudCosts.map(item => item.provider)).toEqual(['aws', 'gcp']);
     expect(plan.scaling.options).toHaveLength(3);
+    expect(plan.scaling.options.every(option =>
+      Object.keys(option.monthlyCostByProvider).sort().join(',') === 'aws,gcp')).toBe(true);
   });
 });

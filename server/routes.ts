@@ -30,6 +30,14 @@ import { marketplaceService } from "./services/marketplace";
 import { nlQueryService } from "./services/nlquery";
 import { governanceRoutes } from "./routes/governance";
 import { productionReadinessRoutes } from "./routes/production-readiness";
+import {
+  complianceService,
+  type EvidenceCollector,
+} from "./services/compliance";
+import {
+  configureRemediationRuntime,
+  type RemediationRuntimeConfiguration,
+} from "./services/sre";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
 import {
@@ -51,6 +59,8 @@ import type { WebSocketAuthOptions } from "./websocket/upgrade-auth";
 
 export interface RouteRegistrationOptions {
   websocketAuth?: WebSocketAuthOptions;
+  complianceCollectors?: readonly EvidenceCollector[];
+  remediation?: RemediationRuntimeConfiguration;
 }
 
 export async function registerRoutes(
@@ -58,6 +68,16 @@ export async function registerRoutes(
   app: Express,
   options: RouteRegistrationOptions = {},
 ): Promise<Server> {
+  for (const collector of options.complianceCollectors ?? []) {
+    complianceService.registerCollector(collector);
+  }
+  if (options.remediation !== undefined) {
+    configureRemediationRuntime(options.remediation);
+  }
+  // Start registered compliance collectors and recurring scans at process
+  // boot; waiting for the first API request would silently skip scheduled
+  // assessments.
+  await complianceService.initialize();
 
   // ==========================================================================
   // MODULAR ROUTES

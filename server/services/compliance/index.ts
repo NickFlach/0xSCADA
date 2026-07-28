@@ -8,6 +8,8 @@
  */
 import { createHash } from 'node:crypto';
 import { EventEmitter } from 'node:events';
+import { readFile, stat } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import { log, logError } from '../../logger';
 
 export type ComplianceFramework = 'IEC-62443' | 'NIST-CSF';
@@ -55,6 +57,11 @@ export interface ControlEvaluation {
   satisfiedEvidenceKeys: readonly string[];
   missingEvidenceKeys: readonly string[];
   failedEvidenceKeys: readonly string[];
+  invalidEvidence: ReadonlyArray<{
+    key: string;
+    expected: ComplianceEvidenceKind;
+    reason: string;
+  }>;
   rationale: string;
   remediation?: string;
   securityLevel?: 1 | 2 | 3 | 4;
@@ -68,8 +75,27 @@ export interface ComplianceGap {
   title: string;
   missingEvidenceKeys: readonly string[];
   failedEvidenceKeys: readonly string[];
+  invalidEvidence: ReadonlyArray<{
+    key: string;
+    expected: ComplianceEvidenceKind;
+    reason: string;
+  }>;
   remediation: string;
 }
+
+export type ComplianceEvidenceKind =
+  | 'true-attestation'
+  | 'positive-number'
+  | 'non-empty-string'
+  | 'non-empty-string-list';
+
+export interface ComplianceEvidenceRequirement {
+  kind: ComplianceEvidenceKind;
+  description: string;
+}
+
+export type ComplianceEvidenceRequirements =
+  Readonly<Record<string, ComplianceEvidenceRequirement>>;
 
 export interface Iec62443Assessment {
   targetSecurityLevel: 1 | 2 | 3 | 4;
@@ -447,10 +473,82 @@ const NIST_CONTROLS: readonly ComplianceControl[] = [
   },
 ] as const;
 
-export const COMPLIANCE_CONTROL_CATALOG: readonly ComplianceControl[] = Object.freeze([
+function frozenControlCatalog(
+  controls: readonly ComplianceControl[],
+): readonly ComplianceControl[] {
+  return Object.freeze(controls.map(control => Object.freeze({
+    ...control,
+    evidenceKeys: Object.freeze([...control.evidenceKeys]),
+    mappedControlIds: Object.freeze([...control.mappedControlIds]),
+  })));
+}
+
+export const COMPLIANCE_CONTROL_CATALOG: readonly ComplianceControl[] = frozenControlCatalog([
   ...IEC_CONTROLS,
   ...NIST_CONTROLS,
 ]);
+
+const TRUE_ATTESTATION = (description: string): ComplianceEvidenceRequirement => Object.freeze({
+  kind: 'true-attestation',
+  description,
+});
+
+function frozenEvidenceRequirements(
+  requirements: ComplianceEvidenceRequirements,
+): ComplianceEvidenceRequirements {
+  return Object.freeze(Object.fromEntries(
+    Object.entries(requirements).map(([key, requirement]) => [
+      key,
+      Object.freeze({ ...requirement }),
+    ]),
+  ));
+}
+
+/**
+ * Evidence is evaluated by key-specific contracts, not generic JavaScript
+ * truthiness. A non-empty value such as "disabled" must never prove a control.
+ */
+export const COMPLIANCE_EVIDENCE_REQUIREMENTS: ComplianceEvidenceRequirements = frozenEvidenceRequirements({
+  'identity.uniqueUsers': TRUE_ATTESTATION('Unique human identities are enforced.'),
+  'identity.serviceAccountsInventoried': TRUE_ATTESTATION('Service accounts have accountable inventory records.'),
+  'access.rbacEnabled': TRUE_ATTESTATION('Role-based authorization is enabled.'),
+  'access.defaultDeny': TRUE_ATTESTATION('Authorization defaults to deny.'),
+  'integrity.signedArtifacts': TRUE_ATTESTATION('Release artifacts have verified signatures.'),
+  'integrity.configurationAudit': TRUE_ATTESTATION('Critical configuration changes are immutably audited.'),
+  'crypto.tlsEnabled': TRUE_ATTESTATION('Authenticated TLS is enforced.'),
+  'crypto.atRestEncryption': TRUE_ATTESTATION('Sensitive persisted data is encrypted.'),
+  'network.zoneInventory': {
+    kind: 'non-empty-string-list',
+    description: 'The assessed zone identifiers.',
+  },
+  'network.defaultDenyPolicy': TRUE_ATTESTATION('Inter-zone traffic defaults to deny.'),
+  'monitoring.securityEvents': TRUE_ATTESTATION('Security-relevant events are centrally monitored.'),
+  'response.onCallOwned': {
+    kind: 'non-empty-string',
+    description: 'The accountable incident-response owner or team identifier.',
+  },
+  'recovery.backupVerified': TRUE_ATTESTATION('A backup restoration has been verified.'),
+  'availability.capacityHeadroom': {
+    kind: 'positive-number',
+    description: 'Measured available capacity headroom percentage.',
+  },
+  'identity.adminMfa': TRUE_ATTESTATION('Administrative access requires MFA.'),
+  'identity.remoteMfa': TRUE_ATTESTATION('Remote access requires MFA.'),
+  'network.policyTested': TRUE_ATTESTATION('Zone-boundary policy tests pass.'),
+  'integrity.dependencyScan': TRUE_ATTESTATION('Dependency scanning completed within policy.'),
+  'integrity.imageScan': TRUE_ATTESTATION('Deployed image scanning completed within policy.'),
+  'crypto.rotationAutomated': TRUE_ATTESTATION('Certificate and key rotation is automated.'),
+  'crypto.revocationTested': TRUE_ATTESTATION('Emergency revocation has been tested.'),
+  'integrity.hardwareBackedKeys': TRUE_ATTESTATION('Critical root keys are hardware-backed and non-exportable.'),
+  'governance.securityOwner': {
+    kind: 'non-empty-string',
+    description: 'The accountable OT security owner identifier.',
+  },
+  'governance.securityPolicyApproved': TRUE_ATTESTATION('The OT security policy is approved and current.'),
+  'assets.inventoryCurrent': TRUE_ATTESTATION('The owned asset inventory is current.'),
+  'response.exerciseCompleted': TRUE_ATTESTATION('An incident-response exercise completed within policy.'),
+  'recovery.exerciseCompleted': TRUE_ATTESTATION('A recovery exercise completed within policy.'),
+});
 
 const NIST_FUNCTIONS = ['Govern', 'Identify', 'Protect', 'Detect', 'Respond', 'Recover'] as const;
 
@@ -469,15 +567,61 @@ function digest(value: unknown): string {
   return createHash('sha256').update(stableJson(value)).digest('hex');
 }
 
-function evidencePasses(value: EvidenceValue): boolean {
-  if (typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Number.isFinite(value) && value > 0;
-  if (typeof value === 'string') return value.trim().length > 0;
-  return value.length > 0;
+const NEGATIVE_STRING_VALUES = new Set([
+  '0',
+  'disabled',
+  'false',
+  'fail',
+  'failed',
+  'no',
+  'none',
+  'n/a',
+  'na',
+  'not-applicable',
+  'not-configured',
+  'off',
+  'unknown',
+  'unassigned',
+]);
+
+function nonEmptyPositiveString(value: string): boolean {
+  const normalized = value.trim().toLowerCase().replace(/\s+/g, '-');
+  return normalized.length > 0 && !NEGATIVE_STRING_VALUES.has(normalized);
+}
+
+function evidenceEvaluation(
+  requirement: ComplianceEvidenceRequirement,
+  value: EvidenceValue,
+): { passed: boolean; reason: string } {
+  if (requirement.kind === 'true-attestation') {
+    return value === true
+      ? { passed: true, reason: 'true attestation supplied' }
+      : { passed: false, reason: 'expected the boolean value true' };
+  }
+  if (requirement.kind === 'positive-number') {
+    return typeof value === 'number' && Number.isFinite(value) && value > 0
+      ? { passed: true, reason: 'positive measurement supplied' }
+      : { passed: false, reason: 'expected a finite number greater than zero' };
+  }
+  if (requirement.kind === 'non-empty-string') {
+    return typeof value === 'string' && nonEmptyPositiveString(value)
+      ? { passed: true, reason: 'owned identifier supplied' }
+      : { passed: false, reason: 'expected a non-empty, non-negative string identifier' };
+  }
+  const valid = Array.isArray(value)
+    && value.length > 0
+    && value.every(item => nonEmptyPositiveString(item));
+  return valid
+    ? { passed: true, reason: 'non-empty inventory supplied' }
+    : { passed: false, reason: 'expected a non-empty list of valid string identifiers' };
 }
 
 function assertIsoDate(value: string, field: string): void {
-  if (!Number.isFinite(Date.parse(value))) throw new Error(`${field} must be an ISO-8601 timestamp`);
+  const timestampWithZone =
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?(?:Z|[+-]\d{2}:\d{2})$/;
+  if (!timestampWithZone.test(value) || !Number.isFinite(Date.parse(value))) {
+    throw new Error(`${field} must be an ISO-8601 timestamp with a timezone`);
+  }
 }
 
 function normalizeFramework(value: string): ComplianceFramework {
@@ -523,19 +667,109 @@ export class ObjectEvidenceCollector implements EvidenceCollector {
   }
 }
 
+function markdownText(value: string): string {
+  return value
+    .replace(/\r?\n/g, ' ')
+    .replace(/\\/g, '\\\\')
+    .replace(/([`*_{}[\]()#|>])/g, '\\$1');
+}
+
+export interface JsonEvidenceDocument {
+  source?: string;
+  collectedAt?: string;
+  evidence: Readonly<Record<string, EvidenceValue>>;
+}
+
+function isEvidenceValue(value: unknown): value is EvidenceValue {
+  return typeof value === 'boolean'
+    || (typeof value === 'number' && Number.isFinite(value))
+    || typeof value === 'string'
+    || (Array.isArray(value) && value.every(item => typeof item === 'string'));
+}
+
+/**
+ * Concrete production collector for a periodically refreshed, read-only
+ * evidence snapshot mounted by deployment automation.
+ */
+export class JsonFileEvidenceCollector implements EvidenceCollector {
+  readonly id: string;
+  readonly filePath: string;
+  private readonly maxBytes: number;
+
+  constructor(filePath: string, options: { id?: string; maxBytes?: number } = {}) {
+    if (!filePath.trim()) throw new Error('evidence file path is required');
+    this.filePath = resolve(filePath);
+    this.id = options.id?.trim() || `json-file:${this.filePath}`;
+    this.maxBytes = options.maxBytes ?? 1_048_576;
+    if (!Number.isInteger(this.maxBytes) || this.maxBytes < 1) {
+      throw new Error('maxBytes must be a positive integer');
+    }
+  }
+
+  async collect(): Promise<readonly ComplianceEvidence[]> {
+    const [contents, metadata] = await Promise.all([
+      readFile(this.filePath),
+      stat(this.filePath),
+    ]);
+    if (contents.byteLength > this.maxBytes) {
+      throw new Error(`evidence file exceeds ${this.maxBytes} bytes`);
+    }
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(contents.toString('utf8'));
+    } catch (error) {
+      throw new Error(`invalid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error('evidence file must contain an object document');
+    }
+    const document = parsed as Partial<JsonEvidenceDocument>;
+    if (document.evidence === null
+      || typeof document.evidence !== 'object'
+      || Array.isArray(document.evidence)) {
+      throw new Error('evidence file must contain an evidence object');
+    }
+    if (document.source !== undefined && typeof document.source !== 'string') {
+      throw new Error('evidence file source must be a string');
+    }
+    if (document.collectedAt !== undefined && typeof document.collectedAt !== 'string') {
+      throw new Error('evidence file collectedAt must be a string');
+    }
+    const source = document.source?.trim() || `file:${this.filePath}`;
+    const collectedAt = document.collectedAt ?? metadata.mtime.toISOString();
+    assertIsoDate(collectedAt, 'evidence file collectedAt');
+    return Object.entries(document.evidence)
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, value]) => {
+        if (!key.trim()) throw new Error('evidence file contains an empty key');
+        if (!isEvidenceValue(value)) {
+          throw new Error(`evidence ${key} has an unsupported value type`);
+        }
+        return { key, value, source, collectedAt };
+      });
+  }
+}
+
 export class ComplianceScanner {
   private readonly catalog: readonly ComplianceControl[];
   private readonly collectors: readonly EvidenceCollector[];
+  private readonly evidenceRequirements: ComplianceEvidenceRequirements;
   private readonly now: () => Date;
 
   constructor(options: {
     catalog?: readonly ComplianceControl[];
     collectors?: readonly EvidenceCollector[];
+    evidenceRequirements?: ComplianceEvidenceRequirements;
     now?: () => Date;
   } = {}) {
-    this.catalog = options.catalog ?? COMPLIANCE_CONTROL_CATALOG;
+    this.catalog = frozenControlCatalog(options.catalog ?? COMPLIANCE_CONTROL_CATALOG);
     this.collectors = options.collectors ?? [];
+    this.evidenceRequirements = frozenEvidenceRequirements({
+      ...COMPLIANCE_EVIDENCE_REQUIREMENTS,
+      ...(options.evidenceRequirements ?? {}),
+    });
     this.now = options.now ?? (() => new Date());
+    if (this.catalog.length === 0) throw new Error('Compliance control catalog cannot be empty');
     const ids = new Set<string>();
     for (const control of this.catalog) {
       if (ids.has(control.id)) throw new Error(`Duplicate compliance control id: ${control.id}`);
@@ -543,13 +777,26 @@ export class ComplianceScanner {
       if (control.evidenceKeys.length === 0) {
         throw new Error(`Compliance control ${control.id} has no evidence requirements`);
       }
+      for (const key of control.evidenceKeys) {
+        if (!Object.hasOwn(this.evidenceRequirements, key)) {
+          throw new Error(`Compliance control ${control.id} has no typed requirement for ${key}`);
+        }
+      }
     }
   }
 
   getControls(framework?: ComplianceFramework): readonly ComplianceControl[] {
     return this.catalog
       .filter(control => framework === undefined || control.framework === framework)
-      .map(control => ({ ...control }));
+      .map(control => ({
+        ...control,
+        evidenceKeys: [...control.evidenceKeys],
+        mappedControlIds: [...control.mappedControlIds],
+      }));
+  }
+
+  getEvidenceRequirements(): ComplianceEvidenceRequirements {
+    return structuredClone(this.evidenceRequirements);
   }
 
   async runScan(
@@ -560,7 +807,8 @@ export class ComplianceScanner {
       ? { frameworks: [normalizeFramework(requestOrFramework)], evidence: suppliedEvidence }
       : requestOrFramework;
     const frameworks: ComplianceFramework[] = [
-      ...new Set<ComplianceFramework>(request.frameworks ?? ['IEC-62443', 'NIST-CSF']),
+      ...new Set((request.frameworks ?? ['IEC-62443', 'NIST-CSF'])
+        .map(framework => normalizeFramework(framework))),
     ];
     if (frameworks.length === 0) throw new Error('At least one compliance framework is required');
     const targetSecurityLevel = request.targetSecurityLevel ?? 2;
@@ -601,6 +849,7 @@ export class ComplianceScanner {
         title: control.title,
         missingEvidenceKeys: control.missingEvidenceKeys,
         failedEvidenceKeys: control.failedEvidenceKeys,
+        invalidEvidence: control.invalidEvidence,
         remediation: control.remediation ?? 'Collect evidence and remediate the failed control.',
       }));
     const passed = controls.filter(control => control.status === 'pass').length;
@@ -635,7 +884,17 @@ export class ComplianceScanner {
   generateAuditReport(scan: ComplianceScanResult, options: AuditReportOptions): ComplianceAuditReport {
     if (!options.organization.trim()) throw new Error('organization is required');
     const generatedAt = this.now().toISOString();
-    const scope = options.scope?.trim() || `${scan.frameworks.join(' and ')} controls`;
+    const allApplicableControls = this.catalog.filter(control =>
+      scan.frameworks.includes(control.framework)
+      && (control.framework !== 'IEC-62443'
+        || control.securityLevel === undefined
+        || control.securityLevel <= scan.targetSecurityLevel));
+    const completeFrameworkScope = allApplicableControls.length === scan.controls.length
+      && allApplicableControls.every(control =>
+        scan.controls.some(evaluation => evaluation.controlId === control.id));
+    const scope = options.scope?.trim() || (completeFrameworkScope
+      ? `${scan.frameworks.join(' and ')} controls`
+      : `Targeted controls: ${scan.controls.map(control => control.controlId).join(', ')}`);
     const executiveSummary = [
       `${options.organization} was assessed against ${scan.frameworks.join(' and ')} catalog version ${scan.catalogVersion}.`,
       `${scan.summary.passed} of ${scan.summary.total} applicable controls passed (${scan.complianceScore}%).`,
@@ -677,6 +936,16 @@ export class ComplianceScanner {
     supplied: readonly ComplianceEvidence[],
   ): Promise<readonly ComplianceEvidence[]> {
     const collected = [...supplied];
+    const collectorIds = new Set<string>();
+    for (const collector of collectors) {
+      if (typeof collector.id !== 'string' || !collector.id.trim()) {
+        throw new Error('evidence collector id is required');
+      }
+      if (collectorIds.has(collector.id)) {
+        throw new Error(`Duplicate evidence collector id: ${collector.id}`);
+      }
+      collectorIds.add(collector.id);
+    }
     for (const item of supplied) {
       if (!item.key.trim()) throw new Error('evidence key is required');
       if (!item.source.trim()) throw new Error(`evidence source is required for ${item.key}`);
@@ -698,10 +967,19 @@ export class ComplianceScanner {
     const deduplicated = new Map<string, ComplianceEvidence>();
     for (const item of collected) {
       if (!item.key.trim()) throw new Error('evidence key is required');
+      if (typeof item.source !== 'string' || !item.source.trim()) {
+        throw new Error(`evidence source is required for ${item.key}`);
+      }
+      if (!isEvidenceValue(item.value)) {
+        throw new Error(`evidence ${item.key} has an unsupported value type`);
+      }
       assertIsoDate(item.collectedAt, `evidence ${item.key}.collectedAt`);
       const previous = deduplicated.get(item.key);
       if (!previous || Date.parse(item.collectedAt) >= Date.parse(previous.collectedAt)) {
-        deduplicated.set(item.key, { ...item });
+        deduplicated.set(item.key, {
+          ...item,
+          value: Array.isArray(item.value) ? [...item.value] : item.value,
+        });
       }
     }
     return [...deduplicated.values()].sort((a, b) => a.key.localeCompare(b.key));
@@ -714,11 +992,27 @@ export class ComplianceScanner {
     const missingEvidenceKeys: string[] = [];
     const failedEvidenceKeys: string[] = [];
     const satisfiedEvidenceKeys: string[] = [];
+    const invalidEvidence: Array<{
+      key: string;
+      expected: ComplianceEvidenceKind;
+      reason: string;
+    }> = [];
     for (const key of control.evidenceKeys) {
       const item = evidence.get(key);
       if (item === undefined) missingEvidenceKeys.push(key);
-      else if (evidencePasses(item.value)) satisfiedEvidenceKeys.push(key);
-      else failedEvidenceKeys.push(key);
+      else {
+        const requirement = this.evidenceRequirements[key];
+        const evaluation = evidenceEvaluation(requirement, item.value);
+        if (evaluation.passed) satisfiedEvidenceKeys.push(key);
+        else {
+          failedEvidenceKeys.push(key);
+          invalidEvidence.push({
+            key,
+            expected: requirement.kind,
+            reason: evaluation.reason,
+          });
+        }
+      }
     }
     const status: ControlStatus = failedEvidenceKeys.length > 0
       ? 'fail'
@@ -741,6 +1035,7 @@ export class ComplianceScanner {
       satisfiedEvidenceKeys,
       missingEvidenceKeys,
       failedEvidenceKeys,
+      invalidEvidence,
       rationale,
       remediation: status === 'pass' ? undefined : control.remediation,
       securityLevel: control.securityLevel,
@@ -752,23 +1047,34 @@ export class ComplianceScanner {
     controls: readonly ControlEvaluation[],
     target: 1 | 2 | 3 | 4,
   ): Iec62443Assessment {
-    const iecControls = controls.filter(control => control.framework === 'IEC-62443');
+    const iecCatalog = this.catalog.filter(control =>
+      control.framework === 'IEC-62443'
+      && (control.securityLevel ?? 1) <= target);
+    const evaluations = new Map(
+      controls
+        .filter(control => control.framework === 'IEC-62443')
+        .map(control => [control.controlId, control]),
+    );
     let achieved: 0 | 1 | 2 | 3 | 4 = 0;
     for (const level of [1, 2, 3, 4] as const) {
       if (level > target) break;
-      const required = iecControls.filter(control => (control.securityLevel ?? 1) <= level);
-      if (required.length > 0 && required.every(control => control.status === 'pass')) achieved = level;
+      const required = iecCatalog.filter(control => (control.securityLevel ?? 1) <= level);
+      if (required.length > 0
+        && required.every(control => evaluations.get(control.id)?.status === 'pass')) {
+        achieved = level;
+      }
       else break;
     }
-    const families = [...new Set(iecControls.map(control => control.family))];
+    const families = [...new Set(iecCatalog.map(control => control.family))];
     return {
       targetSecurityLevel: target,
       achievedSecurityLevel: achieved,
       foundationalRequirements: families.map(family => {
-        const familyControls = iecControls.filter(control => control.family === family);
-        const passed = familyControls.filter(control => control.status === 'pass').length;
-        const hasFailure = familyControls.some(control => control.status === 'fail');
-        const hasUnknown = familyControls.some(control => control.status === 'not-assessed');
+        const familyControls = iecCatalog.filter(control => control.family === family);
+        const statuses = familyControls.map(control => evaluations.get(control.id)?.status);
+        const passed = statuses.filter(status => status === 'pass').length;
+        const hasFailure = statuses.some(status => status === 'fail');
+        const hasUnknown = statuses.some(status => status === undefined || status === 'not-assessed');
         return {
           family,
           passed,
@@ -780,12 +1086,18 @@ export class ComplianceScanner {
   }
 
   private buildNistMapping(controls: readonly ControlEvaluation[]): NistCsfMapping {
-    const nist = controls.filter(control => control.framework === 'NIST-CSF');
+    const nistCatalog = this.catalog.filter(control => control.framework === 'NIST-CSF');
+    const evaluations = new Map(
+      controls
+        .filter(control => control.framework === 'NIST-CSF')
+        .map(control => [control.controlId, control]),
+    );
     return {
       functions: NIST_FUNCTIONS.map(name => {
-        const functionControls = nist.filter(control => control.family === name);
-        const passed = functionControls.filter(control => control.status === 'pass').length;
-        const assessed = functionControls.filter(control => control.status !== 'not-assessed').length;
+        const functionControls = nistCatalog.filter(control => control.family === name);
+        const statuses = functionControls.map(control => evaluations.get(control.id)?.status);
+        const passed = statuses.filter(status => status === 'pass').length;
+        const assessed = statuses.filter(status => status !== undefined && status !== 'not-assessed').length;
         return {
           function: name,
           passed,
@@ -806,18 +1118,25 @@ export class ComplianceScanner {
     const gapRows = report.gaps.length === 0
       ? '| — | — | — | No gaps identified |'
       : report.gaps
-        .map(gap => `| ${gap.controlId} | ${gap.severity} | ${gap.status} | ${gap.remediation} |`)
+        .map(gap => `| ${markdownText(gap.controlId)} | ${gap.severity} | ${gap.status} | ${
+          markdownText(gap.remediation)
+        } |`)
         .join('\n');
     const evidenceRows = report.evidenceManifest.length === 0
       ? '| — | — | — |'
       : report.evidenceManifest
-        .map(item => `| ${item.key} | ${item.source} | ${item.collectedAt} |`)
+        .map(item => `| ${markdownText(item.key)} | ${markdownText(item.source)} | ${
+          markdownText(item.collectedAt)
+        } |`)
         .join('\n');
     return [
-      `# ${report.title}`,
+      `# ${markdownText(report.title)}`,
       '',
       `- **Report ID:** ${reportId}`,
-      `- **Organization:** ${report.organization}`,
+      `- **Organization:** ${markdownText(report.organization)}`,
+      ...(report.auditor === undefined
+        ? []
+        : [`- **Auditor:** ${markdownText(report.auditor)}`]),
       `- **Generated:** ${report.generatedAt}`,
       `- **Catalog:** ${report.catalogVersion}`,
       `- **Scan:** ${report.scanId}`,
@@ -826,11 +1145,11 @@ export class ComplianceScanner {
       '',
       '## Executive summary',
       '',
-      report.executiveSummary,
+      markdownText(report.executiveSummary),
       '',
       '## Scope',
       '',
-      report.scope,
+      markdownText(report.scope),
       '',
       '## Gap analysis',
       '',
@@ -858,12 +1177,15 @@ export class ComplianceService extends EventEmitter {
   private readonly scanner: ComplianceScanner;
   private readonly maxHistory: number;
   private readonly scanHistory = new Map<string, ComplianceScanResult>();
+  private readonly collectors = new Map<string, EvidenceCollector>();
   private initialized = false;
   private checkTimer?: NodeJS.Timeout;
+  private recurringScanIntervalMs?: number;
 
   constructor(options: {
     scanner?: ComplianceScanner;
     maxHistory?: number;
+    collectors?: readonly EvidenceCollector[];
   } = {}) {
     super();
     this.scanner = options.scanner ?? new ComplianceScanner();
@@ -871,13 +1193,21 @@ export class ComplianceService extends EventEmitter {
     if (!Number.isInteger(this.maxHistory) || this.maxHistory < 1) {
       throw new Error('maxHistory must be a positive integer');
     }
+    for (const collector of options.collectors ?? []) this.registerCollector(collector);
   }
 
   async initialize(): Promise<void> {
     if (this.initialized) return;
     this.initialized = true;
+    const evidenceFile = process.env.COMPLIANCE_EVIDENCE_FILE?.trim();
+    if (evidenceFile && !this.collectors.has('deployment-evidence-file')) {
+      this.registerCollector(new JsonFileEvidenceCollector(evidenceFile, {
+        id: 'deployment-evidence-file',
+      }));
+    }
     const configuredInterval = Number(process.env.COMPLIANCE_SCAN_INTERVAL_MS ?? 0);
     if (Number.isFinite(configuredInterval) && configuredInterval >= 60_000) {
+      this.recurringScanIntervalMs = configuredInterval;
       this.checkTimer = setInterval(() => {
         this.scan({}).catch(error => logError(error, 'Periodic compliance scan failed'));
       }, configuredInterval);
@@ -890,22 +1220,47 @@ export class ComplianceService extends EventEmitter {
   shutdown(): void {
     if (this.checkTimer !== undefined) clearInterval(this.checkTimer);
     this.checkTimer = undefined;
+    this.recurringScanIntervalMs = undefined;
     this.initialized = false;
+  }
+
+  registerCollector(collector: EvidenceCollector): () => void {
+    if (!collector.id.trim()) throw new Error('collector id is required');
+    if (this.collectors.has(collector.id)) {
+      throw new Error(`Duplicate evidence collector id: ${collector.id}`);
+    }
+    this.collectors.set(collector.id, collector);
+    return () => {
+      this.collectors.delete(collector.id);
+    };
+  }
+
+  getCollectors(): readonly string[] {
+    return [...this.collectors.keys()].sort();
   }
 
   async scan(request: ComplianceScanRequest = {}): Promise<ComplianceScanResult> {
     if (!this.initialized) await this.initialize();
-    const result = await this.scanner.runScan(request);
-    this.scanHistory.delete(result.scanId);
-    this.scanHistory.set(result.scanId, result);
+    const result = await this.scanner.runScan({
+      ...request,
+      collectors: [
+        ...this.collectors.values(),
+        ...(request.collectors ?? []),
+      ],
+    });
+    const storedResult = structuredClone(result);
+    this.scanHistory.delete(storedResult.scanId);
+    this.scanHistory.set(storedResult.scanId, storedResult);
     while (this.scanHistory.size > this.maxHistory) {
       const oldest = this.scanHistory.keys().next().value as string | undefined;
       if (oldest === undefined) break;
       this.scanHistory.delete(oldest);
     }
-    this.emit('compliance-checked', result);
-    if (result.gaps.length > 0) this.emit('violation-detected', result.gaps);
-    return result;
+    this.emit('compliance-checked', structuredClone(storedResult));
+    if (storedResult.gaps.length > 0) {
+      this.emit('violation-detected', structuredClone(storedResult.gaps));
+    }
+    return structuredClone(storedResult);
   }
 
   async checkCompliance(evidence: readonly ComplianceEvidence[] = []): Promise<{
@@ -925,13 +1280,18 @@ export class ComplianceService extends EventEmitter {
     return this.scanner.getControls(framework);
   }
 
+  getEvidenceRequirements(): ComplianceEvidenceRequirements {
+    return this.scanner.getEvidenceRequirements();
+  }
+
   getScan(scanId: string): ComplianceScanResult | undefined {
-    return this.scanHistory.get(scanId);
+    const scan = this.scanHistory.get(scanId);
+    return scan === undefined ? undefined : structuredClone(scan);
   }
 
   getScans(limit = 20): readonly ComplianceScanResult[] {
     if (!Number.isInteger(limit) || limit < 1) throw new Error('limit must be a positive integer');
-    return [...this.scanHistory.values()].slice(-limit).reverse();
+    return structuredClone([...this.scanHistory.values()].slice(-limit).reverse());
   }
 
   generateAuditReport(scanId: string, options: AuditReportOptions): ComplianceAuditReport {
@@ -944,6 +1304,8 @@ export class ComplianceService extends EventEmitter {
     initialized: boolean;
     catalogVersion: string;
     totalRules: number;
+    collectors: readonly string[];
+    recurringScanIntervalMs?: number;
     completedScans: number;
     lastCheck?: Date;
   } {
@@ -952,6 +1314,8 @@ export class ComplianceService extends EventEmitter {
       initialized: this.initialized,
       catalogVersion: COMPLIANCE_CATALOG_VERSION,
       totalRules: this.scanner.getControls().length,
+      collectors: this.getCollectors(),
+      recurringScanIntervalMs: this.recurringScanIntervalMs,
       completedScans: this.scanHistory.size,
       lastCheck: latest === undefined ? undefined : new Date(latest.completedAt),
     };

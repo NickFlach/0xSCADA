@@ -22,14 +22,38 @@ Each artifact has:
 ```
 
 - `key` is one of the control-catalog evidence keys.
-- `value` is boolean, positive number, non-empty string, or non-empty string
-  list. False, zero, an empty string, or an empty list is negative evidence.
+- `value` must satisfy the key-specific contract returned as
+  `evidenceRequirements` by `GET /api/governance/compliance/rules`. Boolean
+  controls require the literal value `true`; a non-empty string such as
+  `"disabled"` is never treated as a passing attestation. Owner keys require a
+  non-negative identifier, `availability.capacityHeadroom` requires a positive
+  number, and `network.zoneInventory` requires a non-empty string list.
 - `source` identifies a reproducible export, query, or immutable artifact.
 - `collectedAt` is ISO-8601. When duplicate keys exist, the newest observation
   wins.
 
 Collectors implement `EvidenceCollector`. A collector failure fails the scan;
 the toolkit does not silently continue with a partial source.
+
+Production deployments can inject collectors through
+`registerRoutes(..., { complianceCollectors: [...] })`. A concrete
+`JsonFileEvidenceCollector` is included for evidence snapshots mounted by
+deployment automation. Set `COMPLIANCE_EVIDENCE_FILE` to register that
+collector automatically at boot. The document shape is:
+
+```json
+{
+  "source": "cluster-policy-export/sha256:…",
+  "collectedAt": "2026-07-28T12:00:00.000Z",
+  "evidence": {
+    "access.rbacEnabled": true,
+    "network.zoneInventory": ["operations", "safety"]
+  }
+}
+```
+
+The file is re-read for every scan, is capped at 1 MiB by default, and invalid
+JSON or unsupported values fail the scan.
 
 ## Run a scan
 
@@ -55,8 +79,9 @@ Content-Type: application/json
 A `targeted` scan must supply `controlIds` (the legacy `rules` field is also
 accepted). Server-managed recurring scans are enabled with
 `COMPLIANCE_SCAN_INTERVAL_MS`; values below 60 seconds are ignored for safety.
-The API rejects `schedule: true` so it cannot pretend an in-memory request was
-durably scheduled.
+Collectors and the recurring timer start while server routes are registered,
+not after the first scan request. The API rejects `schedule: true` so it cannot
+pretend an in-memory request was durably scheduled.
 
 Interpretation:
 

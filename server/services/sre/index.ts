@@ -7,6 +7,8 @@
  * shell commands or cloud credentials in the service.
  */
 import { createHash } from 'node:crypto';
+import { mkdir, open } from 'node:fs/promises';
+import { dirname, resolve } from 'node:path';
 
 export type SloStatus = 'healthy' | 'warning' | 'breached' | 'no-data';
 
@@ -188,13 +190,17 @@ export class SloRegistry {
     const byId = new Map<string, SloDefinition>();
     for (const definition of definitions) {
       if (byId.has(definition.id)) throw new Error(`Duplicate SLO id: ${definition.id}`);
-      if (definition.objective <= 0 || definition.objective >= 1) {
+      if (!Number.isFinite(definition.objective)
+        || definition.objective <= 0
+        || definition.objective >= 1) {
         throw new Error(`SLO ${definition.id} objective must be between 0 and 1`);
       }
       if (!Number.isFinite(definition.windowDays) || definition.windowDays <= 0) {
         throw new Error(`SLO ${definition.id} windowDays must be positive`);
       }
-      if (definition.warningBurnRate <= 0
+      if (!Number.isFinite(definition.warningBurnRate)
+        || !Number.isFinite(definition.criticalBurnRate)
+        || definition.warningBurnRate <= 0
         || definition.criticalBurnRate <= definition.warningBurnRate) {
         throw new Error(`SLO ${definition.id} burn-rate thresholds are invalid`);
       }
@@ -227,14 +233,18 @@ export class SloRegistry {
       if (!Number.isFinite(timestamp)) {
         throw new Error(`Observation timestamp is invalid: ${observation.timestamp}`);
       }
-      if (!Number.isInteger(observation.goodEvents)
-        || !Number.isInteger(observation.totalEvents)
+      if (!Number.isSafeInteger(observation.goodEvents)
+        || !Number.isSafeInteger(observation.totalEvents)
         || observation.goodEvents < 0
         || observation.totalEvents < 0
         || observation.goodEvents > observation.totalEvents) {
         throw new Error('Observation event counts must be non-negative integers with good <= total');
       }
       if (timestamp >= windowStartDate.getTime() && timestamp <= windowEndDate.getTime()) {
+        if (!Number.isSafeInteger(goodEvents + observation.goodEvents)
+          || !Number.isSafeInteger(totalEvents + observation.totalEvents)) {
+          throw new Error('Aggregated observation counters exceed the safe integer range');
+        }
         goodEvents += observation.goodEvents;
         totalEvents += observation.totalEvents;
       }
@@ -262,9 +272,12 @@ export class SloRegistry {
     const burnRate = allowedBadEvents === 0 ? 0 : badEvents / allowedBadEvents;
     const errorBudgetConsumed = Math.max(0, burnRate);
     const roundedBurnRate = Number(burnRate.toFixed(4));
-    const status: SloStatus = roundedBurnRate >= definition.criticalBurnRate
+    const reaches = (threshold: number): boolean =>
+      burnRate + Number.EPSILON * 8 * Math.max(1, Math.abs(burnRate), Math.abs(threshold))
+        >= threshold;
+    const status: SloStatus = reaches(definition.criticalBurnRate)
       ? 'breached'
-      : roundedBurnRate >= definition.warningBurnRate
+      : reaches(definition.warningBurnRate)
         ? 'warning'
         : 'healthy';
     return {
@@ -331,6 +344,8 @@ export interface RemediationResult {
   executionId: string;
   actionId: string;
   idempotencyKey: string;
+  /** Trusted caller identity supplied by the authenticated composition layer. */
+  approvedBy?: string;
   status: RemediationStatus;
   risk: RemediationRisk;
   dryRun: boolean;
@@ -350,6 +365,7 @@ export interface RemediationPolicy {
   cooldownMs?: number;
   maxExecutionsPerHour?: number;
   maxAuditEntries?: number;
+  maxCachedExecutions?: number;
 }
 
 interface CachedExecution {
@@ -385,6 +401,7 @@ export class AutoRemediationEngine {
   private readonly cooldownMs: number;
   private readonly maxExecutionsPerHour: number;
   private readonly maxAuditEntries: number;
+  private readonly maxCachedExecutions: number;
   private readonly now: () => Date;
   private readonly cached = new Map<string, CachedExecution>();
   private readonly inFlight = new Map<string, { fingerprint: string; promise: Promise<RemediationResult> }>();
@@ -404,6 +421,7 @@ export class AutoRemediationEngine {
     this.cooldownMs = policy.cooldownMs ?? 5 * 60 * 1000;
     this.maxExecutionsPerHour = policy.maxExecutionsPerHour ?? 20;
     this.maxAuditEntries = policy.maxAuditEntries ?? 1_000;
+    this.maxCachedExecutions = policy.maxCachedExecutions ?? 10_000;
     this.now = options.now ?? (() => new Date());
     if (!Number.isFinite(this.cooldownMs) || this.cooldownMs < 0) {
       throw new Error('cooldownMs must be non-negative');
@@ -413,6 +431,9 @@ export class AutoRemediationEngine {
     }
     if (!Number.isInteger(this.maxAuditEntries) || this.maxAuditEntries < 1) {
       throw new Error('maxAuditEntries must be a positive integer');
+    }
+    if (!Number.isInteger(this.maxCachedExecutions) || this.maxCachedExecutions < 1) {
+      throw new Error('maxCachedExecutions must be a positive integer');
     }
     for (const action of actions) this.register(action);
   }
@@ -438,11 +459,18 @@ export class AutoRemediationEngine {
     }
     const action = this.actions.get(request.actionId) as RemediationAction<Context> | undefined;
     if (action === undefined) throw new Error(`Unknown remediation action: ${request.actionId}`);
+    let context: Context;
+    try {
+      context = structuredClone(request.context);
+    } catch {
+      throw new Error('remediation context must be structured-cloneable data');
+    }
+    const normalizedRequest: RemediationRequest<Context> = { ...request, context };
     const fingerprint = hash({
-      actionId: request.actionId,
-      context: request.context,
-      dryRun: request.dryRun ?? false,
-      approvedBy: request.approvedBy ?? null,
+      actionId: normalizedRequest.actionId,
+      context: normalizedRequest.context,
+      dryRun: normalizedRequest.dryRun ?? false,
+      approvedBy: normalizedRequest.approvedBy ?? null,
     });
     const prior = this.cached.get(request.idempotencyKey);
     if (prior !== undefined) {
@@ -459,12 +487,19 @@ export class AutoRemediationEngine {
       return { ...(await running.promise), reused: true };
     }
 
-    const promise = this.executeOnce(action, request);
+    const promise = this.executeOnce(action, normalizedRequest);
     this.inFlight.set(request.idempotencyKey, { fingerprint, promise });
     try {
       const result = await promise;
-      this.cached.set(request.idempotencyKey, { fingerprint, result });
-      return result;
+      const cachedResult = structuredClone(result);
+      this.cached.delete(request.idempotencyKey);
+      this.cached.set(request.idempotencyKey, { fingerprint, result: cachedResult });
+      while (this.cached.size > this.maxCachedExecutions) {
+        const oldest = this.cached.keys().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.cached.delete(oldest);
+      }
+      return structuredClone(cachedResult);
     } finally {
       this.inFlight.delete(request.idempotencyKey);
     }
@@ -488,6 +523,7 @@ export class AutoRemediationEngine {
         executionId,
         actionId: action.id,
         idempotencyKey: request.idempotencyKey,
+        approvedBy: request.approvedBy?.trim() || undefined,
         risk: action.risk,
         dryRun: request.dryRun ?? false,
         reused: false,
@@ -560,7 +596,13 @@ export class AutoRemediationEngine {
       });
     }
 
-    const nowMs = started.getTime();
+    // Apply cooldown and rate limits at mutation time. A slow precondition
+    // must not age out its own safety window before execution begins.
+    const nowMs = this.now().getTime();
+    const expiredScopeCutoff = nowMs - this.cooldownMs;
+    for (const [executedScope, timestamp] of this.lastExecutionByScope) {
+      if (timestamp <= expiredScopeCutoff) this.lastExecutionByScope.delete(executedScope);
+    }
     const previousExecution = this.lastExecutionByScope.get(scope);
     if (previousExecution !== undefined && nowMs - previousExecution < this.cooldownMs) {
       return finish({
@@ -706,6 +748,16 @@ export function createGatewayFailoverAction(
       };
     },
     execute: async context => {
+      const current = await adapter.inspect(context.gatewayId);
+      if (current.healthy || current.affectedShardCount === 0) {
+        return {
+          changed: false,
+          message: `Gateway ${context.gatewayId} no longer requires failover`,
+        };
+      }
+      if (current.activeGatewayCount < 2) {
+        throw new Error('Failover aborted: healthy peer capacity disappeared after precondition');
+      }
       const result = await adapter.failover(context.gatewayId);
       return {
         changed: true,
@@ -762,6 +814,12 @@ export function createScaleOutAction(adapter: ScaleOutAdapter): RemediationActio
     },
     execute: async context => {
       const previousReplicas = await adapter.currentReplicas(context.component);
+      if (context.desiredReplicas <= previousReplicas) {
+        return {
+          changed: false,
+          message: `${context.component} already has ${previousReplicas} replicas; scale-down is forbidden`,
+        };
+      }
       await adapter.setReplicas(context.component, context.desiredReplicas);
       return {
         changed: true,
@@ -778,4 +836,116 @@ export function createScaleOutAction(adapter: ScaleOutAdapter): RemediationActio
   };
 }
 
+export interface RemediationAuditSink {
+  append(result: RemediationResult): Promise<void>;
+}
+
+/** Durable append-only JSONL audit sink suitable for a mounted persistent volume. */
+export class JsonlRemediationAuditSink implements RemediationAuditSink {
+  readonly filePath: string;
+
+  constructor(filePath: string) {
+    if (!filePath.trim()) throw new Error('remediation audit file path is required');
+    this.filePath = resolve(filePath);
+  }
+
+  async append(result: RemediationResult): Promise<void> {
+    await mkdir(dirname(this.filePath), { recursive: true });
+    const file = await open(this.filePath, 'a', 0o600);
+    try {
+      await file.writeFile(`${JSON.stringify(result)}\n`, 'utf8');
+      await file.sync();
+    } finally {
+      await file.close();
+    }
+  }
+}
+
+export interface RemediationRuntimeConfiguration {
+  gatewayFailover?: GatewayFailoverAdapter;
+  scaleOut?: ScaleOutAdapter;
+  auditSink: RemediationAuditSink;
+  policy?: RemediationPolicy;
+}
+
+export class RemediationRuntimeUnavailableError extends Error {
+  constructor() {
+    super('SRE remediation runtime is not configured with deployment adapters and a durable audit sink');
+    this.name = 'RemediationRuntimeUnavailableError';
+  }
+}
+
+export class RemediationAuditPersistenceError extends Error {
+  readonly result: RemediationResult;
+
+  constructor(result: RemediationResult, cause: unknown) {
+    super(`Remediation result could not be durably audited: ${
+      cause instanceof Error ? cause.message : String(cause)
+    }`);
+    this.name = 'RemediationAuditPersistenceError';
+    this.result = structuredClone(result);
+  }
+}
+
+/**
+ * Production composition boundary. The server exposes only the two bounded
+ * actions created here, and remains fail-closed until the deployment injects
+ * real gateway/scaler adapters plus a durable audit sink.
+ */
+export class RemediationRuntime {
+  private engine?: AutoRemediationEngine;
+  private auditSink?: RemediationAuditSink;
+  private persistenceTail: Promise<void> = Promise.resolve();
+
+  configure(configuration: RemediationRuntimeConfiguration): void {
+    if (this.engine !== undefined) throw new Error('SRE remediation runtime is already configured');
+    const actions: RemediationAction<unknown>[] = [];
+    if (configuration.gatewayFailover !== undefined) {
+      actions.push(createGatewayFailoverAction(configuration.gatewayFailover) as RemediationAction<unknown>);
+    }
+    if (configuration.scaleOut !== undefined) {
+      actions.push(createScaleOutAction(configuration.scaleOut) as RemediationAction<unknown>);
+    }
+    if (actions.length === 0) {
+      throw new Error('At least one remediation deployment adapter is required');
+    }
+    this.auditSink = configuration.auditSink;
+    this.engine = new AutoRemediationEngine(actions, {
+      ...configuration.policy,
+      allowedActionIds: configuration.policy?.allowedActionIds ?? actions.map(action => action.id),
+    });
+  }
+
+  status(): {
+    configured: boolean;
+    actions: ReadonlyArray<Pick<RemediationAction, 'id' | 'description' | 'risk'>>;
+  } {
+    return {
+      configured: this.engine !== undefined,
+      actions: this.engine?.listActions() ?? [],
+    };
+  }
+
+  async execute(request: RemediationRequest<unknown>): Promise<RemediationResult> {
+    if (this.engine === undefined || this.auditSink === undefined) {
+      throw new RemediationRuntimeUnavailableError();
+    }
+    const result = await this.engine.execute(request);
+    const auditCopy = structuredClone(result);
+    const persistence = this.persistenceTail.then(() => this.auditSink!.append(auditCopy));
+    this.persistenceTail = persistence.catch(() => undefined);
+    try {
+      await persistence;
+    } catch (error) {
+      throw new RemediationAuditPersistenceError(result, error);
+    }
+    return result;
+  }
+}
+
 export const sloRegistry = new SloRegistry();
+export const remediationRuntime = new RemediationRuntime();
+
+export function configureRemediationRuntime(configuration: RemediationRuntimeConfiguration): void {
+  remediationRuntime.configure(configuration);
+}

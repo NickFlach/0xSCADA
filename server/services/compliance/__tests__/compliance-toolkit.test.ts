@@ -1,8 +1,13 @@
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   COMPLIANCE_CONTROL_CATALOG,
+  COMPLIANCE_EVIDENCE_REQUIREMENTS,
   ComplianceScanner,
   ComplianceService,
+  JsonFileEvidenceCollector,
   ObjectEvidenceCollector,
   type ComplianceEvidence,
   type EvidenceCollector,
@@ -11,11 +16,19 @@ import {
 const FIXED_DATE = new Date('2026-07-28T12:00:00.000Z');
 const now = () => new Date(FIXED_DATE);
 
-function evidenceForAll(value: boolean = true): ComplianceEvidence[] {
+function passingValue(key: string): ComplianceEvidence['value'] {
+  const requirement = COMPLIANCE_EVIDENCE_REQUIREMENTS[key];
+  if (requirement.kind === 'positive-number') return 30;
+  if (requirement.kind === 'non-empty-string') return 'security-operations';
+  if (requirement.kind === 'non-empty-string-list') return ['zone-a', 'zone-b'];
+  return true;
+}
+
+function evidenceForAll(value?: boolean): ComplianceEvidence[] {
   const keys = new Set(COMPLIANCE_CONTROL_CATALOG.flatMap(control => control.evidenceKeys));
   return [...keys].sort().map(key => ({
     key,
-    value,
+    value: value ?? passingValue(key),
     source: 'unit-test',
     collectedAt: FIXED_DATE.toISOString(),
   }));
@@ -121,12 +134,71 @@ describe('ComplianceScanner', () => {
       .rejects.toThrow('Evidence collector broken failed: collector offline');
   });
 
+  it('fails closed on false-like or wrongly typed evidence values', async () => {
+    const scanner = new ComplianceScanner({ now });
+    const scan = await scanner.runScan({
+      frameworks: ['IEC-62443'],
+      targetSecurityLevel: 2,
+      controlIds: ['IEC62443-SL2-IAC-2'],
+      evidence: [
+        {
+          key: 'identity.adminMfa',
+          value: 'disabled',
+          source: 'iam-export',
+          collectedAt: FIXED_DATE.toISOString(),
+        },
+        {
+          key: 'identity.remoteMfa',
+          value: true,
+          source: 'iam-export',
+          collectedAt: FIXED_DATE.toISOString(),
+        },
+      ],
+    });
+
+    expect(scan.status).toBe('non-compliant');
+    expect(scan.controls[0].invalidEvidence).toEqual([{
+      key: 'identity.adminMfa',
+      expected: 'true-attestation',
+      reason: 'expected the boolean value true',
+    }]);
+  });
+
+  it('does not overstate framework coverage for a passing targeted scan', async () => {
+    const scanner = new ComplianceScanner({ now });
+    const iec = await scanner.runScan({
+      frameworks: ['IEC-62443'],
+      targetSecurityLevel: 4,
+      controlIds: ['IEC62443-FR1-IAC-1'],
+      evidence: evidenceForAll(),
+    });
+    expect(iec.status).toBe('compliant');
+    expect(iec.summary.total).toBe(1);
+    expect(iec.iec62443?.achievedSecurityLevel).toBe(0);
+    expect(iec.iec62443?.foundationalRequirements)
+      .toContainEqual(expect.objectContaining({ family: 'FR 2 — Use control', status: 'not-assessed' }));
+    expect(scanner.generateAuditReport(iec, { organization: 'Targeted Test' }).scope)
+      .toBe('Targeted controls: IEC62443-FR1-IAC-1');
+
+    const nist = await scanner.runScan({
+      frameworks: ['NIST-CSF'],
+      controlIds: ['NIST-PR.AA-01'],
+      evidence: evidenceForAll(),
+    });
+    const protect = nist.nistCsf?.functions.find(item => item.function === 'Protect');
+    expect(protect?.passed).toBe(1);
+    expect(protect?.total).toBeGreaterThan(1);
+    expect(protect?.score).toBeLessThan(100);
+  });
+
   it('generates a certification-ready, content-addressed audit report', async () => {
     const scanner = new ComplianceScanner({ now });
+    const evidence = evidenceForAll();
+    evidence[0].source = 'unit-test | forged\n# row';
     const scan = await scanner.runScan({
       frameworks: ['IEC-62443', 'NIST-CSF'],
       targetSecurityLevel: 2,
-      evidence: evidenceForAll(),
+      evidence,
     });
     const report = scanner.generateAuditReport(scan, {
       organization: 'Example Water Utility',
@@ -139,6 +211,9 @@ describe('ComplianceScanner', () => {
     expect(report.markdown).toContain('# IEC-62443 / NIST-CSF Compliance Audit Report');
     expect(report.markdown).toContain('## Evidence manifest');
     expect(report.markdown).toContain('does not replace, certification');
+    expect(report.markdown).toContain('unit-test \\| forged \\# row');
+    expect(report.markdown).not.toContain('\n# row');
+    expect(report.markdown).toContain('- **Auditor:** Internal Audit');
     expect(report.evidenceManifest.length).toBeGreaterThan(10);
   });
 });
@@ -160,8 +235,67 @@ describe('ComplianceService', () => {
     expect(service.getScans()).toHaveLength(1);
     expect(service.getScan(first.scanId)).toBeUndefined();
     expect(service.getScan(second.scanId)).toBeDefined();
+    second.controls[0].status = 'pass';
+    expect(service.getScan(second.scanId)?.controls[0].status).toBe('fail');
     expect(service.generateAuditReport(second.scanId, { organization: 'Test Org' }).scanId)
       .toBe(second.scanId);
     service.shutdown();
+  });
+
+  it('registers a concrete deployment evidence file and recurring scan at initialization', async () => {
+    const directory = await mkdtemp(join(tmpdir(), '0xscada-compliance-'));
+    const evidenceFile = join(directory, 'evidence.json');
+    const previousFile = process.env.COMPLIANCE_EVIDENCE_FILE;
+    const previousInterval = process.env.COMPLIANCE_SCAN_INTERVAL_MS;
+    await writeFile(evidenceFile, JSON.stringify({
+      source: 'deployment-snapshot',
+      collectedAt: FIXED_DATE.toISOString(),
+      evidence: {
+        'identity.uniqueUsers': true,
+        'identity.serviceAccountsInventoried': true,
+      },
+    }));
+    process.env.COMPLIANCE_EVIDENCE_FILE = evidenceFile;
+    process.env.COMPLIANCE_SCAN_INTERVAL_MS = '60000';
+    const service = new ComplianceService({
+      scanner: new ComplianceScanner({ now }),
+      maxHistory: 2,
+    });
+    try {
+      await service.initialize();
+      expect(service.getStatus()).toMatchObject({
+        initialized: true,
+        collectors: ['deployment-evidence-file'],
+        recurringScanIntervalMs: 60_000,
+      });
+      const scan = await service.scan({
+        frameworks: ['IEC-62443'],
+        targetSecurityLevel: 1,
+        controlIds: ['IEC62443-FR1-IAC-1'],
+      });
+      expect(scan.status).toBe('compliant');
+      expect(scan.evidence.every(item => item.source === 'deployment-snapshot')).toBe(true);
+    } finally {
+      service.shutdown();
+      if (previousFile === undefined) delete process.env.COMPLIANCE_EVIDENCE_FILE;
+      else process.env.COMPLIANCE_EVIDENCE_FILE = previousFile;
+      if (previousInterval === undefined) delete process.env.COMPLIANCE_SCAN_INTERVAL_MS;
+      else process.env.COMPLIANCE_SCAN_INTERVAL_MS = previousInterval;
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects invalid evidence file values instead of coercing them', async () => {
+    const directory = await mkdtemp(join(tmpdir(), '0xscada-compliance-invalid-'));
+    const evidenceFile = join(directory, 'evidence.json');
+    await writeFile(evidenceFile, JSON.stringify({
+      evidence: { 'identity.adminMfa': { enabled: true } },
+    }));
+    try {
+      const collector = new JsonFileEvidenceCollector(evidenceFile);
+      await expect(collector.collect()).rejects.toThrow(/unsupported value type/);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });
