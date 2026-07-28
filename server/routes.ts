@@ -29,6 +29,11 @@ import { marketplaceRoutes } from "./routes/marketplace";
 import { marketplaceService } from "./services/marketplace";
 import { nlQueryService } from "./services/nlquery";
 import { governanceRoutes } from "./routes/governance";
+import { complianceReadinessRoutes } from "./routes/compliance-readiness";
+import {
+  complianceService,
+  type EvidenceCollector,
+} from "./services/compliance";
 import { securityRoutes } from "./routes/security";
 import { geometryRoutes } from "./routes/geometry";
 import {
@@ -50,6 +55,7 @@ import type { WebSocketAuthOptions } from "./websocket/upgrade-auth";
 
 export interface RouteRegistrationOptions {
   websocketAuth?: WebSocketAuthOptions;
+  complianceCollectors?: readonly EvidenceCollector[];
 }
 
 export async function registerRoutes(
@@ -57,6 +63,11 @@ export async function registerRoutes(
   app: Express,
   options: RouteRegistrationOptions = {},
 ): Promise<Server> {
+  for (const collector of options.complianceCollectors ?? []) {
+    complianceService.registerCollector(collector);
+  }
+  // Start registered collectors and recurring scans at process boot.
+  await complianceService.initialize();
 
   // ==========================================================================
   // MODULAR ROUTES
@@ -83,6 +94,9 @@ export async function registerRoutes(
   // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
   app.use("/api/tuning", tuningRoutes);
   app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
+  // Mount before the legacy governance router so real scan results win over
+  // its historical placeholder handlers.
+  app.use("/api/governance", complianceReadinessRoutes);
   app.use("/api/governance", governanceRoutes);
   app.use("/api/security", securityRoutes);
   app.use("/api/geometry", geometryRoutes(getFluxPublisher()));
