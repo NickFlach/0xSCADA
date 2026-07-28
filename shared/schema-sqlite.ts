@@ -435,6 +435,44 @@ export const twinModels = sqliteTable("twin_models", {
     .$defaultFn(() => new Date()),
 });
 
+// ─── Predictive Maintenance Durable State (#212/#493, #546) ──────────────────
+// Dev-mode parity with `shared/schema.ts`. jsonb → text(mode json), timestamptz
+// → integer timestamp_ms, double precision → real, varchar → text. The DDL that
+// creates these tables for SQLite lives in
+// `server/services/predictive/store.ts`; `migrations/0013_predictive_durable_state.sql`
+// is the Postgres source of truth. Kept in sync by
+// `shared/__tests__/schema-parity.test.ts`.
+//
+// Column ORDER matters here: `server/services/predictive/store.ts` reads rows
+// back through drizzle's sqlite-proxy driver, which maps result columns
+// positionally, so the DDL, this declaration and the Postgres table must all
+// list columns in the same order.
+export const predictiveTagThresholds = sqliteTable("predictive_tag_thresholds", {
+  tagId: text("tag_id").primaryKey(),
+  minSamples: integer("min_samples").notNull(),
+  zScoreThreshold: real("z_score_threshold").notNull(),
+  ewmaAlpha: real("ewma_alpha").notNull(),
+  ewmaL: real("ewma_l").notNull(),
+  iqrMultiplier: real("iqr_multiplier").notNull(),
+  ensembleWeights: text("ensemble_weights", { mode: "json" })
+    .$type<Record<string, number>>()
+    .notNull(),
+  severityThresholds: text("severity_thresholds", { mode: "json" })
+    .$type<{ warning: number; critical: number; emergency: number }>()
+    .notNull(),
+  failureLimits: text("failure_limits", { mode: "json" }).$type<{
+    low?: number;
+    high?: number;
+  }>(),
+  updatedBy: text("updated_by").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
 // No `status` column, matching Postgres: a restored simulation is always idle.
 export const twinCheckpoints = sqliteTable("twin_checkpoints", {
   modelId: text("model_id")
@@ -450,6 +488,23 @@ export const twinCheckpoints = sqliteTable("twin_checkpoints", {
   committedAt: integer("committed_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
+});
+
+export const predictiveAlerts = sqliteTable("predictive_alerts", {
+  id: text("id").primaryKey(),
+  tagId: text("tag_id").notNull(),
+  severity: text("severity").notNull(),
+  score: real("score").notNull(),
+  message: text("message").notNull(),
+  detectors: text("detectors", { mode: "json" }).$type<string[]>().notNull(),
+  recommendation: text("recommendation").notNull(),
+  observedAt: integer("observed_at", { mode: "timestamp_ms" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  acknowledged: integer("acknowledged", { mode: "boolean" }).notNull().default(false),
+  acknowledgedBy: text("acknowledged_by"),
+  acknowledgedAt: integer("acknowledged_at", { mode: "timestamp_ms" }),
 });
 
 // Basic exports for compatibility

@@ -75,6 +75,13 @@
     {
       "idx": 10,
       "version": "7",
+      "when": 1784780410000,
+      "tag": "0013_predictive_durable_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
       "when": 1784780411000,
       "tag": "0014_twin_persistence",
       "breakpoints": true

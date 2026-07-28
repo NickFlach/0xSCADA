@@ -12,6 +12,8 @@ import {
   pidTuningAudit as pgPidTuningAudit,
   twinModels as pgTwinModels,
   twinCheckpoints as pgTwinCheckpoints,
+  predictiveTagThresholds as pgPredictiveTagThresholds,
+  predictiveAlerts as pgPredictiveAlerts,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -24,6 +26,8 @@ import {
   pidTuningAudit as sqlitePidTuningAudit,
   twinModels as sqliteTwinModels,
   twinCheckpoints as sqliteTwinCheckpoints,
+  predictiveTagThresholds as sqlitePredictiveTagThresholds,
+  predictiveAlerts as sqlitePredictiveAlerts,
 } from '../schema-sqlite';
 
 /**
@@ -86,6 +90,16 @@ const cases = [
   // one that refuses to come back at all.
   { name: 'twin_models', pg: pgTwinModels, sqlite: sqliteTwinModels },
   { name: 'twin_checkpoints', pg: pgTwinCheckpoints, sqlite: sqliteTwinCheckpoints },
+  // #546: predictive thresholds and alert acknowledgement state. A column
+  // present on only one dialect would mean an operator's configuration — or
+  // the record of who acknowledged an alert — silently vanishing on the other,
+  // which is the exact defect this table was added to fix.
+  {
+    name: 'predictive_tag_thresholds',
+    pg: pgPredictiveTagThresholds,
+    sqlite: sqlitePredictiveTagThresholds,
+  },
+  { name: 'predictive_alerts', pg: pgPredictiveAlerts, sqlite: sqlitePredictiveAlerts },
 ] as const;
 
 describe('schema parity (Postgres vs SQLite dev fallback)', () => {

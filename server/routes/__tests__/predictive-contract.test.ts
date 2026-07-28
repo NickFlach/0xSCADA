@@ -11,17 +11,26 @@
  *
  * Harness pattern copied from twin-auth.test.ts (port-0 express, API_KEYS env,
  * x-api-key header). No new dependencies, no production code changes.
+ *
+ * Since #546 the engine's thresholds and alerts are durable, so the suite
+ * points the store at a throwaway SQLite file: the routes talk to a real
+ * database, and nothing here can touch a developer's `dev-database.sqlite`.
  */
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 
 import { _resetControlPlaneAuthCache } from "../../middleware/control-plane-auth";
 import { predictiveRoutes } from "../predictive";
+import { predictiveStore } from "../../services/predictive/store";
 
 const KEY = "contract-key";
 let server: Server;
 let base: string;
+let temporaryDirectory: string;
 let tagSeq = 0;
 const nextTag = () => `contract-tag-${tagSeq++}`;
 
@@ -60,14 +69,20 @@ beforeAll(async () => {
   // scope enforcement itself is covered elsewhere. Contract tests focus on the
   // request/response contract, not authorization.
   process.env.API_KEYS = `${KEY}:contract-tester:*`;
+  temporaryDirectory = mkdtempSync(join(tmpdir(), "predictive-contract-"));
+  process.env.PREDICTIVE_SQLITE_PATH = join(temporaryDirectory, "predictive.sqlite");
   _resetControlPlaneAuthCache();
   ({ server, base } = await startServer());
 });
 
 afterAll(async () => {
   delete process.env.API_KEYS;
+  delete process.env.PREDICTIVE_SQLITE_PATH;
   _resetControlPlaneAuthCache();
   await new Promise<void>((resolve) => server.close(() => resolve()));
+  // Release the durable-store handle before removing the file it holds open.
+  await predictiveStore.close();
+  rmSync(temporaryDirectory, { recursive: true, force: true });
 });
 
 function series(count: number, at = Date.now()): Array<{ timestamp: number; value: number }> {
@@ -206,6 +221,74 @@ describe("POST /api/predictive/alerts/:alertId/acknowledge", () => {
     expect(status).toBe(404);
     expect(typeof json.error).toBe("string");
   });
+
+  it("attributes the acknowledgement to the authenticated principal (#546)", async () => {
+    const tag = nextTag();
+    await api("POST", "/ingest", { tagId: tag, points: spikeSeries() });
+    const alerts = (await api("GET", `/alerts?tagId=${tag}`)).json.alerts;
+    expect(alerts.length).toBeGreaterThan(0);
+
+    const { status, json } = await api("POST", `/alerts/${alerts[0].id}/acknowledge`);
+    expect(status).toBe(200);
+    expect(json.acknowledged).toBe(true);
+    // "contract-tester" is the NAME on the server-owned API key record, not
+    // anything the caller sent.
+    expect(json.acknowledgedBy).toBe("contract-tester");
+    expect(typeof json.acknowledgedAt).toBe("number");
+
+    const reread = (await api("GET", `/alerts?tagId=${tag}`)).json.alerts[0];
+    expect(reread.acknowledged).toBe(true);
+    expect(reread.acknowledgedBy).toBe("contract-tester");
+  });
+
+  it("returns 409 and preserves the original attribution on a second acknowledgement", async () => {
+    const tag = nextTag();
+    await api("POST", "/ingest", { tagId: tag, points: spikeSeries() });
+    const alertId = (await api("GET", `/alerts?tagId=${tag}`)).json.alerts[0].id;
+    expect((await api("POST", `/alerts/${alertId}/acknowledge`)).status).toBe(200);
+
+    const { status, json } = await api("POST", `/alerts/${alertId}/acknowledge`);
+    expect(status).toBe(409);
+    expect(json.acknowledgedBy).toBe("contract-tester");
+  });
+
+  it("rejects a caller-supplied acknowledging identity with 400 (#546)", async () => {
+    const tag = nextTag();
+    await api("POST", "/ingest", { tagId: tag, points: spikeSeries() });
+    const alertId = (await api("GET", `/alerts?tagId=${tag}`)).json.alerts[0].id;
+
+    const { status, json } = await api("POST", `/alerts/${alertId}/acknowledge`, {
+      acknowledgedBy: "somebody-else",
+    });
+    // Spoofed attribution fails loudly rather than being silently ignored.
+    expect(status).toBe(400);
+    expect(json.error).toContain("authenticated principal");
+
+    const alert = (await api("GET", `/alerts?tagId=${tag}`)).json.alerts[0];
+    expect(alert.acknowledged).toBe(false);
+    expect(alert.acknowledgedBy).toBeNull();
+  });
+});
+
+describe("PUT /api/predictive/thresholds/:tagId attribution (#546)", () => {
+  it("rejects a caller-supplied updatedBy with 400", async () => {
+    const tag = nextTag();
+    const { status } = await api("PUT", `/thresholds/${tag}`, {
+      minSamples: 5,
+      updatedBy: "somebody-else",
+    });
+    expect(status).toBe(400);
+  });
+
+  it("records the authenticated principal on GET /configured-tags", async () => {
+    const tag = nextTag();
+    expect((await api("PUT", `/thresholds/${tag}`, { minSamples: 5 })).status).toBe(200);
+    const { status, json } = await api("GET", "/configured-tags");
+    expect(status).toBe(200);
+    const entry = json.tags.find((t: { tagId: string }) => t.tagId === tag);
+    expect(entry.updatedBy).toBe("contract-tester");
+    expect(typeof entry.updatedAt).toBe("string");
+  });
 });
 
 describe("GET /api/predictive/status", () => {
@@ -215,5 +298,14 @@ describe("GET /api/predictive/status", () => {
     expect(typeof json.trackedTags).toBe("number");
     expect(typeof json.totalAlerts).toBe("number");
     expect(Array.isArray(json.detectors)).toBe(true);
+  });
+
+  it("reports the durable backend and hydration state (#546)", async () => {
+    const { json } = await api("GET", "/status");
+    expect(json.durable).toBe(true);
+    expect(json.storeBackend).toBe("sqlite");
+    expect(json.lastStoreError).toBeNull();
+    expect(typeof json.configuredTags).toBe("number");
+    expect(typeof json.activeAlerts).toBe("number");
   });
 });

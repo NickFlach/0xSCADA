@@ -91,14 +91,45 @@ export interface MaintenancePrediction {
 }
 
 export interface PredictiveAlert {
+  /**
+   * Content-derived, restart-stable identity (#546). Derived from
+   * tag + severity + the cooldown window the alert was raised in, so the same
+   * anomaly seen by a restarted process — or by a second replica — resolves to
+   * the same durable row instead of a new one.
+   */
   id: string;
   tagId: string;
   severity: SeverityLevel;
   score: number;
   message: string;
+  /** Timestamp of the observation that triggered the alert (data clock) */
   timestamp: number;
   detectors: string[];
   acknowledged: boolean;
   recommendation: string;
   prediction?: MaintenancePrediction | null;
+  /** Wall-clock time the alert was durably recorded. Retention/order key. */
+  createdAt: number;
+  /**
+   * Authenticated control-plane principal that acknowledged the alert.
+   * Never taken from a request body — see `server/routes/predictive.ts`.
+   */
+  acknowledgedBy: string | null;
+  acknowledgedAt: number | null;
+}
+
+/** What `hydrate()` actually loaded from the durable store at startup (#546). */
+export interface PredictiveHydrationSummary {
+  backend: 'postgres' | 'sqlite' | 'unopened';
+  configuredTags: number;
+  totalAlerts: number;
+  unacknowledgedAlerts: number;
+}
+
+/** Outcome of a durable acknowledgement attempt (#546). */
+export type AcknowledgeStatus = 'acknowledged' | 'already-acknowledged' | 'not-found';
+
+export interface AcknowledgeOutcome {
+  status: AcknowledgeStatus;
+  alert: PredictiveAlert | null;
 }
