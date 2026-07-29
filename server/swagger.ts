@@ -10,13 +10,27 @@
 import { Router } from "express";
 import { readFileSync, existsSync } from "fs";
 import { join } from "path";
+import { rateLimit as expressRateLimit } from "express-rate-limit";
 import { rateLimitMiddleware } from "./middleware/api-gateway";
 
 export const swaggerRouter = Router();
 
-// Rate limit for documentation endpoints (generous limit for static content)
+// Rate limit for documentation endpoints (generous limit for static content).
+//
+// Paired for the reason documented on the `/api/` limiters in
+// `middleware/api-gateway.ts`: `rateLimitMiddleware` is the real, optionally
+// Redis-backed one but is invisible to static analysis; `express-rate-limit` is
+// modelled by CodeQL and, being per-process, can only be stricter.
 const docsRateLimit = rateLimitMiddleware({ windowMs: 60_000, maxRequests: 100 });
 swaggerRouter.use(docsRateLimit);
+swaggerRouter.use(
+  expressRateLimit({
+    windowMs: 60_000,
+    limit: 100,
+    standardHeaders: false,
+    legacyHeaders: false,
+  }),
+);
 
 // Get the path to the OpenAPI spec
 function getSpecPath(): string {
