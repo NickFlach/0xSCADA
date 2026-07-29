@@ -123,3 +123,62 @@ export interface RollbackSimulationResult {
   restoredValues: ScenarioModification[];
   result: SimulationResult;
 }
+
+// ── Durable persistence (#550) ─────────────────────────────────────────────
+//
+// Model definitions and simulation checkpoints outlive the process. Every
+// stored row carries the schema version it was written with, so a build that
+// does not understand a row refuses it instead of guessing at its shape.
+
+/**
+ * Version of the stored `ProcessModel` definition payload.
+ *
+ * There is exactly one version today. It exists so the loader can *refuse*
+ * a row it does not understand rather than mis-parse it: bump this constant
+ * (and add the corresponding decode branch) whenever the persisted shape
+ * changes incompatibly. Rows carrying any other version fail closed.
+ */
+export const TWIN_MODEL_SCHEMA_VERSION = 1;
+
+/** Version of the stored simulation-checkpoint payload. See above. */
+export const TWIN_CHECKPOINT_SCHEMA_VERSION = 1;
+
+/**
+ * A bounded, explicitly committed snapshot of one model's simulation state.
+ *
+ * Deliberately does NOT include `status`: a restored simulation always comes
+ * back idle. Persisting "running" would let a restart resume stepping without
+ * an authorized caller asking for it, and the digital twin's stopped state is
+ * the safe state (ADR-0009 — the twin is the sandbox, not the actuator).
+ */
+export interface TwinCheckpoint {
+  modelId: string;
+  schemaVersion: number;
+  tick: number;
+  timeMs: number;
+  componentStates: Record<string, Record<string, number>>;
+  /** Epoch ms of the last live-data assimilation captured by this checkpoint */
+  lastSyncAt?: number;
+  /** Epoch ms at which this checkpoint was committed to storage */
+  committedAt: number;
+}
+
+/** Why one persisted model was refused at load time. */
+export interface TwinRestoreFailure {
+  modelId: string;
+  /** Which stored artefact was rejected */
+  stage: 'model' | 'checkpoint';
+  reason: string;
+}
+
+/**
+ * Outcome of one restore pass. `failed` entries are left untouched in storage
+ * for operator inspection — nothing is repaired or invented on their behalf.
+ */
+export interface TwinRestoreReport {
+  /** Model rows examined */
+  scanned: number;
+  /** Ids registered into the runtime, all idle */
+  restored: string[];
+  failed: TwinRestoreFailure[];
+}

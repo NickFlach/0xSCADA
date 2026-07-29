@@ -3,6 +3,7 @@ import ora from "ora";
 import fs from "fs";
 import path from "path";
 import yaml from "js-yaml";
+import { resolveWithinDirectory, safeFileName } from "../lib/safe-path.js";
 import { getApiClient } from "../api.js";
 import {
   output,
@@ -541,10 +542,17 @@ export function registerBlueprintsCommand(program: Command): void {
           return;
         }
 
-        // Determine output file
+        // Determine output file.
+        //
+        // `--output` is the operator's own choice and is honoured as given. The
+        // DEFAULT is named after `blueprint.name`, which came from the server —
+        // so it is reduced to a single inert segment first. `path.resolve` on a
+        // raw `../../.ssh/authorized_keys` would otherwise leave the working
+        // directory entirely.
         const ext = options.format === "json" ? ".json" : ".yaml";
-        const outputFile = options.output || `${blueprint.name}${ext}`;
-        const outputPath = path.resolve(outputFile);
+        const outputPath = options.output
+          ? path.resolve(options.output)
+          : path.resolve(`${safeFileName(blueprint.name, "blueprint")}${ext}`);
 
         // Format and write
         let content: string;
@@ -601,7 +609,7 @@ export function registerBlueprintsCommand(program: Command): void {
             if (!fs.existsSync(cmDir)) fs.mkdirSync(cmDir, { recursive: true });
 
             for (const cm of cmResponse.data) {
-              const filePath = path.join(cmDir, `${cm.name}${ext}`);
+              const filePath = resolveWithinDirectory(cmDir, `${safeFileName(cm.name, "cm-type")}${ext}`);
               const content = options.format === "json"
                 ? JSON.stringify(cm, null, 2)
                 : yaml.dump(cm, { indent: 2 });
@@ -619,7 +627,7 @@ export function registerBlueprintsCommand(program: Command): void {
             if (!fs.existsSync(unitDir)) fs.mkdirSync(unitDir, { recursive: true });
 
             for (const unit of unitResponse.data) {
-              const filePath = path.join(unitDir, `${unit.name}${ext}`);
+              const filePath = resolveWithinDirectory(unitDir, `${safeFileName(unit.name, "unit-type")}${ext}`);
               const content = options.format === "json"
                 ? JSON.stringify(unit, null, 2)
                 : yaml.dump(unit, { indent: 2 });
@@ -637,7 +645,7 @@ export function registerBlueprintsCommand(program: Command): void {
             if (!fs.existsSync(phaseDir)) fs.mkdirSync(phaseDir, { recursive: true });
 
             for (const phase of phaseResponse.data) {
-              const filePath = path.join(phaseDir, `${phase.name}${ext}`);
+              const filePath = resolveWithinDirectory(phaseDir, `${safeFileName(phase.name, "phase-type")}${ext}`);
               const content = options.format === "json"
                 ? JSON.stringify(phase, null, 2)
                 : yaml.dump(phase, { indent: 2 });

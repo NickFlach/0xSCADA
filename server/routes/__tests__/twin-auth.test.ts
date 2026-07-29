@@ -79,6 +79,8 @@ const operateRoutes = routeCases("operate-key", "configure-key", [
   ["POST", "/models/missing/reset", 400],
   ["POST", "/models/missing/step", 400],
   ["POST", "/models/missing/sync", 400],
+  // #550: committing a durable checkpoint is an operate-scope action.
+  ["POST", "/models/missing/checkpoint", 400],
 ]);
 
 const simulationRoutes = routeCases("simulate-key", "operate-key", [

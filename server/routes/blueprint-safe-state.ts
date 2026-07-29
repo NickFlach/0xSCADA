@@ -112,7 +112,9 @@ router.post("/:blueprintId/resume", requireSafetyResume, async (req, res) => {
     );
     res.json({ status });
   } catch (error) {
-    logError(error, `Failed to resume blueprint ${req.params.blueprintId}`);
+    const safeBlueprintId = String(req.params.blueprintId).replace(/[\r\n\t]/g, " ");
+    logError(error, "Failed to resume blueprint");
+    console.error({ blueprintId: safeBlueprintId });
     res.status(409).json({ error: (error as Error).message });
   }
 });

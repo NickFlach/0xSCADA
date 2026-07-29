@@ -116,7 +116,11 @@ carries `X-Data-Provenance: live:<kind>`.
 is never replaced with substituted data.
 
 **503** — no source is registered (the default deployment). The endpoint
-**never** substitutes generated records, not even when the demo flag is enabled:
+**never** substitutes generated records, not even when the demo flag is enabled.
+`reason` keeps two facts apart on purpose: consensus attestation duty history is
+unavailable in this *build* and no configuration changes that, whereas the
+observed-liveness feed is merely not running on this *deployment* — which is the
+part an operator can act on (see below):
 
 ```json
 {
@@ -124,7 +128,7 @@ is never replaced with substituted data.
   "synthetic": false,
   "provenance": "live",
   "message": "No live attestation history is available. This endpoint fails closed rather than returning generated data.",
-  "reason": "No live attestation feed is compiled into this build. ...",
+  "reason": "No live source is registered on this deployment. Consensus attestation duty history is unavailable in this build at all: ... An observed-liveness feed IS available ... but it is opt-in: set VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and configure ANCHOR_NODE_URLS. ...",
   "demo": {
     "available": false,
     "path": "/api/nodes/attestation-history/demo",

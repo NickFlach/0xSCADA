@@ -813,6 +813,86 @@ export const pidTuningAudit = pgTable("pid_tuning_audit", {
   recordedAtIdx: index("idx_pid_tuning_audit_recorded_at").on(table.recordedAt),
 }));
 
+// ─── Predictive Maintenance Durable State (ADR-0013 [13.1], #212/#493, #546) ─
+
+/**
+ * Operator-configured per-tag detection thresholds.
+ *
+ * This is durable *configuration*, not sampled data: it changes only when an
+ * operator calls `PUT /api/predictive/thresholds/:tagId`, and it is what the
+ * detectors are graded against. Holding it in a process-local Map meant a
+ * restart silently reverted every tag to the built-in defaults — a tag that had
+ * been deliberately desensitised would start alarming again, and a tag that had
+ * been made more sensitive would stop. `updated_by` is the authenticated
+ * control-plane principal (API key record name), never a request body field.
+ *
+ * Retention: none. Operator configuration is kept until the operator changes
+ * it. Raw prediction history has a completely separate policy — it is an
+ * in-process sliding window that is never written here (see
+ * `server/services/predictive/engine.ts`).
+ */
+export const predictiveTagThresholds = pgTable("predictive_tag_thresholds", {
+  tagId: varchar("tag_id", { length: 256 }).primaryKey(),
+  minSamples: integer("min_samples").notNull(),
+  zScoreThreshold: doublePrecision("z_score_threshold").notNull(),
+  ewmaAlpha: doublePrecision("ewma_alpha").notNull(),
+  ewmaL: doublePrecision("ewma_l").notNull(),
+  iqrMultiplier: doublePrecision("iqr_multiplier").notNull(),
+  ensembleWeights: jsonb("ensemble_weights").$type<Record<string, number>>().notNull(),
+  severityThresholds: jsonb("severity_thresholds")
+    .$type<{ warning: number; critical: number; emergency: number }>()
+    .notNull(),
+  failureLimits: jsonb("failure_limits").$type<{ low?: number; high?: number }>(),
+  updatedBy: varchar("updated_by", { length: 128 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  updatedAtIdx: index("idx_predictive_thresholds_updated_at").on(table.updatedAt),
+}));
+
+/**
+ * Generated predictive alerts and their acknowledgement state.
+ *
+ * `id` is content-derived (tag + severity + cooldown window), not a process
+ * counter, so a restarted process or a second replica that observes the same
+ * anomaly writes the same row instead of a duplicate. Inserts use
+ * ON CONFLICT DO NOTHING, which makes the shared table — rather than a
+ * process-local `lastAlertAt` Map — the alert-suppression authority.
+ *
+ * `acknowledged_by` / `acknowledged_at` are the audit half of the row: who
+ * took ownership of the alert and when. Acknowledgement is a conditional
+ * UPDATE (`WHERE acknowledged = false`), so the first acknowledgement wins
+ * across replicas and a later one is reported as `already-acknowledged`
+ * instead of overwriting the original attribution.
+ *
+ * Retention (distinct from operator configuration above, and applied by
+ * `server/services/predictive/index.ts`):
+ *   - acknowledged alerts are pruned after PREDICTIVE_ALERT_RETENTION_MS
+ *   - any alert is pruned after PREDICTIVE_ALERT_MAX_AGE_MS
+ *   - a row cap bounds the table; evictions are emitted, never silent
+ */
+export const predictiveAlerts = pgTable("predictive_alerts", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  tagId: varchar("tag_id", { length: 256 }).notNull(),
+  severity: varchar("severity", { length: 16 }).notNull(),
+  score: doublePrecision("score").notNull(),
+  message: text("message").notNull(),
+  detectors: jsonb("detectors").$type<string[]>().notNull(),
+  recommendation: text("recommendation").notNull(),
+  /** Data-clock timestamp of the observation that triggered the alert. */
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  /** Wall-clock time the row was written. Retention and ordering key. */
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  acknowledged: boolean("acknowledged").default(false).notNull(),
+  acknowledgedBy: varchar("acknowledged_by", { length: 128 }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+}, (table) => ({
+  tagIdx: index("idx_predictive_alerts_tag").on(table.tagId),
+  severityIdx: index("idx_predictive_alerts_severity").on(table.severity),
+  acknowledgedIdx: index("idx_predictive_alerts_acknowledged").on(table.acknowledged),
+  createdAtIdx: index("idx_predictive_alerts_created_at").on(table.createdAt),
+}));
+
 // ─── Agent Marketplace (ADR-0013 [13.6], #217) ───────────────────────────────
 
 /**
@@ -858,6 +938,258 @@ export const pluginInstallations = pgTable("plugin_installations", {
 }, (table) => ({
   statusIdx: index("idx_plugin_installations_status").on(table.status),
 }));
+
+// ─── Digital Twin Persistence (ADR-0013 [13.3], #550) ────────────────────────
+//
+// The twin runtime kept its model registry and simulation state in process
+// memory, so a restart lost both. These two tables make the registry and one
+// explicitly committed checkpoint per model durable.
+//
+// Physical DDL: migrations/0014_twin_persistence.sql (Postgres) and the
+// SQLITE_DDL in server/services/twin/persistence.ts (dev/test fallback).
+// Kept in sync by `shared/__tests__/schema-parity.test.ts`.
+
+/**
+ * One row per registered `ProcessModel`. `id` is the model id itself — the
+ * same natural key the in-memory registry is keyed by, so storage and runtime
+ * cannot disagree about which model a row describes.
+ *
+ * `schema_version` is the `TWIN_MODEL_SCHEMA_VERSION` the payload was written
+ * under. A loader that does not know the version refuses the row rather than
+ * decoding it under today's assumptions.
+ */
+export const twinModels = pgTable("twin_models", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  // The full ProcessModel as authored, re-validated by the runtime on load.
+  definition: jsonb("definition").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+// ─── Alarm Correlation Coordination (ADR-0026 / ADR-0013 [13.2], #573) ───────
+//
+// #213 shipped a process-local correlation engine whose suppression defaults
+// OFF, because suppression that lives only in one process's heap silently
+// changes what an operator sees and then loses that state on restart or when a
+// second replica forms a different view. These six tables are the durable,
+// replica-coordinated state ADR-0026 requires before suppression can be turned
+// on in production.
+//
+// THE ORDERING MODEL. `alarm_correlation_journal` is a single, totally-ordered,
+// append-only log of every correlation-affecting operation (alarm ingest,
+// acknowledge, clear, rule/topology/policy change). The database allocates
+// `seq`; appends are serialised (Postgres advisory lock, SQLite BEGIN
+// IMMEDIATE) so commit order equals `seq` order and no reader can observe a
+// gap that later fills in. Every replica consumes the same journal in `seq`
+// order and applies each entry to its own deterministic engine, so all
+// replicas converge on identical membership, root cause and suppression
+// WITHOUT any replica needing to be leader. This is convergence by shared log,
+// not order-independent merge: the log defines the order, and which replica an
+// HTTP request happened to land on cannot change it.
+//
+// IDENTIFIERS. Group ids are derived from the journal `seq` that formed them
+// (`ACG-<seq>` / `ACG-<seq>-<n>`), never from a per-process random source. Two
+// replicas therefore cannot mint conflicting ids for the same group, cannot
+// invent different ids for the same journal entry, and cannot reuse an id
+// because `seq` is monotonic for the life of the table.
+//
+// IDEMPOTENCY. `idempotency_key` is UNIQUE. A retried or duplicated delivery
+// re-appends the same key, hits the conflict, and returns the seq already
+// assigned — it never produces a second entry and never double-counts.
+//
+// SAFETY. Nothing in these tables can hide an alarm. Suppression is only ever
+// enabled while the durable projection reports healthy; on any storage or
+// coordination failure the runtime disables suppression, restores every
+// suppressed alarm and re-broadcasts it. That direction is deliberate and
+// one-way: losing coordination can only ever reveal more alarms, never fewer.
+
+/**
+ * The shared, totally-ordered operation log. Append-only: there is no update
+ * or delete helper. Retention prunes entries strictly below the materialised
+ * watermark (`alarm_correlation_state.applied_seq`) — never above it, because
+ * an entry that has not been projected yet is the only record of an operator's
+ * acknowledge or clear.
+ */
+export const alarmCorrelationJournal = pgTable("alarm_correlation_journal", {
+  // Monotonic total order. BIGSERIAL rather than a timestamp: wall clocks on
+  // separate replicas disagree, and correlation needs a single agreed order.
+  seq: bigint("seq", { mode: "number" }).primaryKey().generatedByDefaultAsIdentity(),
+  // Natural key of the operation — e.g. `ingest:<alarmId>`,
+  // `ack:<alarmId>`, `policy:<hash>`. UNIQUE, so duplicate delivery of the
+  // same logical operation collapses onto the entry already recorded.
+  idempotencyKey: varchar("idempotency_key", { length: 256 }).notNull().unique(),
+  op: varchar("op", { length: 32 }).notNull(),
+  payload: jsonb("payload").notNull(),
+  // Authenticated control-plane principal that submitted the operation, taken
+  // from the API key record — never from a request body. This is the lifecycle
+  // attribution that has to survive a restart to remain an audit record.
+  principal: varchar("principal", { length: 128 }).notNull(),
+  // Which replica appended it. Diagnostic only: it must never affect ordering.
+  originInstance: varchar("origin_instance", { length: 64 }).notNull(),
+  recordedAt: timestamp("recorded_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  recordedAtIdx: index("idx_alarm_corr_journal_recorded_at").on(table.recordedAt),
+  opIdx: index("idx_alarm_corr_journal_op").on(table.op),
+}));
+
+/**
+ * Materialised correlation groups. `updated_seq` records the journal entry
+ * whose application produced this row, so a restarting replica knows exactly
+ * how far the projection got.
+ */
+export const alarmCorrelationGroups = pgTable("alarm_correlation_groups", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  state: varchar("state", { length: 8 }).notNull(),
+  rootCauseAlarmId: varchar("root_cause_alarm_id", { length: 128 }).notNull(),
+  formedByRuleId: varchar("formed_by_rule_id", { length: 128 }).notNull(),
+  // Which rule admitted each member, keyed by alarm id. Kept so a recovered
+  // group can explain itself rather than merely existing.
+  joinedVia: jsonb("joined_via").notNull().default(sql`'{}'::jsonb`),
+  maxSeverity: varchar("max_severity", { length: 16 }).notNull(),
+  // Event time, epoch ms — the clock correlation actually reasons about.
+  createdAtMs: bigint("created_at_ms", { mode: "number" }).notNull(),
+  lastAlarmAtMs: bigint("last_alarm_at_ms", { mode: "number" }).notNull(),
+  closedAtMs: bigint("closed_at_ms", { mode: "number" }),
+  closeReason: varchar("close_reason", { length: 32 }),
+  updatedSeq: bigint("updated_seq", { mode: "number" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  stateIdx: index("idx_alarm_corr_groups_state").on(table.state),
+  lastAlarmIdx: index("idx_alarm_corr_groups_last_alarm").on(table.lastAlarmAtMs),
+}));
+
+/**
+ * Materialised alarm lifecycle. This is the row that makes suppression
+ * recoverable: `suppressed` says the operator is not currently seeing this
+ * alarm, and `group_id` + `severity` + `state` are everything needed to
+ * restore it. If this row could not be written, suppression must not be on.
+ *
+ * `acknowledged_by` / `cleared_by` are control-plane principal names copied
+ * from the journal entry, so attribution is immutable in the same sense the
+ * journal is: the projection can be rebuilt from the log, and the log cannot
+ * be rewritten through any route in this codebase.
+ */
+export const alarmCorrelationAlarms = pgTable("alarm_correlation_alarms", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  // NULL means tracked but ungrouped (the engine's "pending" set). Those rows
+  // matter: they carry lifecycle and attribution for standalone alarms.
+  groupId: varchar("group_id", { length: 64 }),
+  name: varchar("name", { length: 256 }).notNull(),
+  tagId: varchar("tag_id", { length: 256 }).notNull(),
+  equipmentId: varchar("equipment_id", { length: 256 }),
+  siteId: varchar("site_id", { length: 64 }),
+  processArea: varchar("process_area", { length: 256 }),
+  severity: varchar("severity", { length: 16 }).notNull(),
+  state: varchar("state", { length: 16 }).notNull(),
+  message: text("message").notNull(),
+  eventTimeMs: bigint("event_time_ms", { mode: "number" }).notNull(),
+  // number | string in the wire type, so JSON preserves which one it was.
+  alarmValue: jsonb("alarm_value"),
+  alarmLimit: jsonb("alarm_limit"),
+  source: varchar("source", { length: 256 }),
+  acknowledgedBy: varchar("acknowledged_by", { length: 128 }),
+  clearedBy: varchar("cleared_by", { length: 128 }),
+  suppressed: boolean("suppressed").default(false).notNull(),
+  isRootCause: boolean("is_root_cause").default(false).notNull(),
+  joinedViaRuleId: varchar("joined_via_rule_id", { length: 128 }),
+  // Journal seq that first ingested this alarm, and the seq of the latest
+  // state change. The latter is broadcast with every snapshot so a consumer
+  // can drop an out-of-order or duplicated cross-instance echo.
+  ingestSeq: bigint("ingest_seq", { mode: "number" }).notNull(),
+  updatedSeq: bigint("updated_seq", { mode: "number" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  groupIdx: index("idx_alarm_corr_alarms_group").on(table.groupId),
+  stateIdx: index("idx_alarm_corr_alarms_state").on(table.state),
+  eventTimeIdx: index("idx_alarm_corr_alarms_event_time").on(table.eventTimeMs),
+}));
+
+/** Durable correlation rules — the configuration a restart must not forget. */
+export const alarmCorrelationRules = pgTable("alarm_correlation_rules", {
+  id: varchar("id", { length: 128 }).primaryKey(),
+  name: varchar("name", { length: 256 }).notNull(),
+  type: varchar("type", { length: 16 }).notNull(),
+  enabled: boolean("enabled").default(true).notNull(),
+  priority: integer("priority").notNull(),
+  config: jsonb("config").notNull(),
+  updatedBy: varchar("updated_by", { length: 128 }).notNull(),
+  updatedSeq: bigint("updated_seq", { mode: "number" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/** Durable equipment topology — hierarchy plus directed causal edges. */
+export const alarmCorrelationEquipment = pgTable("alarm_correlation_equipment", {
+  equipmentId: varchar("equipment_id", { length: 256 }).primaryKey(),
+  name: varchar("name", { length: 256 }),
+  parentId: varchar("parent_id", { length: 256 }),
+  causalDownstream: jsonb("causal_downstream").notNull().default(sql`'[]'::jsonb`),
+  siteId: varchar("site_id", { length: 64 }),
+  processArea: varchar("process_area", { length: 256 }),
+  updatedBy: varchar("updated_by", { length: 128 }).notNull(),
+  updatedSeq: bigint("updated_seq", { mode: "number" }).notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * The LAST COMMITTED checkpoint for a model — at most one row per model,
+ * written in the same transaction as the model it belongs to. A model row
+ * without a checkpoint row is therefore a torn write, and the loader treats it
+ * as corrupt rather than seeding the model from authored initial conditions
+ * (which would silently substitute different state for real state).
+ *
+ * There is deliberately no `status` column: a restored simulation is always
+ * idle and only starts when an authorized caller starts or steps it.
+ */
+export const twinCheckpoints = pgTable("twin_checkpoints", {
+  modelId: varchar("model_id", { length: 128 })
+    .primaryKey()
+    .references(() => twinModels.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull(),
+  tick: bigint("tick", { mode: "number" }).notNull(),
+  // Simulated clock in ms. Double precision rather than bigint because the
+  // runtime carries it as a JS number and only requires it to stay finite.
+  timeMs: doublePrecision("time_ms").notNull(),
+  // Record<componentId, Record<parameter, number>>, re-validated against the
+  // model's components before it is admitted into the runtime.
+  componentStates: jsonb("component_states").notNull(),
+  // Epoch ms of the last live-tag assimilation folded into this checkpoint.
+  lastSyncAt: bigint("last_sync_at", { mode: "number" }),
+  committedAt: timestamp("committed_at", { withTimezone: true }).defaultNow().notNull(),
+});
+
+/**
+ * Single-row coordination state: the suppression policy plus the watermark of
+ * the shared projection and its cumulative counters.
+ *
+ * `applied_seq` is advanced with a conditional UPDATE (`WHERE applied_seq <
+ * :seq`) in the same transaction that writes the entry's row changes. A replica
+ * that loses the race writes nothing, so the materialised rows are always the
+ * result of applying journal entries strictly in `seq` order, whichever replica
+ * happened to get there first.
+ *
+ * `enabled` defaults FALSE. Persisting an operator's intent to suppress is not
+ * the same as suppressing: the runtime only honours it while coordination is
+ * healthy, and forces it back off — restoring every suppressed alarm — the
+ * moment it is not.
+ */
+export const alarmCorrelationState = pgTable("alarm_correlation_state", {
+  id: varchar("id", { length: 16 }).primaryKey(),
+  appliedSeq: bigint("applied_seq", { mode: "number" }).default(0).notNull(),
+  suppressionEnabled: boolean("suppression_enabled").default(false).notNull(),
+  neverSuppressAtOrAbove: varchar("never_suppress_at_or_above", { length: 16 })
+    .default("critical").notNull(),
+  // Always TRUE. Column exists so the persisted policy is complete and a
+  // future value change is a visible migration, not a silent default.
+  unsuppressOnRootClear: boolean("unsuppress_on_root_clear").default(true).notNull(),
+  alarmsIngested: bigint("alarms_ingested", { mode: "number" }).default(0).notNull(),
+  groupsCreated: bigint("groups_created", { mode: "number" }).default(0).notNull(),
+  groupsClosed: bigint("groups_closed", { mode: "number" }).default(0).notNull(),
+  alarmsSuppressed: bigint("alarms_suppressed", { mode: "number" }).default(0).notNull(),
+  alarmsUnsuppressed: bigint("alarms_unsuppressed", { mode: "number" }).default(0).notNull(),
+  updatedBy: varchar("updated_by", { length: 128 }).default("system").notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+});
 
 // ─── Schema Exports ──────────────────────────────────────────────────────────
 
@@ -929,7 +1261,27 @@ export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
 export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
 export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;
 export type InsertPidTuningAuditRow = typeof pidTuningAudit.$inferInsert;
+export type PredictiveTagThresholdRow = typeof predictiveTagThresholds.$inferSelect;
+export type InsertPredictiveTagThresholdRow = typeof predictiveTagThresholds.$inferInsert;
+export type PredictiveAlertRow = typeof predictiveAlerts.$inferSelect;
+export type InsertPredictiveAlertRow = typeof predictiveAlerts.$inferInsert;
 export type PluginRegistryRow = typeof pluginRegistry.$inferSelect;
 export type InsertPluginRegistryRow = typeof pluginRegistry.$inferInsert;
 export type PluginInstallationRow = typeof pluginInstallations.$inferSelect;
 export type InsertPluginInstallationRow = typeof pluginInstallations.$inferInsert;
+export type TwinModelRow = typeof twinModels.$inferSelect;
+export type InsertTwinModelRow = typeof twinModels.$inferInsert;
+export type TwinCheckpointRow = typeof twinCheckpoints.$inferSelect;
+export type InsertTwinCheckpointRow = typeof twinCheckpoints.$inferInsert;
+export type AlarmCorrelationJournalRow = typeof alarmCorrelationJournal.$inferSelect;
+export type InsertAlarmCorrelationJournalRow = typeof alarmCorrelationJournal.$inferInsert;
+export type AlarmCorrelationGroupRow = typeof alarmCorrelationGroups.$inferSelect;
+export type InsertAlarmCorrelationGroupRow = typeof alarmCorrelationGroups.$inferInsert;
+export type AlarmCorrelationAlarmRow = typeof alarmCorrelationAlarms.$inferSelect;
+export type InsertAlarmCorrelationAlarmRow = typeof alarmCorrelationAlarms.$inferInsert;
+export type AlarmCorrelationRuleRow = typeof alarmCorrelationRules.$inferSelect;
+export type InsertAlarmCorrelationRuleRow = typeof alarmCorrelationRules.$inferInsert;
+export type AlarmCorrelationEquipmentRow = typeof alarmCorrelationEquipment.$inferSelect;
+export type InsertAlarmCorrelationEquipmentRow = typeof alarmCorrelationEquipment.$inferInsert;
+export type AlarmCorrelationStateRow = typeof alarmCorrelationState.$inferSelect;
+export type InsertAlarmCorrelationStateRow = typeof alarmCorrelationState.$inferInsert;

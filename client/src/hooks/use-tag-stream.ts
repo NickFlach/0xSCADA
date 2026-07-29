@@ -40,7 +40,19 @@ export interface AlarmEvent {
     rootCauseAlarmId: string | null;
     suppressed: boolean;
     isRootCause: boolean;
-    coordinationMode: "process-local";
+    /**
+     * `durable` means the correlation state behind this snapshot is projected
+     * from the shared journal and agrees across replicas; `process-local` means
+     * it is this server process's own view, lost on restart. Suppression is
+     * only ever enabled in `durable` mode (#573).
+     */
+    coordinationMode: "process-local" | "durable";
+    /**
+     * Shared journal sequence of this alarm's latest state change, or null when
+     * uncoordinated. Monotonic per alarm across every replica, so a client that
+     * receives the same alarm twice can keep the higher one.
+     */
+    seq: number | null;
   };
 }
 

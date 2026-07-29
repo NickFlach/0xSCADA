@@ -71,6 +71,27 @@
       "when": 1784780409000,
       "tag": "0012_validator_liveness_observations",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1784780410000,
+      "tag": "0013_predictive_durable_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1784780411000,
+      "tag": "0014_twin_persistence",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1784780412000,
+      "tag": "0015_alarm_correlation_coordination",
+      "breakpoints": true
     }
   ]
 }

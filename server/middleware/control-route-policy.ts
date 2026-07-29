@@ -43,6 +43,12 @@ export const CONTROL_ROUTE_POLICIES: readonly ControlRoutePolicy[] = Object.free
     description: "Resume a blueprint from a fail-closed safe state.",
   },
   {
+    id: "sre-remediation-control",
+    pathPrefix: "/api/governance/sre/remediations",
+    scopes: Object.freeze(["sre.remediate"]),
+    description: "Dry-run or execute bounded, audited SRE remediation actions.",
+  },
+  {
     id: "tuning-proposal-decision",
     pathPrefix: "/api/tuning/proposals",
     scopes: Object.freeze(["tuning.approve"]),

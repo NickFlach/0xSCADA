@@ -10,6 +10,16 @@ import {
   validatorLivenessObservations as pgValidatorLivenessObservations,
   blueprintSafeStateLog as pgBlueprintSafeStateLog,
   pidTuningAudit as pgPidTuningAudit,
+  twinModels as pgTwinModels,
+  twinCheckpoints as pgTwinCheckpoints,
+  predictiveTagThresholds as pgPredictiveTagThresholds,
+  predictiveAlerts as pgPredictiveAlerts,
+  alarmCorrelationJournal as pgAlarmCorrelationJournal,
+  alarmCorrelationGroups as pgAlarmCorrelationGroups,
+  alarmCorrelationAlarms as pgAlarmCorrelationAlarms,
+  alarmCorrelationRules as pgAlarmCorrelationRules,
+  alarmCorrelationEquipment as pgAlarmCorrelationEquipment,
+  alarmCorrelationState as pgAlarmCorrelationState,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -20,6 +30,16 @@ import {
   validatorLivenessObservations as sqliteValidatorLivenessObservations,
   blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
   pidTuningAudit as sqlitePidTuningAudit,
+  twinModels as sqliteTwinModels,
+  twinCheckpoints as sqliteTwinCheckpoints,
+  predictiveTagThresholds as sqlitePredictiveTagThresholds,
+  predictiveAlerts as sqlitePredictiveAlerts,
+  alarmCorrelationJournal as sqliteAlarmCorrelationJournal,
+  alarmCorrelationGroups as sqliteAlarmCorrelationGroups,
+  alarmCorrelationAlarms as sqliteAlarmCorrelationAlarms,
+  alarmCorrelationRules as sqliteAlarmCorrelationRules,
+  alarmCorrelationEquipment as sqliteAlarmCorrelationEquipment,
+  alarmCorrelationState as sqliteAlarmCorrelationState,
 } from '../schema-sqlite';
 
 /**
@@ -76,6 +96,58 @@ const cases = [
   // configured, so a column that exists on only one of them would silently
   // drop part of a plant-change record.
   { name: 'pid_tuning_audit', pg: pgPidTuningAudit, sqlite: sqlitePidTuningAudit },
+  // #550: the digital-twin model registry and its committed checkpoints. A
+  // column present on only one dialect would drop part of a restored model or
+  // checkpoint, and a twin that comes back with partial state is worse than
+  // one that refuses to come back at all.
+  { name: 'twin_models', pg: pgTwinModels, sqlite: sqliteTwinModels },
+  { name: 'twin_checkpoints', pg: pgTwinCheckpoints, sqlite: sqliteTwinCheckpoints },
+  // #546: predictive thresholds and alert acknowledgement state. A column
+  // present on only one dialect would mean an operator's configuration — or
+  // the record of who acknowledged an alert — silently vanishing on the other,
+  // which is the exact defect this table was added to fix.
+  {
+    name: 'predictive_tag_thresholds',
+    pg: pgPredictiveTagThresholds,
+    sqlite: sqlitePredictiveTagThresholds,
+  },
+  { name: 'predictive_alerts', pg: pgPredictiveAlerts, sqlite: sqlitePredictiveAlerts },
+  // #573: the durable, replica-coordinated correlation state. A column present
+  // on only one dialect is a safety defect here, not a dev-mode inconvenience:
+  // `suppressed` on `alarm_correlation_alarms` is what makes an alarm the
+  // operator cannot currently see restorable after a restart, and `applied_seq`
+  // on `alarm_correlation_state` is what keeps two replicas from projecting the
+  // journal out of order.
+  {
+    name: 'alarm_correlation_journal',
+    pg: pgAlarmCorrelationJournal,
+    sqlite: sqliteAlarmCorrelationJournal,
+  },
+  {
+    name: 'alarm_correlation_groups',
+    pg: pgAlarmCorrelationGroups,
+    sqlite: sqliteAlarmCorrelationGroups,
+  },
+  {
+    name: 'alarm_correlation_alarms',
+    pg: pgAlarmCorrelationAlarms,
+    sqlite: sqliteAlarmCorrelationAlarms,
+  },
+  {
+    name: 'alarm_correlation_rules',
+    pg: pgAlarmCorrelationRules,
+    sqlite: sqliteAlarmCorrelationRules,
+  },
+  {
+    name: 'alarm_correlation_equipment',
+    pg: pgAlarmCorrelationEquipment,
+    sqlite: sqliteAlarmCorrelationEquipment,
+  },
+  {
+    name: 'alarm_correlation_state',
+    pg: pgAlarmCorrelationState,
+    sqlite: sqliteAlarmCorrelationState,
+  },
 ] as const;
 
 describe('schema parity (Postgres vs SQLite dev fallback)', () => {

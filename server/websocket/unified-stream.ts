@@ -18,7 +18,11 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { Server as HttpServer, IncomingMessage } from 'http';
 import type { Duplex } from 'stream';
 import { URL } from 'url';
-import { tagStreamServer, type TagUpdate } from './tag-stream.js';
+import {
+  tagStreamServer,
+  type AlarmSnapshotProvider,
+  type TagUpdate,
+} from './tag-stream.js';
 import type { EventFilters, WebSocketMetrics } from './types.js';
 import {
   authorizeWebSocketUpgrade,
@@ -56,6 +60,11 @@ export interface UnifiedClient {
 
 export class UnifiedStreamServer {
   private wss: WebSocketServer | null = null;
+  /**
+   * Supplies one canonical snapshot per active alarm on (re)subscribe (#573).
+   * Registered by the cached event bridge, which owns correlation state.
+   */
+  private alarmSnapshotProvider: AlarmSnapshotProvider | null = null;
   private clients = new Map<string, UnifiedClient>();
   private startTime = Date.now();
   private pingInterval?: ReturnType<typeof setInterval>;
@@ -171,10 +180,25 @@ export class UnifiedStreamServer {
         this.send(client, { type: 'subscribed', requestId: msg.requestId, payload: { channel: 'events' } });
         break;
       }
-      case 'subscribe:alarms':
+      case 'subscribe:alarms': {
         client.subscribedChannels.add('alarms');
         this.send(client, { type: 'subscribed', requestId: msg.requestId, payload: { channel: 'alarms' } });
+        // Catch-up: the latest canonical state of every alarm the operator
+        // could still act on, exactly once each. Subscribing after a reconnect
+        // must not leave a client acting on a stale view.
+        if (this.alarmSnapshotProvider) {
+          try {
+            this.send(client, {
+              type: 'alarm:snapshot',
+              requestId: msg.requestId,
+              payload: { alarms: this.alarmSnapshotProvider() },
+            });
+          } catch {
+            // Live alarm delivery continues even if catch-up cannot be built.
+          }
+        }
         break;
+      }
       case 'subscribe:health':
         client.subscribedChannels.add('health');
         this.send(client, { type: 'subscribed', requestId: msg.requestId, payload: { channel: 'health' } });
@@ -229,6 +253,11 @@ export class UnifiedStreamServer {
         this.totalEventsDelivered++;
       }
     }
+  }
+
+  /** Register (or clear) the reconnect alarm-snapshot source. */
+  setAlarmSnapshotProvider(provider: AlarmSnapshotProvider | null): void {
+    this.alarmSnapshotProvider = provider;
   }
 
   /** Broadcast an alarm to unified clients subscribed to alarms */

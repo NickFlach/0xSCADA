@@ -60,7 +60,7 @@
  * free outright; it is left here deliberately so the loop owns exactly one timer.
  */
 
-import { readFileSync, statSync } from "node:fs";
+import { closeSync, fstatSync, openSync, readSync } from "node:fs";
 import { z } from "zod";
 import { log, logError } from "../logger.js";
 import { compileBlueprint } from "./compiler.js";
@@ -392,29 +392,18 @@ export class BlueprintControlLoop {
       );
     }
 
-    let byteSize: number;
-    try {
-      byteSize = statSync(path).size;
-    } catch (err) {
-      throw new BlueprintControlLoopError(
-        `cannot stat blueprint definition "${path}": ${describeError(err)}`,
-      );
-    }
-    if (byteSize > this.config.maxDefinitionBytes) {
-      throw new BlueprintControlLoopError(
-        `blueprint definition "${path}" is ${byteSize} bytes, exceeding the configured ` +
-          `maximum of ${this.config.maxDefinitionBytes} bytes`,
-      );
-    }
-
-    let text: string;
-    try {
-      text = readFileSync(path, "utf8");
-    } catch (err) {
-      throw new BlueprintControlLoopError(
-        `cannot read blueprint definition "${path}": ${describeError(err)}`,
-      );
-    }
+    // Size-check and read the SAME open descriptor, never the path twice.
+    //
+    // `statSync(path)` followed by `readFileSync(path)` checks one file and
+    // reads whatever is at that name a moment later. The cap exists to bound
+    // how much this control-plane process will pull into memory, and a file
+    // that grows between the two calls — or a path swapped for a larger one —
+    // defeats it entirely. Holding the descriptor means the bytes measured are
+    // the bytes read.
+    //
+    // The read is also bounded by the cap rather than by the size just
+    // measured, so a file still being appended to cannot exceed it either.
+    const text = this.readBoundedDefinition(path);
 
     let raw: unknown;
     try {
@@ -457,6 +446,73 @@ export class BlueprintControlLoop {
     this.jitterToleranceMs =
       this.config.jitterToleranceMsOverride ?? Math.max(1, this.periodMs * 0.25);
     this.metricLabels = { blueprint: program.id };
+  }
+
+  /**
+   * Read a definition file whole, refusing anything over `maxDefinitionBytes`.
+   *
+   * Opens once and works from the descriptor: `fstat` and every `read` see the
+   * same inode, so the file cannot be swapped or grown between the size check
+   * and the read. One byte past the cap is requested deliberately — if that
+   * byte arrives, the file is over the limit even when `fstat` said otherwise,
+   * which is what catches a file still being appended to.
+   */
+  private readBoundedDefinition(path: string): string {
+    const limit = this.config.maxDefinitionBytes;
+    let fd: number;
+    try {
+      fd = openSync(path, "r");
+    } catch (err) {
+      throw new BlueprintControlLoopError(
+        `cannot read blueprint definition "${path}": ${describeError(err)}`,
+      );
+    }
+
+    try {
+      let reportedSize: number;
+      try {
+        reportedSize = fstatSync(fd).size;
+      } catch (err) {
+        throw new BlueprintControlLoopError(
+          `cannot stat blueprint definition "${path}": ${describeError(err)}`,
+        );
+      }
+      if (reportedSize > limit) {
+        throw new BlueprintControlLoopError(
+          `blueprint definition "${path}" is ${reportedSize} bytes, exceeding the configured ` +
+            `maximum of ${limit} bytes`,
+        );
+      }
+
+      const buffer = Buffer.allocUnsafe(limit + 1);
+      let filled = 0;
+      for (;;) {
+        let read: number;
+        try {
+          read = readSync(fd, buffer, filled, buffer.length - filled, null);
+        } catch (err) {
+          throw new BlueprintControlLoopError(
+            `cannot read blueprint definition "${path}": ${describeError(err)}`,
+          );
+        }
+        if (read === 0) break;
+        filled += read;
+        if (filled > limit) {
+          throw new BlueprintControlLoopError(
+            `blueprint definition "${path}" exceeds the configured maximum of ` +
+              `${limit} bytes`,
+          );
+        }
+      }
+      return buffer.subarray(0, filled).toString("utf8");
+    } finally {
+      try {
+        closeSync(fd);
+      } catch {
+        // The read already succeeded or already threw; a failure to close is
+        // not something the caller can act on and must not mask either.
+      }
+    }
   }
 
   // ─── Hot path ───────────────────────────────────────────────────────────────

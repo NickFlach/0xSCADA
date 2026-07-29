@@ -69,9 +69,11 @@ export { geometryService } from './geometry';
 // The /api/intelligence/ml/* routes stay 501 (server/routes/intelligence.ts).
 // Reintroduce ML against a real model runtime, not before.
 
-// ── Ubiquity Service ─────────────────────────────────────────────────────────
-export * from './ubiquity';
-export { ubiquityService } from './ubiquity';
+// ── Ubiquity Service — REMOVED (#638) ────────────────────────────────────────
+// The deleted service registered hard-coded devices, treated endpoint strings
+// as successful validation, and reported PRNG-driven command execution as real.
+// The honest placeholder /api/ubiquity route remains until a real discovery and
+// command backend is implemented.
 
 // ── Optimization Service (PID Auto-Tuning & Decoherence Scheduler) ───────────
 export * from './optimization';
@@ -85,9 +87,9 @@ export { spcService } from './spc';
 export * from './predictive';
 export { predictiveMaintenanceService } from './predictive';
 
-// ── Layer 2 Rollup Service ───────────────────────────────────────────────────
-export * from './l2-rollup';
-export { l2RollupService } from './l2-rollup';
+// ── Layer 2 Rollup Service — REMOVED (#638) ──────────────────────────────────
+// The deleted service generated sequencer/L1 addresses, transaction hashes and
+// submission outcomes locally, but had no consumer or blockchain backend.
 
 // ── Digital Twin Service (ADR-0013 [13.3], #214) ─────────────────────────────
 export * from './twin';
@@ -107,6 +109,9 @@ export * from './reporting';
 // ── Agent Marketplace Service (ADR-0013 [13.6], #217) ────────────────────────
 export * from './marketplace';
 export { marketplaceService } from './marketplace';
+
+// ── Production SRE Service (ADR-0014 [14.6], #226) ──────────────────────────
+export * from './sre';
 
 // ── NL Process Query Service (ADR-0013 [13.5], #216) ─────────────────────────
 // Exported by name rather than with `export *`: the module's public surface
@@ -131,8 +136,8 @@ export async function initializeServices(): Promise<void> {
     { name: 'Geometry', service: () => import('./geometry').then(m => m.geometryService.initialize()) },
     // 'Machine Learning' removed (#605) — the service it booted fabricated its
     // output; see the removal note above.
-    { name: 'Ubiquity', service: () => import('./ubiquity').then(m => m.ubiquityService.initialize()) },
-    { name: 'Layer 2 Rollup', service: () => import('./l2-rollup').then(m => m.l2RollupService.initialize()) },
+    // Ubiquity and L2 Rollup are removed (#638); neither may be started by this
+    // generic boot sequence.
     { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
     { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
     { name: 'Digital Twin', service: () => import('./twin').then(m => m.digitalTwinService.initialize()) },
@@ -195,22 +200,8 @@ export async function getServicesHealthStatus(): Promise<{
     // two hard-coded models were present, which said nothing about whether
     // anything could infer — there was no inference. An absent key is the
     // honest answer: the platform has no ML subsystem to report on.
-    ubiquity: async () => {
-      try {
-        const { ubiquityService } = await import('./ubiquity');
-        return await ubiquityService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Ubiquity service not available' };
-      }
-    },
-    l2Rollup: async () => {
-      try {
-        const { l2RollupService } = await import('./l2-rollup');
-        return await l2RollupService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'L2 Rollup service not available' };
-      }
-    },
+    // Ubiquity and L2 Rollup have no subsystem to report after #638, so absent
+    // keys are the honest operator-facing result.
     optimization: async () => {
       try {
         const { optimizationService } = await import('./optimization');
@@ -288,10 +279,9 @@ export const serviceRegistry = {
   capacity: () => import('./capacity'),
   flux: () => import('./flux'),
   geometry: () => import('./geometry'),
-  ubiquity: () => import('./ubiquity'),
-  l2Rollup: () => import('./l2-rollup'),
   optimization: () => import('./optimization'),
-  spc: () => import('./spc')
+  spc: () => import('./spc'),
+  sre: () => import('./sre')
 } as const;
 
 export type ServiceName = keyof typeof serviceRegistry;
