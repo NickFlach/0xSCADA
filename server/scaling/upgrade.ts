@@ -1,12 +1,5 @@
-import { randomUUID } from "node:crypto";
-import {
-  mkdir,
-  open,
-  readFile,
-  rename,
-  rm,
-} from "node:fs/promises";
-import { dirname } from "node:path";
+import { readFile } from "node:fs/promises";
+import { writeFileAtomicDurable } from "../atomic-file";
 import { canonicalJson, hash64 } from "./hash";
 
 export interface VersionTransition {
@@ -527,8 +520,6 @@ export class JsonFileUpgradeJournal implements UpgradeJournal {
   }
 
   private async save(entries: readonly UpgradeJournalEntry[]): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     const payload: UpgradeJournalFile = {
       version: 1,
       entries: entries.map((entry) => ({
@@ -536,19 +527,11 @@ export class JsonFileUpgradeJournal implements UpgradeJournal {
         timestamp: entry.timestamp.toISOString(),
       })),
     };
-    try {
-      const handle = await open(temporary, "wx");
-      try {
-        await handle.writeFile(`${canonicalJson(payload)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporary, this.path);
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    // Durability here is the whole point of the journal: recovery after a
+    // controller restart during a drain/deploy boundary. `rename` is atomic but
+    // its directory entry is not durable until the parent directory is fsynced,
+    // so the shared helper owns both syncs rather than each call site.
+    await writeFileAtomicDurable(this.path, `${canonicalJson(payload)}\n`);
   }
 
   private async serialized<T>(work: () => Promise<T>): Promise<T> {
