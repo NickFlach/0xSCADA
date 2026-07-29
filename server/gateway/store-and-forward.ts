@@ -8,8 +8,9 @@
 
 import { EventEmitter } from "node:events";
 import { randomUUID } from "node:crypto";
-import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+import { writeFileAtomicDurable } from "../atomic-file";
 import { log, logError } from "../logger";
 import {
   canonicalJson,
@@ -86,8 +87,10 @@ interface QueueFile {
 }
 
 /**
- * Crash-safe single-file queue: write complete snapshot, then atomically rename.
- * A database-backed adapter can implement the same contract for larger queues.
+ * Power-loss-durable single-file queue on platforms with directory fsync:
+ * fsync a complete snapshot, atomically rename it, then fsync the containing
+ * directory. A database-backed adapter can implement the same contract for
+ * larger queues.
  */
 export class JsonFileEdgeQueue implements DurableEdgeQueue {
   constructor(readonly path: string) {}
@@ -110,25 +113,14 @@ export class JsonFileEdgeQueue implements DurableEdgeQueue {
   }
 
   async save(records: readonly StoredRecord[]): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const temporary = `${this.path}.${process.pid}.${randomUUID()}.tmp`;
     const payload: QueueFile = {
       version: 1,
       records: records.map(serializeRecord),
     };
-    try {
-      const handle = await open(temporary, "wx");
-      try {
-        await handle.writeFile(`${canonicalJson(payload)}\n`, "utf8");
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      await rename(temporary, this.path);
-    } catch (error) {
-      await rm(temporary, { force: true }).catch(() => undefined);
-      throw error;
-    }
+    await writeFileAtomicDurable(
+      this.path,
+      `${canonicalJson(payload)}\n`,
+    );
   }
 }
 
