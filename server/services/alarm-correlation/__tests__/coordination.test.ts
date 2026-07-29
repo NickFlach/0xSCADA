@@ -519,10 +519,20 @@ describe("two-replica coordination", () => {
 });
 
 describe("fail-safe on coordination loss", () => {
-  /** A store that works until `fail` is set, then rejects everything. */
-  function breakableStore(inner: CorrelationStore): CorrelationStore & { fail: boolean } {
+  /**
+   * A store that works until `fail` is set, then rejects everything.
+   *
+   * `failProject` breaks only the projection, which is the one way an entry can
+   * be applied to the engine while the coordinator stays degraded — reads
+   * succeed, so `drain()` reaches `applyEntry()`, but it throws before
+   * `markHealthy()`.
+   */
+  function breakableStore(
+    inner: CorrelationStore,
+  ): CorrelationStore & { fail: boolean; failProject: boolean } {
     const wrapper = {
       fail: false,
+      failProject: false,
       ready: () => inner.ready(),
       backend: () => inner.backend(),
       append: (entry: Parameters<CorrelationStore["append"]>[0]) =>
@@ -535,7 +545,7 @@ describe("fail-safe on coordination loss", () => {
           : inner.read(afterSeq, limit)),
       load: () => inner.load(),
       project: (seq: number, changes: Parameters<CorrelationStore["project"]>[1]) =>
-        (wrapper.fail
+        (wrapper.fail || wrapper.failProject
           ? Promise.reject(new Error("journal unreachable"))
           : inner.project(seq, changes)),
       prune: (options: Parameters<CorrelationStore["prune"]>[0]) => inner.prune(options),
@@ -627,6 +637,70 @@ describe("fail-safe on coordination loss", () => {
     expect(coordinator.health().healthy).toBe(true);
     expect(coordinator.health().suppressionDisabledByHealth).toBe(false);
     // Restored to the operator's persisted intent, not to some default.
+    expect(coordinator.engine.getSuppressionPolicy().enabled).toBe(true);
+  });
+
+  it("does not let a policy write re-enable suppression while still degraded", async () => {
+    const inner = await openStore(await tempDbFile());
+    const store = breakableStore(inner);
+    const coordinator = new AlarmCorrelationCoordinator({
+      store,
+      instanceId: "replica-a",
+      pollIntervalMs: 60_000,
+      pruneIntervalMs: 60 * 60_000,
+    });
+    await coordinator.start();
+    cleanups.push(() => coordinator.stop());
+
+    await coordinator.submitConfig("topology-upsert", { nodes: TOPOLOGY }, "engineer", "t1");
+    await coordinator.submitConfig(
+      "policy-set",
+      { policy: { enabled: true, neverSuppressAtOrAbove: "critical" } },
+      "engineer",
+      "p1",
+    );
+    await coordinator.submitIngest(
+      alarm({ id: "root", equipmentId: "PUMP-1", severity: "high", timestamp: 1_000 }),
+      "gw",
+    );
+    await coordinator.submitIngest(
+      alarm({ id: "hidden", equipmentId: "VALVE-1", severity: "low", timestamp: 1_100 }),
+      "gw",
+    );
+    expect(coordinator.engine.getAlarm("hidden")?.state).toBe("suppressed");
+
+    store.fail = true;
+    await expect(coordinator.pump()).rejects.toThrow();
+    expect(coordinator.engine.getSuppressionPolicy().enabled).toBe(false);
+    expect(coordinator.engine.getAlarm("hidden")?.state).toBe("active");
+
+    // Reads work again, so the entry IS applied and `syncEnginePolicy()` runs —
+    // but the projection still fails, so the coordinator never becomes healthy.
+    // `degrade()` is idempotent and will not force suppression off a second
+    // time, so the health gate inside `syncEnginePolicy()` is the only thing
+    // standing between a degraded replica and silently hiding alarms again.
+    store.fail = false;
+    store.failProject = true;
+    await expect(
+      coordinator.submitConfig(
+        "policy-set",
+        { policy: { enabled: true, neverSuppressAtOrAbove: "critical" } },
+        "engineer",
+        "p2",
+      ),
+    ).rejects.toThrow(/journal unreachable/);
+
+    expect(coordinator.health().healthy).toBe(false);
+    expect(coordinator.health().suppressionDisabledByHealth).toBe(true);
+    expect(coordinator.health().policyEnabledIntent).toBe(true);
+    expect(coordinator.engine.getSuppressionPolicy().enabled).toBe(false);
+    expect(coordinator.health().suppressionActive).toBe(false);
+    expect(coordinator.engine.getAlarm("hidden")?.state).toBe("active");
+
+    // And once projection recovers, the operator's intent is honoured again.
+    store.failProject = false;
+    await coordinator.pump();
+    expect(coordinator.health().healthy).toBe(true);
     expect(coordinator.engine.getSuppressionPolicy().enabled).toBe(true);
   });
 
