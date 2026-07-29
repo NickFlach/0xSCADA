@@ -7,7 +7,7 @@
  * GET  /api/geometry/fano/cycles      — detected feedback loops (#335)
  * GET  /api/geometry/fano/gaps        — uncovered process areas (#335)
  * GET  /api/geometry/classes          — all 96 classes with entity counts (#336)
- * POST /api/geometry/rules            — custom classification overrides (#336)
+ * POST /api/geometry/rules            — explicit refusal for unwired overrides (#641)
  * POST /api/geometry/recalibrate      — re-classify all entities (#336)
  */
 
@@ -15,43 +15,17 @@ import { Router, type Request, type Response } from "express";
 import { FluxPublisher } from "../services/flux/index.js";
 import { FANO_LINES, isFanoRelated, geometricSimilarity } from "../services/geometry/fano.js";
 import { decodeClassIndex, Quadrant, Triality, type ClassComponents } from "../services/geometry/types.js";
-import { classify, classifyEntity } from "../services/geometry/classifier.js";
+import { classifyEntity } from "../services/geometry/classifier.js";
 import { requireControlPlaneAccess } from "../middleware/control-plane-auth";
-
-/** Max allowed regex pattern length to mitigate ReDoS */
-const MAX_REGEX_PATTERN_LENGTH = 200;
 
 const requireGeometryWrite = requireControlPlaneAccess({
   scopes: ["geometry.write"],
 });
 
-/** Validate and sanitize a regex pattern string */
-function validateRegexPattern(pattern: string): { valid: boolean; error?: string } {
-  if (pattern.length > MAX_REGEX_PATTERN_LENGTH) {
-    return { valid: false, error: `Pattern too long (max ${MAX_REGEX_PATTERN_LENGTH} chars)` };
-  }
-  // Reject patterns with known ReDoS-prone constructs
-  if (/(\.\*){3,}|(\+\+)|(\*\*)|(\{\d{4,}\})/.test(pattern)) {
-    return { valid: false, error: "Pattern contains potentially unsafe constructs" };
-  }
-  try {
-    new RegExp(pattern);
-    return { valid: true };
-  } catch (e) {
-    return { valid: false, error: `Invalid regex: ${(e as Error).message}` };
-  }
-}
-
-/** In-memory classification rule overrides (#336) */
-interface ClassificationOverride {
-  pattern: string;         // regex pattern for entity type/id
-  quadrant?: number;       // force h2
-  triality?: number;       // force d
-  slot?: number;           // force l
-  createdAt: number;
-}
-
-const overrides: ClassificationOverride[] = [];
+const CUSTOM_RULES_REFERENCE = "https://github.com/NickFlach/0xSCADA/issues/641";
+const CUSTOM_RULES_DETAIL =
+  "Custom geometry classification overrides are not implemented. The classifier and " +
+  "recalibration path do not consume custom rules, so no rule was stored or applied.";
 
 const QUADRANT_NAMES = ["sensor", "control", "alarm", "maintenance"];
 const TRIALITY_NAMES = ["site", "asset", "event"];
@@ -271,38 +245,22 @@ export function geometryRoutes(fluxPublisher: FluxPublisher | null): Router {
     });
   });
 
-  // ── Custom classification rules (#336) ─────────────────────────────────────
-  router.post("/rules", requireGeometryWrite, (req: Request, res: Response) => {
-    const { pattern, quadrant, triality, slot } = req.body || {};
-    if (!pattern || typeof pattern !== "string") {
-      return res.status(400).json({ error: "pattern (string) is required" });
-    }
-
-    // Validate and sanitize regex pattern
-    const validation = validateRegexPattern(pattern);
-    if (!validation.valid) {
-      return res.status(400).json({ error: validation.error });
-    }
-
-    const override: ClassificationOverride = {
-      pattern,
-      quadrant: quadrant != null ? Number(quadrant) : undefined,
-      triality: triality != null ? Number(triality) : undefined,
-      slot: slot != null ? Number(slot) : undefined,
-      createdAt: Date.now(),
-    };
-
-    overrides.push(override);
-
-    res.status(201).json({
-      message: "Classification rule added",
-      totalRules: overrides.length,
-      rule: override,
+  // ── Unavailable custom classification rules (#641) ─────────────────────────
+  router.post("/rules", requireGeometryWrite, (_req: Request, res: Response) => {
+    res.status(501).json({
+      error: "not_implemented",
+      detail: CUSTOM_RULES_DETAIL,
+      reference: CUSTOM_RULES_REFERENCE,
     });
   });
 
   router.get("/rules", (_req: Request, res: Response) => {
-    res.json({ rules: overrides });
+    res.json({
+      configured: false,
+      rules: [],
+      detail: CUSTOM_RULES_DETAIL,
+      reference: CUSTOM_RULES_REFERENCE,
+    });
   });
 
   // ── Recalibrate all entities (#336) ────────────────────────────────────────
