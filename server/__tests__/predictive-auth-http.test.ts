@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import express from "express";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createServer, type Server } from "node:http";
 
 import { _resetControlPlaneAuthCache } from "../middleware/control-plane-auth";
@@ -8,6 +11,7 @@ import {
   type ApiKeyRecord,
 } from "../middleware/api-gateway";
 import { predictiveRoutes } from "../routes/predictive";
+import { predictiveStore } from "../services/predictive/store";
 
 interface TestServer {
   server: Server;
@@ -25,6 +29,7 @@ interface RouteCase {
 
 const readRoutes: RouteCase[] = [
   { method: "GET", path: "/tags", authorizedStatus: 200 },
+  { method: "GET", path: "/configured-tags", authorizedStatus: 200 },
   { method: "GET", path: "/thresholds/unknown-tag", authorizedStatus: 200 },
   { method: "GET", path: "/alerts", authorizedStatus: 200 },
   { method: "GET", path: "/status", authorizedStatus: 200 },
@@ -156,8 +161,13 @@ function request(
 describe("predictive HTTP authorization", () => {
   const originalApiKeys = process.env.API_KEYS;
   let testServer: TestServer;
+  let temporaryDirectory: string;
 
   beforeAll(async () => {
+    // #546: the routes now read and write a real durable store. Point it at a
+    // throwaway file so authorization tests cannot touch a developer database.
+    temporaryDirectory = mkdtempSync(join(tmpdir(), "predictive-auth-"));
+    process.env.PREDICTIVE_SQLITE_PATH = join(temporaryDirectory, "predictive.sqlite");
     process.env.API_KEYS = [
       "read-key:predictive-reader:predictive.read",
       "recommend-key:predictive-recommender:predictive.recommend",
@@ -174,7 +184,11 @@ describe("predictive HTTP authorization", () => {
     await closeServer(testServer.server);
     if (originalApiKeys === undefined) delete process.env.API_KEYS;
     else process.env.API_KEYS = originalApiKeys;
+    delete process.env.PREDICTIVE_SQLITE_PATH;
     _resetControlPlaneAuthCache();
+    // Release the durable-store handle before removing the file it holds open.
+    await predictiveStore.close();
+    rmSync(temporaryDirectory, { recursive: true, force: true });
   });
 
   it.each([...readRoutes, ...recommendationRoutes, ...mutationRoutes])(

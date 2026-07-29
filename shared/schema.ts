@@ -813,6 +813,86 @@ export const pidTuningAudit = pgTable("pid_tuning_audit", {
   recordedAtIdx: index("idx_pid_tuning_audit_recorded_at").on(table.recordedAt),
 }));
 
+// ─── Predictive Maintenance Durable State (ADR-0013 [13.1], #212/#493, #546) ─
+
+/**
+ * Operator-configured per-tag detection thresholds.
+ *
+ * This is durable *configuration*, not sampled data: it changes only when an
+ * operator calls `PUT /api/predictive/thresholds/:tagId`, and it is what the
+ * detectors are graded against. Holding it in a process-local Map meant a
+ * restart silently reverted every tag to the built-in defaults — a tag that had
+ * been deliberately desensitised would start alarming again, and a tag that had
+ * been made more sensitive would stop. `updated_by` is the authenticated
+ * control-plane principal (API key record name), never a request body field.
+ *
+ * Retention: none. Operator configuration is kept until the operator changes
+ * it. Raw prediction history has a completely separate policy — it is an
+ * in-process sliding window that is never written here (see
+ * `server/services/predictive/engine.ts`).
+ */
+export const predictiveTagThresholds = pgTable("predictive_tag_thresholds", {
+  tagId: varchar("tag_id", { length: 256 }).primaryKey(),
+  minSamples: integer("min_samples").notNull(),
+  zScoreThreshold: doublePrecision("z_score_threshold").notNull(),
+  ewmaAlpha: doublePrecision("ewma_alpha").notNull(),
+  ewmaL: doublePrecision("ewma_l").notNull(),
+  iqrMultiplier: doublePrecision("iqr_multiplier").notNull(),
+  ensembleWeights: jsonb("ensemble_weights").$type<Record<string, number>>().notNull(),
+  severityThresholds: jsonb("severity_thresholds")
+    .$type<{ warning: number; critical: number; emergency: number }>()
+    .notNull(),
+  failureLimits: jsonb("failure_limits").$type<{ low?: number; high?: number }>(),
+  updatedBy: varchar("updated_by", { length: 128 }).notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+}, (table) => ({
+  updatedAtIdx: index("idx_predictive_thresholds_updated_at").on(table.updatedAt),
+}));
+
+/**
+ * Generated predictive alerts and their acknowledgement state.
+ *
+ * `id` is content-derived (tag + severity + cooldown window), not a process
+ * counter, so a restarted process or a second replica that observes the same
+ * anomaly writes the same row instead of a duplicate. Inserts use
+ * ON CONFLICT DO NOTHING, which makes the shared table — rather than a
+ * process-local `lastAlertAt` Map — the alert-suppression authority.
+ *
+ * `acknowledged_by` / `acknowledged_at` are the audit half of the row: who
+ * took ownership of the alert and when. Acknowledgement is a conditional
+ * UPDATE (`WHERE acknowledged = false`), so the first acknowledgement wins
+ * across replicas and a later one is reported as `already-acknowledged`
+ * instead of overwriting the original attribution.
+ *
+ * Retention (distinct from operator configuration above, and applied by
+ * `server/services/predictive/index.ts`):
+ *   - acknowledged alerts are pruned after PREDICTIVE_ALERT_RETENTION_MS
+ *   - any alert is pruned after PREDICTIVE_ALERT_MAX_AGE_MS
+ *   - a row cap bounds the table; evictions are emitted, never silent
+ */
+export const predictiveAlerts = pgTable("predictive_alerts", {
+  id: varchar("id", { length: 64 }).primaryKey(),
+  tagId: varchar("tag_id", { length: 256 }).notNull(),
+  severity: varchar("severity", { length: 16 }).notNull(),
+  score: doublePrecision("score").notNull(),
+  message: text("message").notNull(),
+  detectors: jsonb("detectors").$type<string[]>().notNull(),
+  recommendation: text("recommendation").notNull(),
+  /** Data-clock timestamp of the observation that triggered the alert. */
+  observedAt: timestamp("observed_at", { withTimezone: true }).notNull(),
+  /** Wall-clock time the row was written. Retention and ordering key. */
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  acknowledged: boolean("acknowledged").default(false).notNull(),
+  acknowledgedBy: varchar("acknowledged_by", { length: 128 }),
+  acknowledgedAt: timestamp("acknowledged_at", { withTimezone: true }),
+}, (table) => ({
+  tagIdx: index("idx_predictive_alerts_tag").on(table.tagId),
+  severityIdx: index("idx_predictive_alerts_severity").on(table.severity),
+  acknowledgedIdx: index("idx_predictive_alerts_acknowledged").on(table.acknowledged),
+  createdAtIdx: index("idx_predictive_alerts_created_at").on(table.createdAt),
+}));
+
 // ─── Agent Marketplace (ADR-0013 [13.6], #217) ───────────────────────────────
 
 /**
@@ -984,6 +1064,10 @@ export type ModbusRegisterMapRow = typeof modbusRegisterMap.$inferSelect;
 export type InsertModbusRegisterMapRow = typeof modbusRegisterMap.$inferInsert;
 export type PidTuningAuditRow = typeof pidTuningAudit.$inferSelect;
 export type InsertPidTuningAuditRow = typeof pidTuningAudit.$inferInsert;
+export type PredictiveTagThresholdRow = typeof predictiveTagThresholds.$inferSelect;
+export type InsertPredictiveTagThresholdRow = typeof predictiveTagThresholds.$inferInsert;
+export type PredictiveAlertRow = typeof predictiveAlerts.$inferSelect;
+export type InsertPredictiveAlertRow = typeof predictiveAlerts.$inferInsert;
 export type PluginRegistryRow = typeof pluginRegistry.$inferSelect;
 export type InsertPluginRegistryRow = typeof pluginRegistry.$inferInsert;
 export type PluginInstallationRow = typeof pluginInstallations.$inferSelect;
