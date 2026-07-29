@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { rateLimit as expressRateLimit } from 'express-rate-limit';
 import { z } from 'zod';
 import {
   RemediationAuditPersistenceError,
@@ -47,13 +48,27 @@ const requireRemediationOperator = requireControlPlaneAccess({
   roles: ['operator'],
   scopes: ['sre.remediate'],
 });
+// Pair a per-process fail-safe with the shared limiter so requests remain
+// bounded if its backend degrades. Both guards run before authentication.
 const remediationStatusRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   maxRequests: 60,
 });
+const remediationStatusProcessRateLimit = expressRateLimit({
+  windowMs: 60_000,
+  limit: 60,
+  standardHeaders: false,
+  legacyHeaders: true,
+});
 const remediationExecuteRateLimit = rateLimitMiddleware({
   windowMs: 60_000,
   maxRequests: 10,
+});
+const remediationExecuteProcessRateLimit = expressRateLimit({
+  windowMs: 60_000,
+  limit: 10,
+  standardHeaders: false,
+  legacyHeaders: true,
 });
 
 function errorMessage(error: unknown): string {
@@ -81,6 +96,7 @@ router.post('/sre/slos/:sloId/evaluate', (req, res) => {
 
 router.get(
   '/sre/remediations/status',
+  remediationStatusProcessRateLimit,
   remediationStatusRateLimit,
   requireRemediationOperator,
   (_req, res) => {
@@ -91,6 +107,7 @@ router.get(
 
 router.post(
   '/sre/remediations/execute',
+  remediationExecuteProcessRateLimit,
   remediationExecuteRateLimit,
   requireRemediationOperator,
   async (req, res) => {
