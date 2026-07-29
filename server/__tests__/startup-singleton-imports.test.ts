@@ -57,12 +57,14 @@ describe("startup singleton module identity", () => {
         "./gateway",
         "./services/flux",
         "./services/nats",
+        "./scaling/upgrade-runtime",
         "./bridge/anchor-backend",
       ],
     },
     {
       file: "server/health/index.ts",
       modules: [
+        "../scaling/upgrade-runtime",
         "../simulator",
         "../gateway/store-and-forward",
         "../gateway/store-and-forward-runtime",

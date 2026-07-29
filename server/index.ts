@@ -21,6 +21,7 @@ import { startFluxIntegration } from "./services/flux";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
 import { startBlueprintControlLoop } from "./blueprint/control-loop";
+import { zeroDowntimeUpgradeRuntime } from "./scaling/upgrade-runtime";
 // Blueprint watchdog / safe-state composition root (#459). Off unless the
 // deployment supplies BLUEPRINT_SAFETY_BINDINGS[_FILE].
 import { blueprintSafetyHost } from "./blueprint/safety-host";
@@ -101,6 +102,14 @@ registerSwaggerRoutes(app, gatewayConfig);
   // Initialize edge store-and-forward service
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");
+
+  // Bind the real deployment controller, durable journal, migrations, and
+  // feature flags before the API starts accepting traffic. Enabled deployments
+  // fail startup closed when any production upgrade binding is incomplete.
+  await zeroDowntimeUpgradeRuntime.initialize();
+  if (zeroDowntimeUpgradeRuntime.isEnabled()) {
+    log("Zero-downtime upgrade runtime initialized");
+  }
 
   // Initialize bridge modules (event-anchor, state-sync)
   await initializeBridges();
