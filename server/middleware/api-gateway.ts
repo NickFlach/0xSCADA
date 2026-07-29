@@ -12,6 +12,7 @@ import { Request, Response, NextFunction, Router, Express } from 'express';
 import crypto from 'crypto';
 import { readFileSync } from 'fs';
 import { z, ZodSchema } from 'zod';
+import { rateLimit as expressRateLimit } from 'express-rate-limit';
 import {
   createRateLimiter,
   type CreateRateLimiterOptions,
@@ -424,7 +425,34 @@ export function setupApiGateway(app: Express, config: Partial<ApiGatewayConfig> 
   // Order matters
   app.use(requestIdMiddleware());
   app.use(corsMiddleware(cfg.corsOrigins));
+  // Two limiters, deliberately, at the same bound.
+  //
+  // `rateLimitMiddleware` is the real one: it can be backed by Redis
+  // (RATE_LIMITER_BACKEND=redis), so under multiple replicas it enforces the
+  // limit fleet-wide rather than per process. It is hand-rolled, which means
+  // static analysis cannot recognise it as a rate limiter — every `/api` route
+  // handler is reported as `js/missing-rate-limiting` even though all of them
+  // sit behind this line.
+  //
+  // `express-rate-limit` is modelled by CodeQL. Layering it here at the same
+  // window and limit makes the protection visible to the scanner once, for the
+  // whole surface, instead of requiring a second limiter on every new route
+  // (the per-route approach taken in #631). It is per-process, so it never
+  // loosens the shared bound — it is a local backstop for when Redis is
+  // unavailable, which is exactly when a process-local limit matters most.
   app.use('/api/', rateLimitMiddleware(cfg.rateLimit));
+  app.use(
+    '/api/',
+    expressRateLimit({
+      windowMs: cfg.rateLimit.windowMs,
+      limit: cfg.rateLimit.maxRequests,
+      standardHeaders: false,
+      // `rateLimitMiddleware` above already owns the response headers and the
+      // 429 body; this layer must not overwrite them when it is not the one
+      // rejecting.
+      legacyHeaders: false,
+    }),
+  );
   if (cfg.enableApiKeyAuth) {
     app.use('/api/', apiKeyMiddleware(keyManager.getKeysMap(), cfg.publicRoutes));
     app.use('/api/', mutationAuthorizationMiddleware());
