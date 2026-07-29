@@ -108,6 +108,9 @@ export * from './reporting';
 export * from './marketplace';
 export { marketplaceService } from './marketplace';
 
+// ── Production SRE Service (ADR-0014 [14.6], #226) ──────────────────────────
+export * from './sre';
+
 // ── NL Process Query Service (ADR-0013 [13.5], #216) ─────────────────────────
 // Exported by name rather than with `export *`: the module's public surface
 // includes generic bound names (MAX_RESULT_ITEMS, tokenize, ...) that would be
@@ -291,7 +294,8 @@ export const serviceRegistry = {
   ubiquity: () => import('./ubiquity'),
   l2Rollup: () => import('./l2-rollup'),
   optimization: () => import('./optimization'),
-  spc: () => import('./spc')
+  spc: () => import('./spc'),
+  sre: () => import('./sre')
 } as const;
 
 export type ServiceName = keyof typeof serviceRegistry;

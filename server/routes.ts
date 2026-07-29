@@ -29,6 +29,11 @@ import { tuningService } from "./services/tuning";
 import { marketplaceRoutes } from "./routes/marketplace";
 import { marketplaceService } from "./services/marketplace";
 import { nlQueryService } from "./services/nlquery";
+import { sreReadinessRoutes } from "./routes/sre-readiness";
+import {
+  configureRemediationRuntime,
+  type RemediationRuntimeConfiguration,
+} from "./services/sre";
 import { governanceRoutes } from "./routes/governance";
 import { complianceReadinessRoutes } from "./routes/compliance-readiness";
 import {
@@ -55,6 +60,7 @@ import { cachedEventBridge } from "./websocket/cached-event-bridge";
 import type { WebSocketAuthOptions } from "./websocket/upgrade-auth";
 
 export interface RouteRegistrationOptions {
+  remediation?: RemediationRuntimeConfiguration;
   websocketAuth?: WebSocketAuthOptions;
   complianceCollectors?: readonly EvidenceCollector[];
 }
@@ -94,7 +100,11 @@ export async function registerRoutes(
   // ADR-0013 [13.4] (#215). PID tuning deliberately does NOT live under
   // /api/pid: that prefix belongs to the P&ID diagram surface the client
   // already calls (client/src/pages/pid-view.tsx -> /api/pid/diagrams/:id).
+  if (options.remediation !== undefined) {
+    configureRemediationRuntime(options.remediation);
+  }
   app.use("/api/tuning", tuningRoutes);
+  app.use("/api/governance", sreReadinessRoutes);  // ADR-0014 [14.6] (#226)
   app.use("/api/marketplace", marketplaceRoutes);  // ADR-0013 [13.6] (#217)
   // Mount before the legacy governance router so real scan results win over
   // its historical placeholder handlers.
