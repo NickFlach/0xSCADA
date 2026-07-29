@@ -74,7 +74,17 @@ const openServers: Server[] = [];
 async function startApp(logs: string[] = []): Promise<string> {
   const app = express();
   app.use(express.json());
-  app.use(requestLoggingMiddleware((line) => logs.push(line)));
+  // Capture the structured payload as well as the message. The CodeQL
+  // log-injection autofix in #658 moved the request details out of the
+  // formatted message and into pino's structured field — which is the right
+  // place for untrusted values, since pino encodes them — but this sink only
+  // recorded the first argument, so the redaction assertions below were
+  // silently checking a string that no longer contains the response at all.
+  app.use(
+    requestLoggingMiddleware((message, ...args) =>
+      logs.push(args.length > 0 ? `${message} ${JSON.stringify(args)}` : message),
+    ),
+  );
   setupApiGateway(app, {
     enableApiKeyAuth: true,
     apiKeys: new Map(records.map((record) => [record.key, record])),
