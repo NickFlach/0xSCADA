@@ -79,7 +79,16 @@ export const logError = (error: unknown, message?: string) => {
     return;
   }
 
-  logger.error(error, safeMessage ?? 'Unexpected error');
+  const fallbackErrorText = (() => {
+    try {
+      return typeof error === 'object' ? JSON.stringify(error) : String(error);
+    } catch {
+      return String(error);
+    }
+  })();
+  const safeFallbackError = escapeLogMessage(fallbackErrorText);
+  const combinedFallbackMessage = safeMessage ? `${safeMessage}: ${safeFallbackError}` : safeFallbackError;
+  logger.error(combinedFallbackMessage);
 };
 
 export const logWarn = (message: string, ...args: any[]) => {
