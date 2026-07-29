@@ -31,7 +31,6 @@ shared/types/
 │   ├── index.ts
 │   ├── common.ts              # Service patterns & interfaces
 │   ├── adapters.ts            # Vendor adapters (moved)
-│   ├── ml.ts                  # Machine Learning types
 │   ├── blockchain.ts          # Blockchain & L2 types
 │   ├── compliance.ts          # Compliance & audit types
 │   ├── geometry.ts            # Spatial & geometric types
@@ -61,10 +60,8 @@ graph TD
     A --> C[services/common.ts]
     A --> D[api/rest.ts]
     
-    B --> E[services/ml.ts]
     B --> F[services/compliance.ts]
     
-    C --> E
     C --> F
     C --> G[services/blockchain.ts]
     

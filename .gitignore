@@ -33,6 +33,7 @@ nul
 # local dev database (test artifact)
 dev-database.sqlite
 *.sqlite
+.data/
 
 # test coverage output
 coverage/

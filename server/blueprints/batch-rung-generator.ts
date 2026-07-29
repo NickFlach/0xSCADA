@@ -149,7 +149,7 @@ export class BatchRungGenerator {
       const values = this.parseCSVLine(lines[i]);
       if (values.length === 0) continue;
 
-      const row: Record<string, string> = {};
+      const row: Record<string, string> = Object.create(null); // null-prototype: header cells are untrusted keys
       for (let j = 0; j < headers.length && j < values.length; j++) {
         const key = headers[j].trim();
         const value = values[j].trim();

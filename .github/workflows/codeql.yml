@@ -1,0 +1,79 @@
+name: CodeQL
+
+# Static analysis for the TypeScript/JavaScript tree.
+#
+# WHY THIS FILE EXISTS. CodeQL used to run here through GitHub-managed *default
+# setup*, not a committed workflow — `git log --all -- '.github/workflows/*codeql*'`
+# is empty. That setup is now `not-configured`, so the last analysis on this repo
+# was 2026-02-17 against commit 55cdb8ed. Everything merged since then has been
+# unscanned, and the alerts left over from February are pinned to line numbers
+# that no longer mean anything (see the discussion on the PR that added this).
+#
+# Committing the workflow (CodeQL "advanced setup") makes scanning a reviewable
+# part of the repo rather than a console toggle that can be switched off without
+# leaving a trace in git.
+#
+# NOTE: advanced setup and default setup are mutually exclusive. If default setup
+# is ever re-enabled in Settings → Code security, this workflow's uploads will be
+# rejected — pick one. This file is the one under version control.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    # Weekly floor so the tree is still scanned during quiet periods. Offset off
+    # the hour to avoid the load spike other repos schedule at :00.
+    - cron: "23 4 * * 1"
+  workflow_dispatch: {}
+
+# Least privilege: CodeQL needs to read the tree and write its findings back.
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: codeql-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        # `javascript-typescript` is the current single language pack; the two
+        # historical analyses on this repo (`/language:javascript` and
+        # `/language:typescript`) were merged upstream into it.
+        language: [javascript-typescript]
+
+    steps:
+      - uses: actions/checkout@v7
+
+      # Pinned to the same Node major every other workflow uses (#598, #604), so
+      # a version skew here cannot produce findings the rest of CI never sees.
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v4
+        with:
+          languages: ${{ matrix.language }}
+          # `security-and-quality` is deliberately NOT used: it adds
+          # maintainability rules that would bury the security findings this is
+          # here to surface. `security-extended` keeps the signal security-only
+          # while covering more than the default suite.
+          queries: security-extended
+
+      # No build step. This tree is interpreted TypeScript, so CodeQL's
+      # extractor works from source; running `npm ci` here would only add a
+      # multi-minute install for no additional coverage.
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v4
+        with:
+          category: "/language:${{ matrix.language }}"

@@ -63,6 +63,40 @@ describe("Deploy Command", () => {
     it("should support dry-run", async () => { await program.parseAsync(["node", "test", "deploy", "--dry-run", "metrics"]); expect(outputInfo).toHaveBeenCalledWith(expect.stringContaining("[DRY-RUN]")); });
   });
 
+  describe("generated compose Node image pins (#604)", () => {
+    // The dev stack's hardhat service runs `npx hardhat node` straight off its
+    // base image, and hardhat 3.x aborts on Node < 22.13.0, so anything below
+    // the 22 line generates a stack that cannot start.
+    const MINIMUM_NODE_MAJOR = 22;
+
+    async function generateCompose(env: string): Promise<string> {
+      await program.parseAsync(["node", "test", "deploy", "--env", env, "compose", "generate"]);
+      const written = vi.mocked(fs.writeFileSync).mock.calls[0]?.[1];
+      expect(typeof written).toBe("string");
+      return String(written);
+    }
+
+    it.each(["dev", "staging", "production"])("pins every node image in the %s compose at Node >= 22", async (env) => {
+      const compose = await generateCompose(env);
+      const majors = [...compose.matchAll(/^\s*image:\s*node:(\d+)/gm)].map((match) => Number.parseInt(match[1], 10));
+      // A non-numeric tag (node:lts-alpine, node:alpine) would drop out of the
+      // match above, so assert the emitted node images were all readable.
+      const nodeImages = [...compose.matchAll(/^\s*image:\s*node:(\S+)/gm)];
+      expect(majors).toHaveLength(nodeImages.length);
+      for (const major of majors) {
+        expect(major).toBeGreaterThanOrEqual(MINIMUM_NODE_MAJOR);
+      }
+    });
+
+    it("gives the dev hardhat service a Node major hardhat 3.x supports", async () => {
+      const compose = await generateCompose("dev");
+      expect(compose).toContain("hardhat:");
+      const match = /hardhat:\s*\r?\n\s*image:\s*node:(\d+)/.exec(compose);
+      expect(match).not.toBeNull();
+      expect(Number.parseInt(match?.[1] ?? "0", 10)).toBeGreaterThanOrEqual(MINIMUM_NODE_MAJOR);
+    });
+  });
+
   describe("environment configurations", () => {
     it("should generate dev configuration by default", async () => { await program.parseAsync(["node", "test", "deploy", "compose", "generate"]); const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0]; expect(callArgs[1]).toContain("development"); });
     it("should generate production configuration", async () => { await program.parseAsync(["node", "test", "deploy", "--env", "production", "compose", "generate"]); const callArgs = vi.mocked(fs.writeFileSync).mock.calls[0]; expect(callArgs[1]).toContain("production"); });

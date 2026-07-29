@@ -112,11 +112,21 @@ if (status.mode !== "realtime") log.warn(status.error);
 ```
 
 `BlueprintTickLoop` (`server/blueprint/tick-loop.ts`) accepts the same
-target as an option and forwards it at `start()`. Its `TickFn` seam is what the
-deterministic runtime from #457 plugs into:
+target as an option and forwards it at `start()`. It does **not** default to the
+process-wide scheduler: the instance is a required option, so a loop can never
+apply a scheduling decision to the shared singleton by accident (#622). Its
+`TickFn` seam is what the deterministic runtime from #457 plugs into:
 
 ```ts
-const loop = new BlueprintTickLoop({ blueprintId: bp.id, periodMs: 10 });
+import { BlueprintTickLoop, getScheduler } from "./server/blueprint";
+
+const loop = new BlueprintTickLoop({
+  blueprintId: bp.id,
+  periodMs: 10,
+  // Explicit: pass getScheduler() for the process-wide instance, or your own
+  // TickScheduler when the control process owns its configuration.
+  scheduler: getScheduler(),
+});
 loop.setTickFn(() => runtime.tickFast());
 loop.start();
 ```

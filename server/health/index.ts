@@ -14,10 +14,13 @@ import { blockchainService } from '../blockchain';
 import { registry, collectProcessMetrics } from '../metrics';
 import { fieldSimulator } from '../simulator';
 import { storeAndForwardService } from '../gateway/store-and-forward';
+import { edgeStoreAndForwardRuntime } from '../gateway/store-and-forward-runtime';
 import { getBridgeHealthStatus } from '../bridge';
+import { federationRuntime } from '../scaling/federation-runtime';
 import { describeBlueprintControlLoopHealth, getBlueprintControlLoop } from '../blueprint/control-loop';
 import { publishControlLoopProbeStatus } from '../integrity/latency-probe';
 import { getBlueprintProductionSafetyStatus } from '../blueprint/production-safety';
+import { zeroDowntimeUpgradeRuntime } from '../scaling/upgrade-runtime';
 import type { Response } from 'express';
 // Tick-aware scheduler (#458): surface schedulingMode in /health and append
 // blueprint tick telemetry to /metrics.
@@ -28,6 +31,7 @@ import type { Response } from 'express';
 // applied only by an explicit `applyScheduler()` call from a composition root
 // that owns a dedicated control process (see server/blueprint/scheduler.ts).
 import { createSchedulerCheck, exposeBlueprintMetrics } from '../blueprint';
+import { horizontalScaleRuntime } from '../scaling/horizontal-runtime';
 
 // Control-loop latency telemetry (#460): publish the sentinel probe's liveness
 // gauge as part of normal server composition so `scada_control_loop_probe_up`
@@ -125,19 +129,59 @@ healthManager.registerSimple(
   false,
 );
 
-// 7. Edge store-and-forward service (required for edge deployments)
-healthManager.registerSimple(
-  'store-and-forward',
-  async () => {
+// 7. Edge store-and-forward service. Upstream loss is degraded, not unready:
+// the durable local queue is specifically required to operate through it.
+healthManager.register({
+  name: 'store-and-forward',
+  required: true,
+  check: async () => {
     try {
       const status = await storeAndForwardService.healthCheck();
-      return status.healthy;
-    } catch {
-      return false;
+      return {
+        name: 'store-and-forward',
+        status: status.healthy
+          ? status.degraded
+            ? 'degraded'
+            : 'healthy'
+          : 'unhealthy',
+        lastCheck: new Date(),
+        message: status.message,
+        details: {
+          productionBindingsEnabled: edgeStoreAndForwardRuntime.isEnabled(),
+          productionBindingsInitialized:
+            edgeStoreAndForwardRuntime.isInitialized(),
+          ...storeAndForwardService.getStatus(),
+        },
+      };
+    } catch (error) {
+      return {
+        name: 'store-and-forward',
+        status: 'unhealthy',
+        lastCheck: new Date(),
+        message: error instanceof Error ? error.message : String(error),
+      };
     }
   },
-  true, // Required for edge deployments
-);
+});
+
+healthManager.register({
+  name: 'horizontal-scaling',
+  required: horizontalScaleRuntime.isRequired(),
+  check: async () => {
+    const health = await horizontalScaleRuntime.health();
+    return {
+      name: 'horizontal-scaling',
+      status: health.healthy
+        ? health.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: health.message,
+      details: health.details ? { ...health.details } : undefined,
+    };
+  },
+});
 
 // 8. Bridge modules (event-anchor, state-sync)
 healthManager.registerSimple(
@@ -152,6 +196,25 @@ healthManager.registerSimple(
   },
   false, // Optional, depends on configuration
 );
+
+healthManager.register({
+  name: 'multi-site-federation',
+  required: federationRuntime.isRequired(),
+  check: async () => {
+    const health = await federationRuntime.health();
+    return {
+      name: 'multi-site-federation',
+      status: health.healthy
+        ? health.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: health.message,
+      details: health.details ? { ...health.details } : undefined,
+    };
+  },
+});
 
 // 9. Deterministic blueprint control loop (#457).
 //    Optional and OFF by default. "Disabled" is reported as healthy — an
@@ -203,6 +266,28 @@ healthManager.register({
 //     probes the kernel and never applies a policy. Real-time scheduling stays
 //     off unless a dedicated control process opts in via OXSCADA_RT_ENABLED.
 healthManager.register(createSchedulerCheck());
+
+// Zero-downtime upgrade controller. Disabled deployments report healthy;
+// enabled deployments expose their real controller/journal health. Operators
+// can make this readiness-critical with ZERO_DOWNTIME_UPGRADES_REQUIRED=true.
+healthManager.register({
+  name: 'zero-downtime-upgrades',
+  required: zeroDowntimeUpgradeRuntime.isRequired(),
+  check: async () => {
+    const status = await zeroDowntimeUpgradeRuntime.health();
+    return {
+      name: 'zero-downtime-upgrades',
+      status: status.healthy
+        ? status.degraded
+          ? 'degraded'
+          : 'healthy'
+        : 'unhealthy',
+      lastCheck: new Date(),
+      message: status.message,
+      details: status.details ? { ...status.details } : undefined,
+    };
+  },
+});
 
 // ── Sync health → Prometheus after each check cycle ──────────────────────────
 healthManager.onCheckComplete((result) => {

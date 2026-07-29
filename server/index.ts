@@ -14,18 +14,22 @@ import { initializeDatabase } from "./storage";
 import { fieldSimulator } from "./simulator";
 import { initializeDefaultAgents, startDefaultAgents } from "./agents";
 import { storeAndForwardService } from "./gateway/store-and-forward";
+import { edgeStoreAndForwardRuntime } from "./gateway/store-and-forward-runtime";
 import { initializeBridges } from "./bridge";
 import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
+import { federationRuntime } from "./scaling/federation-runtime";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
 import { startBlueprintControlLoop } from "./blueprint/control-loop";
+import { zeroDowntimeUpgradeRuntime } from "./scaling/upgrade-runtime";
 // Blueprint watchdog / safe-state composition root (#459). Off unless the
 // deployment supplies BLUEPRINT_SAFETY_BINDINGS[_FILE].
 import { blueprintSafetyHost } from "./blueprint/safety-host";
 // Observed-liveness collector (#456). Off unless
 // VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and ANCHOR_NODE_URLS is set.
 import { startValidatorLivenessCollector } from "./blockchain/liveness-collector";
+import { horizontalScaleRuntime } from "./scaling/horizontal-runtime";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -85,14 +89,43 @@ registerSwaggerRoutes(app, gatewayConfig);
   await initializeDatabase();
   log("Database initialized");
 
+  // Bind authenticated discovery, federated query, and replicated
+  // configuration adapters before accepting traffic.
+  await federationRuntime.initialize();
+  if (federationRuntime.isEnabled()) {
+    log("Multi-site federation runtime initialized");
+  }
+
   await fieldSimulator.initialize();
   
   await initializeDefaultAgents();
   await startDefaultAgents();
+
+  // Bind real historian, gateway, load-balancer, and event-bus adapters before
+  // accepting traffic. An enabled but incomplete deployment fails startup.
+  await horizontalScaleRuntime.initialize();
+  if (horizontalScaleRuntime.isEnabled()) {
+    log("Horizontal scaling runtime initialized");
+  }
   
+  // Install a real upstream transport before the shared queue singleton starts.
+  // Explicit production enablement without bindings fails startup closed.
+  await edgeStoreAndForwardRuntime.initialize();
+  if (edgeStoreAndForwardRuntime.isEnabled()) {
+    log("Production edge store-and-forward bindings initialized");
+  }
+
   // Initialize edge store-and-forward service
   await storeAndForwardService.initialize();
   log("Edge store-and-forward service initialized");
+
+  // Bind the real deployment controller, durable journal, migrations, and
+  // feature flags before the API starts accepting traffic. Enabled deployments
+  // fail startup closed when any production upgrade binding is incomplete.
+  await zeroDowntimeUpgradeRuntime.initialize();
+  if (zeroDowntimeUpgradeRuntime.isEnabled()) {
+    log("Zero-downtime upgrade runtime initialized");
+  }
 
   // Initialize bridge modules (event-anchor, state-sync)
   await initializeBridges();

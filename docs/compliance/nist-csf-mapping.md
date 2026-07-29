@@ -1,61 +1,56 @@
-# NIST Cybersecurity Framework Mapping — 0xSCADA
+# NIST Cybersecurity Framework 2.0 Mapping
 
-## Overview
+The compliance toolkit maps evidence across all six NIST CSF 2.0 functions.
+The mapping is a maintained engineering interpretation, not a certification or
+legal opinion. Catalog version and individual mapped IEC 62443 controls are
+included in every scan.
 
-Mapping of 0xSCADA capabilities to the NIST Cybersecurity Framework (CSF) v2.0 functions.
+## Automated control set
 
-## Function Mapping
+| Function | Toolkit control | Assessment intent | Required evidence |
+|---|---|---|---|
+| Govern | `NIST-GV.OC-01` | OT cybersecurity ownership and approved policy | `governance.securityOwner`, `governance.securityPolicyApproved` |
+| Identify | `NIST-ID.AM-01` | Current asset inventory with ownership | `assets.inventoryCurrent` |
+| Identify | `NIST-ID.RA-01` | Dependency and image vulnerability discovery | `integrity.dependencyScan`, `integrity.imageScan` |
+| Protect | `NIST-PR.AA-01` | Identity lifecycle management | `identity.uniqueUsers`, `identity.serviceAccountsInventoried` |
+| Protect | `NIST-PR.AA-03` | Strong privileged and remote authentication | `identity.adminMfa`, `identity.remoteMfa` |
+| Protect | `NIST-PR.AA-05` | Least privilege and deny by default | `access.rbacEnabled`, `access.defaultDeny` |
+| Protect | `NIST-PR.DS-01` | Protected data at rest | `crypto.atRestEncryption` |
+| Protect | `NIST-PR.DS-02` | Protected data in transit | `crypto.tlsEnabled` |
+| Protect | `NIST-PR.PS-06` | Software and configuration integrity | `integrity.signedArtifacts`, `integrity.configurationAudit` |
+| Protect | `NIST-PR.IR-01` | Network zones and allowlisted conduits | `network.zoneInventory`, `network.defaultDenyPolicy` |
+| Detect | `NIST-DE.CM-01` | Continuous security-event monitoring | `monitoring.securityEvents` |
+| Respond | `NIST-RS.MA-01` | Owned and exercised response process | `response.onCallOwned`, `response.exerciseCompleted` |
+| Recover | `NIST-RC.RP-01` | Verified backups and recovery exercises | `recovery.backupVerified`, `recovery.exerciseCompleted` |
 
-### IDENTIFY (ID)
+## Scoring
 
-| Category | Subcategory | 0xSCADA Implementation | Status |
-|----------|-------------|----------------------|--------|
-| Asset Management | ID.AM-1: Physical device inventory | Gateway auto-discovery, tag registry | ✅ |
-| Asset Management | ID.AM-2: Software inventory | Package manifest, dependency tracking | ✅ |
-| Asset Management | ID.AM-5: Resource prioritization | Tag priority classification | ✅ |
-| Risk Assessment | ID.RA-1: Vulnerability identification | Compliance scanner, dependency audit | ✅ |
-| Risk Assessment | ID.RA-5: Risk response identification | Auto-remediation rules | ✅ |
+Each function reports:
 
-### PROTECT (PR)
+- `passed`: controls whose complete evidence set is positive;
+- `assessed`: controls with either positive or negative evidence;
+- `total`: all applicable controls in the function;
+- `score`: passed controls divided by total controls.
 
-| Category | Subcategory | 0xSCADA Implementation | Status |
-|----------|-------------|----------------------|--------|
-| Access Control | PR.AC-1: Identity management | JWT + RBAC | ✅ |
-| Access Control | PR.AC-3: Remote access management | mTLS, VPN-aware deployment | ✅ |
-| Access Control | PR.AC-5: Network integrity | Gateway segmentation, TLS everywhere | ✅ |
-| Data Security | PR.DS-1: Data-at-rest protection | AES-256 encryption | ✅ |
-| Data Security | PR.DS-2: Data-in-transit protection | TLS 1.3 | ✅ |
-| Data Security | PR.DS-6: Integrity checking | Blockchain anchoring, Merkle verification | ✅ |
-| Maintenance | PR.MA-1: Maintenance performed | Zero-downtime upgrade system | ✅ |
-| Protective Tech | PR.PT-1: Audit/log records | Immutable blockchain audit trail | ✅ |
+Unassessed controls remain in the denominator. This prevents an incomplete
+evidence export from inflating the score.
 
-### DETECT (DE)
+## Example scan
 
-| Category | Subcategory | 0xSCADA Implementation | Status |
-|----------|-------------|----------------------|--------|
-| Anomalies | DE.AE-1: Baseline established | Predictive maintenance baselines | ✅ |
-| Anomalies | DE.AE-3: Event data collected | Event pipeline + historian | ✅ |
-| Anomalies | DE.AE-5: Incident alert thresholds | Alarm correlator, configurable thresholds | ✅ |
-| Monitoring | DE.CM-1: Network monitoring | Health manager, connection tracking | ✅ |
-| Monitoring | DE.CM-7: Unauthorized monitoring | Gateway anomaly detection | ✅ |
+```ts
+import { ComplianceScanner } from '../../server/services/compliance';
 
-### RESPOND (RS)
+const scanner = new ComplianceScanner();
+const result = await scanner.runScan('NIST-CSF', evidence);
 
-| Category | Subcategory | 0xSCADA Implementation | Status |
-|----------|-------------|----------------------|--------|
-| Response Planning | RS.RP-1: Response plan execution | SRE playbooks + auto-remediation | ✅ |
-| Communications | RS.CO-2: Incident reporting | Post-mortem templates, escalation | ✅ |
-| Mitigation | RS.MI-1: Incident containment | Gateway isolation, connection draining | ✅ |
-| Mitigation | RS.MI-3: Vulnerability mitigation | Rolling updates, feature flags | ✅ |
+for (const summary of result.nistCsf!.functions) {
+  console.log(summary.function, summary.score);
+}
+```
 
-### RECOVER (RC)
+The HTTP equivalent is `POST /api/governance/compliance/scan`; use
+`frameworks: ["NIST-CSF"]` and an `evidence` array. Generate a signed-content
+audit artifact with `POST /api/governance/compliance/reports/:scanId`.
 
-| Category | Subcategory | 0xSCADA Implementation | Status |
-|----------|-------------|----------------------|--------|
-| Recovery Planning | RC.RP-1: Recovery plan execution | Database recovery playbook | ✅ |
-| Improvements | RC.IM-1: Lessons learned | Post-mortem templates | ✅ |
-| Communications | RC.CO-3: Recovery communication | Incident response runbook | ✅ |
-
-## Automated Assessment
-
-Run `ComplianceScanner.runScan('NIST-CSF')` for automated evaluation against these controls.
+See [Compliance assessment operations](assessment-guide.md) for the complete
+request and evidence-handling procedure.

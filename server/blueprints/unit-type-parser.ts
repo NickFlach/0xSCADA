@@ -67,7 +67,7 @@ export function parseUnitTypeMarkdown(content: string, sourceFile?: string): Par
       }
       
       // Parse data row
-      const row: Record<string, string> = {};
+      const row: Record<string, string> = Object.create(null); // null-prototype: header cells are untrusted keys
       headerRow.forEach((header, idx) => {
         row[header] = cells[idx] || "";
       });

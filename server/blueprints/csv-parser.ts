@@ -17,7 +17,7 @@ function parseCSV(content: string): Array<Record<string, string>> {
   
   for (let i = 1; i < lines.length; i++) {
     const values = lines[i].split(",").map(v => v.trim());
-    const row: Record<string, string> = {};
+    const row: Record<string, string> = Object.create(null); // null-prototype: CSV headers are untrusted keys
     
     headers.forEach((header, idx) => {
       row[header] = values[idx] || "";
@@ -59,7 +59,7 @@ export function parseCMInstancesCSV(
     if (!name) continue;
     
     // Extract configuration (non-standard columns)
-    const configuration: Record<string, any> = {};
+    const configuration: Record<string, any> = Object.create(null); // null-prototype: column names are untrusted keys
     for (const [key, value] of Object.entries(row)) {
       if (!standardColumns.has(key) && value) {
         // Try to parse numeric values

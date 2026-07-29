@@ -29,10 +29,17 @@ export interface Dnp3ResponseFragment {
  * CONFIRM plus any fragments queued behind it.
  */
 export interface OutstationSession {
+  /** Stable identity used to bind SAv5 challenges to this association. */
+  sav5AssociationId: number;
   pendingFragments: Dnp3ResponseFragment[];
   awaitingConfirm: Dnp3ResponseFragment | null;
 }
 
+let nextAssociationId = 1;
+
 export function createSession(): OutstationSession {
-  return { pendingFragments: [], awaitingConfirm: null };
+  const sav5AssociationId = nextAssociationId;
+  nextAssociationId =
+    nextAssociationId >= Number.MAX_SAFE_INTEGER ? 1 : nextAssociationId + 1;
+  return { sav5AssociationId, pendingFragments: [], awaitingConfirm: null };
 }

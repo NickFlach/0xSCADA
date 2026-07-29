@@ -6,7 +6,10 @@
 # ---------------------------------------------------------------------------
 # Stage 1: Build
 # ---------------------------------------------------------------------------
-FROM node:20-alpine AS builder
+# Node 22: its bundled npm 10.9+ reads the lockfile format current npm and
+# Dependabot emit. Node 20 ships npm 10.8.2, which fails `npm ci` with EUSAGE
+# (#598, #604). Guarded by test/ci/workflow-node-version.test.ts.
+FROM node:22-alpine AS builder
 
 WORKDIR /app
 
@@ -31,7 +34,7 @@ RUN npm prune --production
 # ---------------------------------------------------------------------------
 # Stage 2: Production
 # ---------------------------------------------------------------------------
-FROM node:20-alpine
+FROM node:22-alpine
 
 # Security: run as non-root
 RUN addgroup -S scada && adduser -S scada -G scada

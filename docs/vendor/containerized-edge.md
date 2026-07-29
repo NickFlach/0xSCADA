@@ -17,7 +17,7 @@ This document describes the containerized runtime pattern for deploying 0xSCADA 
 
 ### Image Characteristics
 
-- **Base:** `node:20-alpine` (~130 MB)
+- **Base:** `node:22-alpine`
 - **Final image:** ~200-300 MB (depending on native modules)
 - **Non-root execution** — runs as `scada` user
 - **Health check** — built-in HTTP health endpoint
