@@ -58,7 +58,26 @@ export const log = (message: string, ...args: any[]) => {
 };
 
 export const logError = (error: unknown, message?: string) => {
-  logger.error(error, message === undefined ? undefined : escapeLogMessage(message));
+  const safeMessage = message === undefined ? undefined : escapeLogMessage(message);
+
+  if (typeof error === 'string') {
+    logger.error(escapeLogMessage(error), safeMessage);
+    return;
+  }
+
+  if (error instanceof Error) {
+    logger.error(
+      {
+        ...error,
+        message: escapeLogMessage(error.message),
+        stack: error.stack ? escapeLogMessage(error.stack) : undefined
+      },
+      safeMessage
+    );
+    return;
+  }
+
+  logger.error(error, safeMessage);
 };
 
 export const logWarn = (message: string, ...args: any[]) => {
