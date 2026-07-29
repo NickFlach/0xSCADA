@@ -72,8 +72,11 @@ export async function loadSitesFromStorage(): Promise<SourceSite[]> {
  * stored a string for that tag (`string_value`) or only numerics (`value`).
  *
  * Tags are exposed read-only: 0xSCADA has no audited UA write path yet, so the
- * server must not advertise one. TODO(#461): add UA writes behind the
- * control-plane authorisation used for other actuating routes.
+ * server must not advertise one. Read-only is the intended shipped behaviour,
+ * not a placeholder — #461 asked for an address space, and that is what this
+ * is. Writes are tracked separately in #667, because a UA client setting a tag
+ * is a control action and needs scope authorisation and an audit record before
+ * it can be offered at all.
  */
 export async function loadTagCatalogueFromStorage(): Promise<SourceTag[]> {
   const rows = await typedDatabase()
