@@ -6,6 +6,7 @@
 
 import { sqliteTable, text, integer, real, blob } from "drizzle-orm/sqlite-core";
 import type { GainEnvelope, TuningGains } from "./types/tuning";
+import type { ProcessModel } from "./types/digital-twin";
 
 // Simplified schemas for SQLite (development mode)
 export const sites = sqliteTable("sites", {
@@ -410,6 +411,43 @@ export const pidTuningAudit = sqliteTable("pid_tuning_audit", {
   reasonCode: text("reason_code"),
   detail: text("detail"),
   recordedAt: integer("recorded_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// ─── Digital Twin Persistence (ADR-0013 [13.3], #550) ────────────────────────
+// Dev-mode parity with `shared/schema.ts`, created in production by
+// migrations/0014_twin_persistence.sql. jsonb → text(mode json), timestamptz →
+// integer timestamp_ms, bigint → integer, double precision → real. The twin's
+// model registry must be durable on BOTH dialects: a registry that silently
+// resets on restart is exactly the defect #550 exists to remove.
+// Kept in sync by `shared/__tests__/schema-parity.test.ts`; the physical SQLite
+// DDL lives in `server/services/twin/persistence.ts`.
+export const twinModels = sqliteTable("twin_models", {
+  id: text("id").primaryKey(),
+  schemaVersion: integer("schema_version").notNull(),
+  definition: text("definition", { mode: "json" }).$type<ProcessModel>().notNull(),
+  createdAt: integer("created_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp_ms" })
+    .notNull()
+    .$defaultFn(() => new Date()),
+});
+
+// No `status` column, matching Postgres: a restored simulation is always idle.
+export const twinCheckpoints = sqliteTable("twin_checkpoints", {
+  modelId: text("model_id")
+    .primaryKey()
+    .references(() => twinModels.id, { onDelete: "cascade" }),
+  schemaVersion: integer("schema_version").notNull(),
+  tick: integer("tick").notNull(),
+  timeMs: real("time_ms").notNull(),
+  componentStates: text("component_states", { mode: "json" })
+    .$type<Record<string, Record<string, number>>>()
+    .notNull(),
+  lastSyncAt: integer("last_sync_at"),
+  committedAt: integer("committed_at", { mode: "timestamp_ms" })
     .notNull()
     .$defaultFn(() => new Date()),
 });
