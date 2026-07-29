@@ -128,4 +128,26 @@ describe('remediation guard requires the scope AND the operator role', () => {
     expect((await execute()).status).toBe(401);
     expect((await status()).status).toBe(401);
   });
+
+  it('rate-limits both authenticated remediation endpoints', async () => {
+    const firstExecute = await execute('both-key');
+    expect(firstExecute.status).toBe(200);
+    expect(firstExecute.headers.get('x-ratelimit-limit')).toBe('10');
+
+    let executeResponse = firstExecute;
+    for (let request = 0; request < 10; request += 1) {
+      executeResponse = await execute('both-key');
+    }
+    expect(executeResponse.status).toBe(429);
+
+    const firstStatus = await status('both-key');
+    expect(firstStatus.status).toBe(200);
+    expect(firstStatus.headers.get('x-ratelimit-limit')).toBe('60');
+
+    let statusResponse = firstStatus;
+    for (let request = 0; request < 60; request += 1) {
+      statusResponse = await status('both-key');
+    }
+    expect(statusResponse.status).toBe(429);
+  });
 });

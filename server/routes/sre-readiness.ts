@@ -10,6 +10,7 @@ import {
   controlPlanePrincipal,
   requireControlPlaneAccess,
 } from '../middleware/control-plane-auth';
+import { rateLimitMiddleware } from '../middleware/api-gateway';
 
 const router = Router();
 
@@ -46,6 +47,14 @@ const requireRemediationOperator = requireControlPlaneAccess({
   roles: ['operator'],
   scopes: ['sre.remediate'],
 });
+const remediationStatusRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  maxRequests: 60,
+});
+const remediationExecuteRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  maxRequests: 10,
+});
 
 function errorMessage(error: unknown): string {
   if (error instanceof z.ZodError) {
@@ -70,30 +79,40 @@ router.post('/sre/slos/:sloId/evaluate', (req, res) => {
   }
 });
 
-router.get('/sre/remediations/status', requireRemediationOperator, (_req, res) => {
-  const status = remediationRuntime.status();
-  res.status(status.configured ? 200 : 503).json(status);
-});
+router.get(
+  '/sre/remediations/status',
+  remediationStatusRateLimit,
+  requireRemediationOperator,
+  (_req, res) => {
+    const status = remediationRuntime.status();
+    res.status(status.configured ? 200 : 503).json(status);
+  },
+);
 
-router.post('/sre/remediations/execute', requireRemediationOperator, async (req, res) => {
-  try {
-    const request = RemediationExecuteSchema.parse(req.body);
-    const principal = controlPlanePrincipal(req);
-    const result = await remediationRuntime.execute({
-      ...request,
-      // Approval/audit identity is always server-bound. A body/header supplied
-      // identity cannot authorize its own remediation.
-      approvedBy: principal.name,
-    });
-    res.json(result);
-  } catch (error) {
-    const status = error instanceof RemediationRuntimeUnavailableError
-      ? 503
-      : error instanceof RemediationAuditPersistenceError
-        ? 500
-        : 400;
-    res.status(status).json({ error: errorMessage(error) });
-  }
-});
+router.post(
+  '/sre/remediations/execute',
+  remediationExecuteRateLimit,
+  requireRemediationOperator,
+  async (req, res) => {
+    try {
+      const request = RemediationExecuteSchema.parse(req.body);
+      const principal = controlPlanePrincipal(req);
+      const result = await remediationRuntime.execute({
+        ...request,
+        // Approval/audit identity is always server-bound. A body/header supplied
+        // identity cannot authorize its own remediation.
+        approvedBy: principal.name,
+      });
+      res.json(result);
+    } catch (error) {
+      const status = error instanceof RemediationRuntimeUnavailableError
+        ? 503
+        : error instanceof RemediationAuditPersistenceError
+          ? 500
+          : 400;
+      res.status(status).json({ error: errorMessage(error) });
+    }
+  },
+);
 
 export { router as sreReadinessRoutes };
