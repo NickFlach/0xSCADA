@@ -1,4 +1,5 @@
 import type { ParsedCMType, CMTypeInput, CMTypeOutput, CMTypeInOut } from "./types";
+import logger from "../logger";
 
 /**
  * Parses a Control Module Type markdown file from the blueprints format.
@@ -10,7 +11,10 @@ export function parseCMTypeMarkdown(content: string, sourceFile?: string): Parse
   // Extract CM Type name from header
   const nameMatch = content.match(/^#\s*CM\s*TYPE:\s*(.+)$/m);
   if (!nameMatch) {
-    console.warn(`Could not find CM TYPE header in ${sourceFile}`);
+    logger.warn(
+      { sourceFile },
+      "Could not find CM TYPE header in blueprint file",
+    );
     return null;
   }
   
