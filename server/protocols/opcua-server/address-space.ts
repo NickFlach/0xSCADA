@@ -41,7 +41,7 @@ export const OBJECTS_FOLDER_NODE_ID = "ns=0;i=85";
  * everything else (object/array) falls back to BaseDataType (Variant) since
  * this scaffold does not yet synthesise UA structured types for them.
  *
- * TODO(#461): map `array` to a one-dimensional UA array (valueRank 1) and
+ * Tracked in #670: map `array` to a one-dimensional UA array (valueRank 1) and
  * synthesise UA ExtensionObject DataTypes for structured `object` tags.
  */
 export function mapDataType(dataType: DataType): UaDataType {

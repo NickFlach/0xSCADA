@@ -472,7 +472,9 @@ function uaTypeToNodeOpcuaDataType(
       return DataType.String;
     default:
       // Object/array tags are exposed as their JSON encoding until proper UA
-      // structured types are synthesised. TODO(#461).
+      // structured types are synthesised (#670). Honest as far as it goes — the
+      // declared type is String and the value really is a string — but a
+      // conformant client will not know to parse it.
       return DataType.String;
   }
 }
