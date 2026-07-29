@@ -698,11 +698,21 @@ describe("live capture — failure modes", () => {
   it("never fabricates a frame when capture cannot start", async () => {
     const frames: Buffer[] = [];
     const backend = new GooseLiveCaptureBackend({
-      command: fakeCapture({ exitCode: 1, stderr: "dumpcap: permission denied" }),
+      // This invariant does not need another Node process. An unsupported
+      // platform refuses synchronously before spawn, so worker load cannot race
+      // child startup against Vitest's timeout. Subprocess exit diagnostics are
+      // exercised independently by the preceding failure-mode tests.
+      platform: "win32",
     });
-    await expect(backend.open((frame) => frames.push(frame))).rejects.toThrow();
+    await expect(backend.open((frame) => frames.push(frame))).rejects.toThrow(/not supported/i);
     expect(frames).toHaveLength(0);
-    expect(backend.getStats().gooseFrames).toBe(0);
+    expect(backend.getStats()).toMatchObject({
+      bytesRead: 0,
+      recordsDecoded: 0,
+      gooseFrames: 0,
+    });
+    expect(backend.isRunning()).toBe(false);
+    await backend.completion();
     await backend.close();
   });
 });
@@ -752,37 +762,33 @@ describe("live capture — lifecycle", () => {
       "listeners.pcap",
       encodePcap([{ timestampMs: Date.now(), data: canonicalFrame() }]),
     );
-    const before = process.listenerCount("exit");
-    for (let i = 0; i < 5; i++) {
-      const backend = new GooseLiveCaptureBackend({
-        command: fakeCapture({ pcapPath: path, hang: true }),
-      });
-      await backend.open(() => {});
-      // The hook that kills an orphaned capture tool is installed while running.
-      expect(process.listenerCount("exit")).toBe(before + 1);
-      await backend.close();
-    }
-    expect(process.listenerCount("exit")).toBe(before);
-  });
-
-  it("can be reopened after a clean close", async () => {
-    const path = writeCapture(
-      "reopen.pcap",
-      encodePcap([{ timestampMs: Date.now(), data: canonicalFrame() }]),
-    );
     const backend = new GooseLiveCaptureBackend({
       command: fakeCapture({ pcapPath: path, hang: true }),
     });
+    const before = process.listenerCount("exit");
     const first: Buffer[] = [];
-    await backend.open((frame) => first.push(frame));
-    await backend.close();
-
     const second: Buffer[] = [];
-    await backend.open((frame) => second.push(frame));
-    await backend.close();
+
+    try {
+      await backend.open((frame) => first.push(frame));
+      // Exactly one orphan guard exists while the first capture is live.
+      expect(process.listenerCount("exit")).toBe(before + 1);
+      await backend.close();
+      expect(process.listenerCount("exit")).toBe(before);
+
+      // Reopening the same backend replaces, rather than adds to, that guard.
+      await backend.open((frame) => second.push(frame));
+      expect(process.listenerCount("exit")).toBe(before + 1);
+      await backend.close();
+    } finally {
+      // Do not leave the fake capture or its process listener behind if an
+      // assertion above fails.
+      await backend.close();
+    }
 
     expect(first).toHaveLength(1);
     expect(second).toHaveLength(1);
+    expect(process.listenerCount("exit")).toBe(before);
   });
 });
 

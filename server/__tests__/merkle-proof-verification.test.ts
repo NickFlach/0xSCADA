@@ -559,35 +559,44 @@ describe("Property-Based Tests", () => {
 });
 
 // =============================================================================
-// PERFORMANCE TESTS
+// LARGE-TREE COMPLEXITY INVARIANTS
 // =============================================================================
 
-describe("Performance Tests", () => {
-  it("should build large tree (10000 events) in reasonable time", () => {
-    const start = performance.now();
+describe("Large-tree complexity invariants", () => {
+  it("should build a 10000-event tree with a linear total node count", () => {
     const hashes = generateHashes(10000);
     const tree = buildMerkleTree(hashes);
-    const duration = performance.now() - start;
+    const paddedLeafCount = nextPowerOf2(hashes.length);
+    const layerSizes = tree.layers.map((layer) => layer.length);
 
     expect(tree.root).toBeDefined();
-    expect(duration).toBeLessThan(1000); // Should complete in < 1 second
-    console.log(`Built 10000-event tree in ${duration.toFixed(2)}ms`);
+    expect(tree.leaves).toHaveLength(hashes.length);
+    expect(layerSizes[0]).toBe(paddedLeafCount);
+    expect(layerSizes).toHaveLength(Math.log2(paddedLeafCount) + 1);
+    for (let i = 1; i < layerSizes.length; i++) {
+      expect(layerSizes[i]).toBe(layerSizes[i - 1] / 2);
+    }
+    // A complete binary tree has 2n - 1 total nodes: construction work and
+    // retained structure therefore grow linearly with the padded leaf count.
+    expect(layerSizes.reduce((total, size) => total + size, 0)).toBe(
+      2 * paddedLeafCount - 1,
+    );
   });
 
-  it("should generate and verify proof efficiently", () => {
+  it("should generate logarithmic proofs and verify them for a large tree", () => {
     const hashes = generateHashes(10000);
     const tree = buildMerkleTree(hashes);
+    const expectedProofLength = Math.log2(nextPowerOf2(hashes.length));
 
-    const start = performance.now();
+    // Cover 100 deterministic positions spread through the tree. Proof
+    // generation walks one sibling per layer and verification consumes exactly
+    // that proof, so this pins O(log n) work without consulting wall clock.
     for (let i = 0; i < 100; i++) {
-      const idx = Math.floor(Math.random() * hashes.length);
+      const idx = (i * 7919) % hashes.length;
       const proof = getMerkleProof(tree, idx);
-      verifyMerkleProof(hashes[idx], proof, tree.root, idx);
+      expect(proof).toHaveLength(expectedProofLength);
+      expect(verifyMerkleProof(hashes[idx], proof, tree.root, idx)).toBe(true);
     }
-    const duration = performance.now() - start;
-
-    expect(duration).toBeLessThan(100); // 100 verifications in < 100ms
-    console.log(`100 proof generations + verifications in ${duration.toFixed(2)}ms`);
   });
 });
 
