@@ -14,6 +14,7 @@
  */
 
 import { afterEach, describe, expect, it, vi } from "vitest";
+import * as fs from "node:fs";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -318,8 +319,10 @@ describe("BlueprintControlLoop — fails closed at load", () => {
   });
 
   it("rejects a missing file", () => {
+    // Reported by `open` rather than `stat` since the size check moved onto the
+    // descriptor; the message still names the file and carries the errno.
     const missing = join(tmpdir(), "definitely-not-here-457.json");
-    expectFailedClosed(makeLoop(enabledEnv(missing)), "cannot stat blueprint definition");
+    expectFailedClosed(makeLoop(enabledEnv(missing)), "cannot read blueprint definition");
   });
 
   it("rejects invalid JSON", () => {

@@ -77,12 +77,15 @@ export function saveConfig(updates: Partial<Config>): void {
   const configPath = path.join(process.cwd(), CONFIG_FILE_NAME);
   let currentConfig: Partial<Config> = {};
 
-  if (fs.existsSync(configPath)) {
-    try {
-      currentConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
-    } catch {
-      // Start fresh if file is invalid
-    }
+  // Read directly instead of testing existence first. The `existsSync` guard
+  // answered a question about a moment that had already passed by the time the
+  // read ran, and bought nothing: the catch below already covers the file being
+  // absent, exactly as it covers the file being invalid. Both mean the same
+  // thing here — start from an empty config.
+  try {
+    currentConfig = JSON.parse(fs.readFileSync(configPath, "utf-8"));
+  } catch {
+    // Missing or invalid: start fresh.
   }
 
   const newConfig = { ...currentConfig, ...updates };
