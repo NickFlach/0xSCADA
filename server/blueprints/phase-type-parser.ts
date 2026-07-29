@@ -5,6 +5,7 @@ import type {
   PhaseSequence,
   PhaseSequenceStep 
 } from "./types";
+import logger from "../logger";
 
 /**
  * Parses a Phase Type markdown file from the blueprints format.
@@ -16,7 +17,10 @@ export function parsePhaseTypeMarkdown(content: string, sourceFile?: string): Pa
   // Extract Phase Type name from header
   const nameMatch = content.match(/^#\s*PHASE\s*TYPE:\s*(.+)$/m);
   if (!nameMatch) {
-    console.warn(`Could not find PHASE TYPE header in ${sourceFile}`);
+    logger.warn(
+      { sourceFile },
+      "Could not find PHASE TYPE header in blueprint file",
+    );
     return null;
   }
   

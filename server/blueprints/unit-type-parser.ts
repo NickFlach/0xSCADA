@@ -1,4 +1,5 @@
 import type { ParsedUnitType, UnitTypeVariable } from "./types";
+import logger from "../logger";
 
 /**
  * Parses a Unit Type markdown file from the blueprints format.
@@ -10,7 +11,10 @@ export function parseUnitTypeMarkdown(content: string, sourceFile?: string): Par
   // Extract Unit Type name from header
   const nameMatch = content.match(/^#\s*UNIT\s*TYPE:\s*(.+)$/m);
   if (!nameMatch) {
-    console.warn(`Could not find UNIT TYPE header in ${sourceFile}`);
+    logger.warn(
+      { sourceFile },
+      "Could not find UNIT TYPE header in blueprint file",
+    );
     return null;
   }
   
