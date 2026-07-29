@@ -423,10 +423,25 @@ describe("HTTP proxy", () => {
   });
 
   it("returns generic 502 and 504 responses without exposing the target", async () => {
+    // 502 and 504 are the two outcomes of the SAME upstream failure, chosen by
+    // `handleProxyError`: a `ProxyTimeoutError` becomes 504, anything else 502.
+    // Whichever of the connection error and the connect timer arrives first
+    // decides the status, so `connectMs` here is load-bearing, not decoration
+    // (see #665, where this returned 504 on CI and 502 on a re-run of the same
+    // commit). Both budgets below are sized so the outcome under test wins by a
+    // wide margin; do not tighten them back to ~100ms.
     const unavailable = await reserveUnusedOrigin();
     const disconnected = await startGateway(unavailable, {
       serverUrl: unavailable,
-      timeouts: { connectMs: 100, responseHeadersMs: 200 },
+      // Nothing is listening, so the refusal is immediate and this returns at
+      // once — the large connect budget costs no wall-clock, it only removes
+      // the timer from the race.
+      //
+      // `responseHeadersMs` stays SHORT on purpose. It is unreachable on a
+      // refused connection, so it only matters if the reserved port were
+      // re-bound by a parallel worker before this ran; in that case the test
+      // should fail in 200ms with a clear 504, not hang for the connect budget.
+      timeouts: { connectMs: 10_000, responseHeadersMs: 200 },
     });
     const badGateway = await request(disconnected.origin, "/api/data");
     expect(badGateway.statusCode).toBe(502);
@@ -439,7 +454,12 @@ describe("HTTP proxy", () => {
     const slowOrigin = await listen(slowUpstream);
     const slowGateway = await startGateway(slowOrigin, {
       serverUrl: slowOrigin,
-      timeouts: { connectMs: 100, responseHeadersMs: 75 },
+      // The connect budget is generous for the same reason, but inverted: the
+      // socket IS listening, so connect succeeds and only the headers timeout
+      // can fire. That pins this 504 to the response-headers timeout rather
+      // than letting a slow connect produce the right status for the wrong
+      // reason — which would leave the headers path untested.
+      timeouts: { connectMs: 10_000, responseHeadersMs: 75 },
     });
     const timeout = await request(slowGateway.origin, "/api/slow");
     expect(timeout.statusCode).toBe(504);
