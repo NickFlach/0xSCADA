@@ -8,7 +8,8 @@ This document is the executable companion to
 `StoreAndForwardService.store(data, driverId)` entry point while making the
 queue durable and the reconnect path verifiable:
 
-- `JsonFileEdgeQueue` persists snapshots using fsync plus atomic rename; a
+- `JsonFileEdgeQueue` persists snapshots using file fsync, atomic rename, and,
+  where the platform supports it, containing-directory fsync; a
   `DurableEdgeQueue` port permits SQLite or another local store.
 - Capacity is fail-closed: unacknowledged records are never silently evicted.
 - Every recovered record is checked with SHA-256, and every forwarded batch
