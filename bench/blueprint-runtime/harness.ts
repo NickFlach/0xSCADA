@@ -64,42 +64,74 @@ function percentile(sorted: Float64Array, p: number): number {
  * Run a tail-latency benchmark. Returns the percentile distribution of a single
  * `tick()`. Allocation-free inside the measured loop.
  */
-export function runLatencyBench(opts: LatencyBenchOptions): LatencyStats {
+export async function runLatencyBench(
+  opts: LatencyBenchOptions,
+): Promise<LatencyStats> {
   const warmup = opts.warmup ?? 10_000;
   const iterations = opts.iterations ?? 100_000;
+
+  // Warm up before GC observation starts so compilation/JIT activity is not
+  // reported as part of the measured steady-state window.
+  for (let i = 0; i < warmup; i++) {
+    opts.beforeTick?.(i);
+    opts.tick();
+  }
+
+  // Start the measured window from a clean heap when the caller exposes GC.
+  // Its entry is outside the timestamp window below and is therefore ignored.
+  const gc = (globalThis as { gc?: () => void }).gc;
+  if (typeof gc === "function") gc();
 
   // Optional GC instrumentation via PerformanceObserver. Best-effort; if the
   // 'gc' entry type is unavailable on this host we simply omit GC stats.
   let gcCount = 0;
   let gcTotalMs = 0;
   let observer: PerformanceObserver | undefined;
+  let measurementStartedAt = Number.NEGATIVE_INFINITY;
+  let measurementEndedAt = Number.POSITIVE_INFINITY;
+  const recordGcEntries = (
+    entries: ReadonlyArray<{ duration: number; startTime: number }>,
+  ): void => {
+    for (const entry of entries) {
+      if (
+        entry.startTime < measurementStartedAt ||
+        entry.startTime > measurementEndedAt
+      ) {
+        continue;
+      }
+      gcCount++;
+      gcTotalMs += entry.duration;
+    }
+  };
   try {
     observer = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        gcCount++;
-        gcTotalMs += entry.duration;
-      }
+      recordGcEntries(list.getEntries());
     });
     observer.observe({ entryTypes: ["gc"], buffered: false });
   } catch {
     observer = undefined;
   }
 
-  // Warm up (not measured).
-  for (let i = 0; i < warmup; i++) {
-    opts.beforeTick?.(i);
-    opts.tick();
-  }
-
   const samples = new Float64Array(iterations);
+  measurementStartedAt = performance.now();
   for (let i = 0; i < iterations; i++) {
     opts.beforeTick?.(i);
     const start = performance.now();
     opts.tick();
     samples[i] = performance.now() - start;
   }
+  measurementEndedAt = performance.now();
 
-  observer?.disconnect();
+  if (observer) {
+    // The benchmark loop is deliberately synchronous, so the observer callback
+    // cannot run until after this function yields back to the event loop.
+    // Yield once, then drain anything not delivered to the callback before
+    // disconnecting. Without the yield, even forced GC misleadingly reports
+    // zero pauses because the observer is disconnected too early.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    recordGcEntries(observer.takeRecords());
+    observer.disconnect();
+  }
 
   // Sort a copy for percentiles. This allocation happens AFTER the measured loop.
   const sorted = samples.slice().sort();

@@ -102,6 +102,63 @@ jobs:
       - name: Enforce npm audit (high and critical)
         run: npm audit --audit-level=high
 
+  blueprint-runtime-arm:
+    name: Blueprint Runtime ARM p99 + allocation (constrained proxy)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+      - run: npm ci
+      - name: Assert the constrained ARM shape and gate the runtime
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --cpuset-cpus 0 \
+            --memory 6g \
+            --memory-swap 6g \
+            --network none \
+            --pids-limit 128 \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --mount "type=bind,source=${GITHUB_WORKSPACE},target=/workspace,readonly" \
+            --workdir /workspace \
+            node:20-bookworm-slim \
+            sh -euc '
+              arch="$(node -p "process.arch")"
+              node_major="$(node -p "process.versions.node.split(\".\")[0]")"
+              cpus="$(node -p "require(\"node:os\").availableParallelism()")"
+              memory_limit="$(cat /sys/fs/cgroup/memory.max)"
+              printf "constrained ARM proxy: arch=%s node=%s cpus=%s memory.max=%s\n" \
+                "$arch" "$node_major" "$cpus" "$memory_limit"
+              test "$arch" = "arm64"
+              test "$node_major" = "20"
+              test "$cpus" = "1"
+              test "$memory_limit" = "6442450944"
+              gc_type="$(node --expose-gc -p "typeof globalThis.gc")"
+              test "$gc_type" = "function"
+              node --expose-gc \
+                node_modules/vitest/vitest.mjs run \
+                server/blueprint/__tests__/runtime.test.ts
+              node --expose-gc --max-semi-space-size=1 --import tsx \
+                bench/blueprint-runtime/allocation.bench.ts
+              node --expose-gc --import tsx \
+                bench/blueprint-runtime/locked.bench.ts
+            ' 2>&1 | tee blueprint-runtime-arm-gate.txt
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: blueprint-runtime-arm-gate-${{ github.sha }}
+          path: blueprint-runtime-arm-gate.txt
+          if-no-files-found: error
+          retention-days: 30
+
   helm-gateway:
     name: Helm Chart Validation
     runs-on: ubuntu-latest
@@ -267,7 +324,7 @@ jobs:
   ci-complete:
     name: CI Complete
     runs-on: ubuntu-latest
-    needs: [lint, typecheck, security, helm-gateway, test, build, integration-test]
+    needs: [lint, typecheck, security, blueprint-runtime-arm, helm-gateway, test, build, integration-test]
     if: always()
     steps:
       - name: Check results
@@ -275,6 +332,7 @@ jobs:
           if [ "${{ needs.lint.result }}" != "success" ] || \
              [ "${{ needs.typecheck.result }}" != "success" ] || \
              [ "${{ needs.security.result }}" != "success" ] || \
+             [ "${{ needs.blueprint-runtime-arm.result }}" != "success" ] || \
              [ "${{ needs.helm-gateway.result }}" != "success" ] || \
              [ "${{ needs.test.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \

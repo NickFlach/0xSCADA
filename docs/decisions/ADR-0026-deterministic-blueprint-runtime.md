@@ -1,6 +1,6 @@
 # ADR-0026: Deterministic Blueprint Runtime
 
-**Status:** Accepted (with a measured gate condition — see "Gate decision")
+**Status:** Provisionally accepted (strict reference-hardware gate pending)
 **Date:** 2026-06-22
 **Deciders:** 0xSCADA Core Team
 **References:** [ADR-0021 (Dual-Time Control Plane)](ADR-0021-dual-time-control-plane.md), [Wave-2 Build Set Design](../plans/2026-06-01-wave-2-build-set-design.md), [Issue #457](https://github.com/NickFlach/0xSCADA/issues/457)
@@ -70,28 +70,34 @@ allocation-free hot loop.
 > (1 ARM OCPU / 6 GB). The numbers below were measured on the **development
 > x86_64 host** (Node v24, Windows). They demonstrate the design works and that
 > the bounded-allocation goal is met, but a local pass is **not** the reference
-> ARM verdict. The reference run must be executed in CI on the target image.
+> ARM verdict. Required CI supplies a native-ARM constrained proxy; the strict
+> verdict still requires the accepted target image described below.
 
-Fixture: control-farm blueprint, **1250 tags / 1000 instructions** (the
-`makeControlFarmBlueprint(1000)` fixture rounds to 125 units × 10 tags / 8 nodes,
-i.e. slightly *more* than 1000 tags — a conservative test).
+Fixture: control-farm blueprint, **1000 tags / 800 instructions** (100 units ×
+10 tags / 8 nodes). The benchmark asserts the exact tag count before measuring
+so a fixture-size regression fails rather than silently changing the workload.
 
 | Metric        | Baseline (naive Map + alloc) | Locked (compiled SoA) | Improvement |
 | ------------- | ---------------------------- | --------------------- | ----------- |
-| p50           | 0.2303 ms                    | 0.0065 ms             | ~35×        |
-| p90           | 0.3971 ms                    | 0.0101 ms             | ~39×        |
-| p99           | 0.7867 ms                    | **0.0319 ms**         | ~25×        |
-| p99.9         | 1.1275 ms (over SLO)         | 0.0538 ms             | ~21×        |
-| max           | 6.6983 ms                    | 0.2292 ms             | ~29×        |
-| stddev/jitter | 0.1382 ms                    | 0.0044 ms             | ~31×        |
+| p50           | 0.2723 ms                    | 0.0087 ms             | ~31×        |
+| p90           | 0.3923 ms                    | 0.0110 ms             | ~36×        |
+| p99           | 0.7897 ms                    | **0.0383 ms**         | ~21×        |
+| p99.9         | 1.6207 ms (over SLO)         | 0.0907 ms             | ~18×        |
+| max           | 17.9633 ms                   | 1.8549 ms             | ~10×        |
+| stddev/jitter | 0.1726 ms                    | 0.0118 ms             | ~15×        |
 
-Allocation probe (`tickFast` × 200,000 with `--expose-gc`): heap growth across
-the measured window was **−0.96 B/tick** (negative — i.e. effectively zero;
-within GC noise), and the bench observed **0 GC pauses** in the measured loop.
-This empirically confirms the no-allocation-in-tick invariant.
+On this run the repaired GC observer recorded **0 pauses** for the locked loop
+and **738 pauses / 249.0687 ms** for the deliberately allocating baseline. The
+observer starts after warm-up, the benchmark yields once after measurement so
+Node can deliver queued entries, and a forced-GC regression test proves the
+accounting is non-vacuous. The isolated allocation gate independently observed
+**0 pauses** for its no-op control, **8 pauses** for its allocating canary, and
+**0 pauses** across 250,000 `tickFast()` calls. This is empirical evidence, not
+a proof that V8 can never allocate.
 
-On this x86_64 host the locked runtime's measured p99 (0.0319 ms) is ~31× under
-the 1 ms SLO, and even its worst observed single tick (0.2292 ms) is under 1 ms.
+On this x86_64 host the locked runtime's measured p99 (0.0383 ms) is ~26× under
+the 1 ms SLO. A single 1.8549 ms outlier reinforces why the issue gates p99
+rather than claiming a hard per-tick maximum.
 
 ## Gate decision
 
@@ -100,12 +106,12 @@ The issue defines the gate: *"If Node's event loop refuses to be tamed enough
 proposing swap for a Rust control-loop crate via N-API. Mark this issue as
 deferred, not abandoned."*
 
-**Local verdict:** p99 = 0.0319 ms ≪ 1 ms, with zero GC pauses and confirmed
-bounded allocation. The gate condition (p99 > 1.5 ms) is **not** triggered on the
-development host. Therefore #457 is **Accepted**, not deferred, pending the
-reference-ARM CI confirmation below.
+**Local verdict:** p99 = 0.0383 ms ≪ 1 ms, with zero observed runtime GC and
+non-vacuous controls. The gate condition (p99 > 1.5 ms) is **not** triggered on
+the development host. Therefore #457 is not deferred, pending an accepted
+reference-ARM confirmation.
 
-**If the reference ARM CI run measures p99 > 1.5 ms** (e.g. due to GC behaviour
+**If an accepted reference ARM run measures p99 > 1.5 ms** (e.g. due to GC behaviour
 or scheduler jitter under a single OCPU), the contingency is:
 
 1. Mark #457 **deferred, not abandoned** (the TS runtime stays as the reference
@@ -133,8 +139,9 @@ or scheduler jitter under a single OCPU), the contingency is:
 
 **Negative / risks**
 
-- The local x86 numbers do not bind the reference ARM target; the CI assertion on
-  the reference image is the source of truth and must be wired up.
+- Neither local x86 numbers nor the required constrained GitHub-hosted ARM proxy
+  bind the appliance's physical CPU. The accepted reference-image run remains
+  the source of truth.
 - The float64-only tag model (booleans as 0.0/1.0) trades a richer type system
   for a single homogeneous cache-friendly buffer. Acceptable for control logic;
   documented in `server/blueprint/types.ts`.
@@ -241,16 +248,40 @@ synchronous — is exercised by the test suite and available to callers, but is
 not yet wired to a process shutdown hook. That wiring belongs with a
 server-wide graceful-shutdown change, not with this one.
 
-## Verification procedure (reference hardware)
+## Verification procedure (proxy CI and reference hardware)
 
 ```bash
 # On the reference ARM image, from the repo root, with deps installed:
 npx tsx bench/blueprint-runtime/baseline.bench.ts   # contrast numbers
-npx tsx bench/blueprint-runtime/locked.bench.ts     # exits non-zero if p99 >= 1ms
+node --expose-gc --import tsx bench/blueprint-runtime/locked.bench.ts
+node --expose-gc --max-semi-space-size=1 --import tsx \
+  bench/blueprint-runtime/allocation.bench.ts
 
-# Allocation invariant (any host):
-NODE_OPTIONS="--expose-gc" npx vitest run server/blueprint/__tests__/runtime.test.ts
+# Heap-retention invariant (any host):
+node --expose-gc node_modules/vitest/vitest.mjs run \
+  server/blueprint/__tests__/runtime.test.ts
 ```
 
-CI must assert `p99 < 1 ms` for the 1000-tag fixture on the reference image; that
-assertion — not the local development numbers above — is the binding gate.
+The `Blueprint Runtime ARM p99 + allocation (constrained proxy)` job in
+`.github/workflows/ci.yml` is a required repository regression gate. It runs on
+a native `ubuntu-24.04-arm` GitHub-hosted runner and executes `locked.bench.ts`
+inside an ARM64 Node 20 container constrained with a one-CPU cpuset and a 6 GiB
+cgroup memory ceiling. Node 20 matches the current server container. Before
+measuring, the job fails unless `process.arch` is `arm64`, the Node major is 20,
+`os.availableParallelism()` is `1`, and `memory.max` is `6442450944`. The
+benchmark itself exits non-zero unless the exact 1000-tag fixture has
+`p99 < 1 ms`. A separate `v8.GCProfiler` gate runs with a 1 MiB V8 semi-space
+and profiles a loop containing only `tickFast()`, excluding timing and IO
+marshalling. Its no-op control must observe zero collections, its
+escaping-object canary must observe at least one, and the runtime must observe
+zero. The job also runs the forced-GC heap-retention invariant under
+`--expose-gc`. These are complementary empirical signals, not a formal
+no-allocation proof. `CI Complete` requires the job, and the complete report is
+retained as an artifact.
+
+This is an honest native-ARM proxy, not an assertion that a constrained
+GitHub-hosted VM has the same CPU model, frequency, virtualization, or host
+contention as the 1-OCPU / 6-GB appliance. The strict reference verdict requires
+the same benchmark on that target (or explicit maintainer designation of this
+profile as the reference image). Only that accepted reference result can trigger
+the Rust/N-API gate decision above.

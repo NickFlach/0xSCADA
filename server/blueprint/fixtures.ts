@@ -11,12 +11,14 @@
 import type { BlueprintDefinition, BlueprintNode, TagDescriptor } from "./types.js";
 
 /**
- * Build a blueprint with roughly `tagCount` tags that exercises every opcode
- * class. The shape mimics a control-module farm: each "unit" reads two analog
- * inputs, runs a comparator + interlock chain, drives a latch and an on-delay
- * timer, and writes a command output.
+ * Build a blueprint targeting `tagCount` tags that exercises every opcode
+ * class. Each unit contains ten tags, so positive multiples of ten are exact;
+ * remainder requests round down and requests below ten produce one unit. The
+ * shape mimics a control-module farm: each unit reads two analog inputs, runs a
+ * comparator + interlock chain, drives a latch and an on-delay timer, and writes
+ * a command output.
  *
- * Layout per unit (8 tags):
+ * Layout per unit (10 tags):
  *   in_a, in_b           : inputs (analog)
  *   hi_alarm             : in_a > limit             (GT)
  *   permissive           : in_b < limit2            (LT)
@@ -26,7 +28,7 @@ import type { BlueprintDefinition, BlueprintNode, TagDescriptor } from "./types.
  *   out_cmd              : SELECT(delayed, in_a + in_b, 0)        (SELECT + ADD)
  */
 export function makeControlFarmBlueprint(tagCount: number): BlueprintDefinition {
-  const TAGS_PER_UNIT = 8;
+  const TAGS_PER_UNIT = 10;
   const units = Math.max(1, Math.floor(tagCount / TAGS_PER_UNIT));
 
   const tags: TagDescriptor[] = [];
