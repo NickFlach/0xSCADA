@@ -9,7 +9,11 @@ export function parseUnitTypeMarkdown(content: string, sourceFile?: string): Par
   const lines = content.split("\n");
   
   // Extract Unit Type name from header
-  const nameMatch = content.match(/^#\s*UNIT\s*TYPE:\s*(.+)$/m);
+  // `[^\S\n]` not `\s`: `\s` matches newlines, so the header could span lines
+  // and the trailing run could overlap the capture, giving an uploaded file a
+  // quadratic match. The capture starts straight after the colon and `.trim()`
+  // below strips the leading run exactly as the old `\s*` did.
+  const nameMatch = content.match(/^#[^\S\n]*UNIT[^\S\n]*TYPE:(.+)$/m);
   if (!nameMatch) {
     logger.warn(
       { sourceFile },
