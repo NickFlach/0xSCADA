@@ -28,6 +28,7 @@ import { Router } from "express";
 import type { Request, Response, RequestHandler } from "express";
 import { z } from "zod";
 import { fromZodError } from "zod-validation-error";
+import { rateLimitMiddleware } from "../middleware/api-gateway";
 import {
   controlPlanePrincipal,
   requireControlPlaneAccess,
@@ -52,6 +53,20 @@ const requirePredictiveConfigure = requireControlPlaneAccess({
 });
 const requirePredictiveAcknowledge = requireControlPlaneAccess({
   scopes: ["predictive.acknowledge"],
+});
+
+/**
+ * Durable predictive-state reads and writes can amplify storage work. Key the
+ * local budget by the server-authenticated API-key name, never by a caller
+ * header or the shared source IP. Every route below places its auth guard
+ * before this middleware, so an unauthenticated request cannot consume an
+ * operator's bucket and a future ordering regression fails closed when the
+ * principal is unavailable.
+ */
+const predictiveStateRateLimit = rateLimitMiddleware({
+  windowMs: 60_000,
+  maxRequests: 60,
+  keyExtractor: (req) => `operator:${controlPlanePrincipal(req).name}`,
 });
 
 /**
@@ -224,6 +239,7 @@ router.get("/tags", requirePredictiveRead, (_req, res) => {
 router.get(
   "/configured-tags",
   requirePredictiveRead,
+  predictiveStateRateLimit,
   asyncHandler(async (_req, res) => {
     const configured = await engine.listConfiguredTags();
     res.json({
@@ -240,6 +256,7 @@ router.get(
 router.get(
   "/thresholds/:tagId",
   requirePredictiveRead,
+  predictiveStateRateLimit,
   asyncHandler(async (req, res) => {
     res.json(await engine.getThresholds(req.params.tagId));
   })
@@ -248,6 +265,7 @@ router.get(
 router.put(
   "/thresholds/:tagId",
   requirePredictiveConfigure,
+  predictiveStateRateLimit,
   asyncHandler(async (req, res) => {
     // The tag id is a caller-controlled path segment that becomes a durable
     // primary key. It must be bounded HERE, at the same 256 characters the
@@ -320,6 +338,7 @@ router.put(
 router.get(
   "/alerts",
   requirePredictiveRead,
+  predictiveStateRateLimit,
   asyncHandler(async (req, res) => {
     const parsed = AlertQuerySchema.safeParse(req.query);
     if (!parsed.success) {
