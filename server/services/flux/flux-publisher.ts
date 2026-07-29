@@ -160,7 +160,7 @@ export class FluxPublisher {
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       return await res.json() as FluxEntity;
     } catch (error) {
-      logError(error, `⚡ Flux entity read failed: ${entityId}`);
+      logError({ error, entityId }, "⚡ Flux entity read failed");
       return null;
     }
   }
