@@ -29,6 +29,7 @@ import { blueprintSafetyHost } from "./blueprint/safety-host";
 // Observed-liveness collector (#456). Off unless
 // VALIDATOR_LIVENESS_COLLECTOR_ENABLED=true and ANCHOR_NODE_URLS is set.
 import { startValidatorLivenessCollector } from "./blockchain/liveness-collector";
+import { horizontalScaleRuntime } from "./scaling/horizontal-runtime";
 
 // Re-export log for backward compatibility
 export { log } from "./logger";
@@ -99,6 +100,13 @@ registerSwaggerRoutes(app, gatewayConfig);
   
   await initializeDefaultAgents();
   await startDefaultAgents();
+
+  // Bind real historian, gateway, load-balancer, and event-bus adapters before
+  // accepting traffic. An enabled but incomplete deployment fails startup.
+  await horizontalScaleRuntime.initialize();
+  if (horizontalScaleRuntime.isEnabled()) {
+    log("Horizontal scaling runtime initialized");
+  }
   
   // Install a real upstream transport before the shared queue singleton starts.
   // Explicit production enablement without bindings fails startup closed.

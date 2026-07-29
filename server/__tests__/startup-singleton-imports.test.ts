@@ -60,6 +60,7 @@ describe("startup singleton module identity", () => {
         "./services/nats",
         "./scaling/upgrade-runtime",
         "./bridge/anchor-backend",
+        "./scaling/horizontal-runtime",
       ],
     },
     {
@@ -71,6 +72,7 @@ describe("startup singleton module identity", () => {
         "../gateway/store-and-forward",
         "../gateway/store-and-forward-runtime",
         "../bridge",
+        "../scaling/horizontal-runtime",
       ],
     },
     {
