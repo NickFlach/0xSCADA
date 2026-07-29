@@ -6,6 +6,7 @@ import type { Server } from "http";
 import { createServer as createViteServer } from "vite";
 import path from "path";
 import fs from "fs";
+import { rateLimit as expressRateLimit } from "express-rate-limit";
 import { rateLimitMiddleware } from "./middleware/api-gateway";
 
 export async function setupVite(httpServer: Server, app: Application) {
@@ -23,11 +24,22 @@ export async function setupVite(httpServer: Server, app: Application) {
   // Use Vite's connect instance as middleware
   app.use(vite.middlewares);
 
-  // Rate limit for SPA fallback file system access
+  // Rate limit for SPA fallback file system access.
+  //
+  // Paired for the reason documented on the `/api/` limiters in
+  // `middleware/api-gateway.ts`: `rateLimitMiddleware` is the real, optionally
+  // Redis-backed one but is invisible to static analysis; `express-rate-limit`
+  // is modelled by CodeQL and, being per-process, can only be stricter.
   const spaRateLimit = rateLimitMiddleware({ windowMs: 60_000, maxRequests: 200 });
+  const scannerVisibleLimit = expressRateLimit({
+    windowMs: 60_000,
+    limit: 200,
+    standardHeaders: false,
+    legacyHeaders: false,
+  });
 
   // Serve index.html for all non-API routes (SPA fallback)
-  app.use("*", spaRateLimit, async (req, res, next) => {
+  app.use("*", spaRateLimit, scannerVisibleLimit, async (req, res, next) => {
     const url = req.originalUrl;
 
     // Skip API routes
