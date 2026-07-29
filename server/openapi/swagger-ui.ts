@@ -169,6 +169,55 @@ export function registerSwaggerRoutes(
   console.log('[OpenAPI] Swagger UI available at /api/docs');
 }
 
+/** True if the string carries any C0 control character or DEL. */
+function hasControlCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+/**
+ * Render a string as a YAML double-quoted scalar.
+ *
+ * A double-quoted scalar is the only YAML string form that can carry an escape,
+ * and the escaping has to be complete: `\` first (so the escapes added after it
+ * are not themselves re-escaped), then `"`, then every control character. A raw
+ * control character inside a quoted scalar is not merely ugly, it is invalid
+ * YAML — a carriage return ends the line as far as the parser is concerned, so
+ * a value carrying one truncates the document at that point and every key after
+ * it silently disappears from the served spec.
+ *
+ * This spec is enriched at runtime from gateway configuration (CORS origins,
+ * route descriptions), so the values are not all authored by hand.
+ */
+function quoteYamlString(value: string): string {
+  let escaped = '';
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char === '\\') {
+      escaped += '\\\\';
+    } else if (char === '"') {
+      escaped += '\\"';
+    } else if (code >= 32 && code !== 127) {
+      escaped += char;
+    } else if (char === '\n') {
+      escaped += '\\n';
+    } else if (char === '\r') {
+      escaped += '\\r';
+    } else if (char === '\t') {
+      escaped += '\\t';
+    } else {
+      escaped += `\\u${code.toString(16).padStart(4, '0')}`;
+    }
+  }
+  return `"${escaped}"`;
+}
+
+/** Exported for tests only; `quoteYamlString` is an implementation detail. */
+export const quoteYamlStringForTest = quoteYamlString;
+
 /**
  * Simple JSON to YAML converter for OpenAPI spec
  */
@@ -186,8 +235,11 @@ function jsonToYaml(obj: object, indent = 0): string {
         value.split('\n').forEach(line => {
           yaml += `${spaces}  ${line}\n`;
         });
-      } else if (value.includes(':') || value.includes('#') || value.startsWith('*')) {
-        yaml += `${spaces}${key}: "${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"\n`;
+      } else if (
+        value.includes(':') || value.includes('#') || value.startsWith('*')
+        || hasControlCharacter(value)
+      ) {
+        yaml += `${spaces}${key}: ${quoteYamlString(value)}\n`;
       } else {
         yaml += `${spaces}${key}: ${value}\n`;
       }
