@@ -98,7 +98,10 @@ function formatDuration(ms: number): string {
 
 // --- small presentational helpers ---------------------------------------------
 
-const StatusCell: React.FC<{ bucket: TimelineBucket }> = ({ bucket }) => {
+const StatusCell: React.FC<{ bucket: TimelineBucket; observedLiveness: boolean }> = ({
+  bucket,
+  observedLiveness,
+}) => {
   // Colour the cell by the worst status present (miss > late > hit > empty).
   let color = "#1f2937";
   if (bucket.total > 0) {
@@ -106,9 +109,13 @@ const StatusCell: React.FC<{ bucket: TimelineBucket }> = ({ bucket }) => {
     else if (bucket.late > 0) color = C.late;
     else color = C.hit;
   }
+  // An empty bucket must not be described in consensus vocabulary when the
+  // records are poll observations — same rule as the card's counters below.
   const title =
     bucket.total === 0
-      ? "no duties"
+      ? observedLiveness
+        ? "no poll rounds"
+        : "no duties"
       : `${bucket.hits} hit / ${bucket.misses} miss / ${bucket.late} late`;
   return (
     <div
@@ -373,7 +380,7 @@ const ValidatorCard: React.FC<{
       {/* timeline */}
       <div style={{ display: "flex", gap: 2, marginBottom: 8 }}>
         {buckets.map((b) => (
-          <StatusCell key={b.index} bucket={b} />
+          <StatusCell key={b.index} bucket={b} observedLiveness={observedLiveness} />
         ))}
       </div>
       <div style={{ display: "flex", justifyContent: "space-between", fontSize: 11, color: C.muted, marginBottom: 12 }}>
