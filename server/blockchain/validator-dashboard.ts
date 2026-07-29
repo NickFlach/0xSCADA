@@ -217,6 +217,9 @@ export interface PollOptions {
  * deliberately kept out of. An aborted request is reported as a timeout,
  * because the abort signal here has one cause — `options.timeoutMs` elapsing.
  *
+ * A real errno beats undici's `UND_ERR_*` classification wherever both appear
+ * in the chain; see the comment on the walk below.
+ *
  * Pure; exported for tests.
  */
 export function describeFetchFailure(err: unknown): string {
@@ -228,6 +231,13 @@ export function describeFetchFailure(err: unknown): string {
   // Walk the cause chain, and the branches of any AggregateError within it, for
   // the first errno-style code. Depth-bounded so a self-referential cause (or a
   // hostile deep chain) cannot spin here.
+  //
+  // Undici classifies its own failures with `UND_ERR_*` codes and wraps the
+  // real errno underneath. Those codes are errno-SHAPED but not errno: a
+  // `UND_ERR_SOCKET` row tells an auditor no more than "fetch failed" did,
+  // which is the outcome this function exists to prevent. So a `UND_ERR_*` code
+  // is only remembered as a fallback and the walk continues to the real one.
+  let undiciCode: string | null = null;
   const queue: unknown[] = [err];
   for (let depth = 0; depth < 8 && queue.length > 0; depth += 1) {
     const current = queue.shift();
@@ -236,7 +246,11 @@ export function describeFetchFailure(err: unknown): string {
     // errno-style codes only (ECONNREFUSED, ENOTFOUND, ...); a numeric or
     // free-text `code` carries nothing an operator can look up.
     if (typeof code === 'string' && /^[A-Z][A-Z0-9_]{2,31}$/.test(code)) {
-      return base.includes(code) ? base : `${base} (${code})`;
+      if (code.startsWith('UND_')) {
+        undiciCode ??= code;
+      } else {
+        return base.includes(code) ? base : `${base} (${code})`;
+      }
     }
     const errors = (current as { errors?: unknown }).errors;
     if (Array.isArray(errors)) {
@@ -250,6 +264,12 @@ export function describeFetchFailure(err: unknown): string {
     }
     const cause = (current as { cause?: unknown }).cause;
     if (cause !== undefined) queue.push(cause);
+  }
+
+  // No real errno anywhere in the chain — undici's own classification is still
+  // better than nothing, and is at least a code an operator can look up.
+  if (undiciCode !== null) {
+    return base.includes(undiciCode) ? base : `${base} (${undiciCode})`;
   }
 
   return base;

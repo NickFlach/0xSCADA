@@ -239,7 +239,13 @@ describe("observed liveness end-to-end: real socket -> real DB -> real route -> 
       // The audited reason is the errno the OS actually reported, not `fetch`'s
       // opaque "fetch failed". This is the assertion the stubbed suites cannot
       // make: they inject the very message they then assert on.
+      //
+      // `UND_ERR_*` is explicitly NOT accepted here. Undici wraps the libuv
+      // error in a SocketError whose code is errno-shaped, and surfacing that
+      // instead would satisfy a laxer pattern while telling an auditor nothing
+      // — see `describeFetchFailure`, which walks past it to the real errno.
       expect(detail).toMatch(/\(E[A-Z0-9_]+\)$/);
+      expect(detail).not.toMatch(/\(UND_/);
     }
     // The rounds that dialled the closed port fresh were refused. (The first
     // miss can be ECONNRESET instead: the keep-alive socket opened by round 1
