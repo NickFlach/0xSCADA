@@ -109,6 +109,11 @@ export { marketplaceService } from './marketplace';
 // ambiguous re-exports from a barrel this wide.
 export { NLQueryService, nlQueryService } from './nlquery';
 
+// ── ghostmagicOS Coordination (ADR-0013 [13.7], #218) ───────────────────────
+// No singleton is exported: capability verification and the physical action
+// executor are deployment-owned dependencies and must fail closed if absent.
+export * from './ghostos';
+
 /**
  * Initialize all services
  * 
