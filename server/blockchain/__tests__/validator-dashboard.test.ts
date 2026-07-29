@@ -331,6 +331,26 @@ describe('describeFetchFailure', () => {
     expect(describeFetchFailure(err)).toBe('fetch failed (ENETUNREACH)');
   });
 
+  it('prefers the real errno over undici\'s UND_ERR_* classification', () => {
+    // What a destroyed keep-alive socket actually produces: undici wraps the
+    // libuv error in a SocketError whose own `code` is errno-SHAPED but tells
+    // an auditor nothing. Reporting it would leave the row as uninformative as
+    // the bare "fetch failed" this function exists to replace.
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = Object.assign(
+      new Error('other side closed'),
+      { code: 'UND_ERR_SOCKET', cause: withCode('read ECONNRESET', 'ECONNRESET') },
+    );
+    expect(describeFetchFailure(err)).toBe('fetch failed (ECONNRESET)');
+  });
+
+  it('falls back to the UND_ERR_* code when no real errno exists', () => {
+    // Better than nothing: it is still a code an operator can look up.
+    const err = new TypeError('fetch failed');
+    (err as { cause?: unknown }).cause = withCode('other side closed', 'UND_ERR_SOCKET');
+    expect(describeFetchFailure(err)).toBe('fetch failed (UND_ERR_SOCKET)');
+  });
+
   it('reports an aborted request as a timeout', () => {
     // The only thing that aborts a poll here is `timeoutMs` elapsing.
     const err = new Error('This operation was aborted');
