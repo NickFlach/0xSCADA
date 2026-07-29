@@ -187,6 +187,51 @@ export function formatJson(data: unknown): string {
   return JSON.stringify(data, null, 2);
 }
 
+/** True if the string carries any C0 control character or DEL. */
+export function hasControlCharacter(value: string): boolean {
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+/**
+ * Render a string as a YAML double-quoted scalar.
+ *
+ * The escaping has to be complete and in this order: `\` first, so the escapes
+ * added after it are not themselves re-escaped, then `"`, then every control
+ * character. A raw control character inside a quoted scalar is invalid YAML — a
+ * carriage return ends the line as far as the parser is concerned, so a value
+ * carrying one truncates the document there and every key after it silently
+ * disappears.
+ *
+ * This matters because `oxscada ... -o yaml` output is piped into other tools.
+ * The values come from API responses, not from the operator typing them.
+ */
+export function quoteYamlString(value: string): string {
+  let escaped = "";
+  for (const char of value) {
+    const code = char.codePointAt(0) ?? 0;
+    if (char === "\\") {
+      escaped += "\\\\";
+    } else if (char === '"') {
+      escaped += '\\"';
+    } else if (code >= 32 && code !== 127) {
+      escaped += char;
+    } else if (char === "\n") {
+      escaped += "\\n";
+    } else if (char === "\r") {
+      escaped += "\\r";
+    } else if (char === "\t") {
+      escaped += "\\t";
+    } else {
+      escaped += `\\u${code.toString(16).padStart(4, "0")}`;
+    }
+  }
+  return `"${escaped}"`;
+}
+
 /**
  * Format data as YAML
  * Simple YAML formatter without external dependencies
@@ -212,13 +257,13 @@ export function formatYaml(data: unknown, indent: number = 0): string {
       data === "" ||
       data.includes(":") ||
       data.includes("#") ||
-      data.includes("\n") ||
+      hasControlCharacter(data) ||
       data.startsWith(" ") ||
       data.endsWith(" ") ||
       /^[\d.]+$/.test(data) ||
       ["true", "false", "null", "yes", "no"].includes(data.toLowerCase())
     ) {
-      return `"${data.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, "\\n")}"`;
+      return quoteYamlString(data);
     }
     return data;
   }
