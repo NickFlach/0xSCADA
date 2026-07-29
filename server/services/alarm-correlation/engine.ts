@@ -61,6 +61,33 @@ export interface CorrelationEngineOptions {
   maxAlarmsPerGroup?: number;
   /** Processing-time clock used only for lifecycle housekeeping */
   clock?: () => number;
+  /**
+   * Mints the id for a newly formed group. Defaults to a process-local random
+   * UUID, which is collision-free but arbitrary: two replicas replaying the
+   * same operation would mint different ids for the same group. The durable
+   * coordinator (#573) supplies a factory deriving the id from the shared
+   * journal sequence instead, so every replica names the group identically and
+   * a monotonic, never-reused sequence rules out reuse.
+   */
+  groupIdFactory?: () => string;
+}
+
+/**
+ * Everything a restart or a second replica needs to reconstitute this engine's
+ * correlation state. Deliberately excludes rules and topology, which are owned
+ * by their own components and restored separately.
+ */
+export interface CorrelationEngineState {
+  groups: AlarmGroup[];
+  /** Tracked but ungrouped alarms — candidate peers for future groups. */
+  pending: CorrelatedAlarm[];
+  metrics: {
+    alarmsIngested: number;
+    groupsCreated: number;
+    groupsClosed: number;
+    alarmsSuppressed: number;
+    alarmsUnsuppressed: number;
+  };
 }
 
 export class AlarmCorrelationEngine extends EventEmitter {
@@ -74,6 +101,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
   private readonly maxPendingAlarms: number;
   private readonly maxAlarmsPerGroup: number;
   private readonly clock: () => number;
+  private readonly groupIdFactory: () => string;
 
   private groups: Map<string, AlarmGroup> = new Map();
   private groupLastTouchedAt: Map<string, number> = new Map();
@@ -108,6 +136,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
     this.maxPendingAlarms = options.maxPendingAlarms ?? 2000;
     this.maxAlarmsPerGroup = options.maxAlarmsPerGroup ?? 128;
     this.clock = options.clock ?? Date.now;
+    this.groupIdFactory = options.groupIdFactory ?? (() => `ACG-${randomUUID()}`);
     if (options.suppressionPolicy?.unsuppressOnRootClear === false) {
       throw new Error('unsuppressOnRootClear must remain enabled for fail-safe closure');
     }
@@ -332,6 +361,21 @@ export class AlarmCorrelationEngine extends EventEmitter {
       ?.alarms.find((alarm) => alarm.id === alarmId);
   }
 
+  /** The group an alarm currently belongs to, or undefined when ungrouped. */
+  getGroupForAlarm(alarmId: string): AlarmGroup | undefined {
+    const groupId = this.alarmIndex.get(alarmId);
+    if (!groupId) return undefined;
+    return this.groups.get(groupId);
+  }
+
+  /** Every alarm this engine is tracking, grouped or not. */
+  listTrackedAlarms(): CorrelatedAlarm[] {
+    const alarms: CorrelatedAlarm[] = [];
+    for (const group of this.groups.values()) alarms.push(...group.alarms);
+    alarms.push(...this.pending);
+    return alarms;
+  }
+
   getRootCause(groupId: string): RootCauseResult | null {
     const group = this.groups.get(groupId);
     if (!group) return null;
@@ -386,6 +430,106 @@ export class AlarmCorrelationEngine extends EventEmitter {
       this.applySuppression(group);
       this.emit('group-updated', group);
     }
+  }
+
+  // ── Durable recovery (#573) ──────────────────────────────────────────
+
+  /**
+   * Deep copy of everything a restart needs to reconstitute correlation.
+   * Copies rather than live references, so a caller cannot mutate engine state
+   * through the snapshot it persists.
+   */
+  exportState(): CorrelationEngineState {
+    return {
+      groups: Array.from(this.groups.values(), (group) => this.cloneGroup(group)),
+      pending: this.pending.map((alarm) => ({ ...alarm })),
+      metrics: this.getCounters(),
+    };
+  }
+
+  /**
+   * Raw cumulative counters, without the derived rate in `getMetrics()` and
+   * without the whole-state deep copy in `exportState()`. The durable
+   * projection writes these on every applied journal entry, so it must not have
+   * to clone every group to read five numbers.
+   */
+  getCounters(): CorrelationEngineState['metrics'] {
+    return { ...this.metrics };
+  }
+
+  /**
+   * Replace this engine's correlation state with a previously exported one —
+   * the restart path, and how a replica adopts the shared projection.
+   *
+   * Emits nothing: hydration is a recovery of state that consumers were
+   * already told about before the restart, and re-emitting it as fresh
+   * suppression decisions would be a lie about when they were made. The
+   * reconnect snapshot is what re-informs consumers, and it is explicitly
+   * labelled as a snapshot.
+   *
+   * Suppressed members are restored into `suppressedAlarmIds` exactly as
+   * persisted, which is the whole point of persisting them: an alarm the
+   * operator cannot currently see must remain restorable after a restart. A
+   * member marked suppressed whose group is closed is corrected to active
+   * here, because a closed group can never un-suppress it later.
+   */
+  hydrate(state: CorrelationEngineState): void {
+    this.groups = new Map();
+    this.groupLastTouchedAt = new Map();
+    this.pending = [];
+    this.pendingLastTouchedAt = new Map();
+    this.alarmIndex = new Map();
+    this.suppressionCountedAlarmIds = new Set();
+
+    const now = this.clock();
+    for (const input of state.groups) {
+      const group = this.cloneGroup(input);
+      const memberIds = new Set(group.alarms.map((alarm) => alarm.id));
+      group.alarmIds = group.alarms.map((alarm) => alarm.id);
+      group.suppressedAlarmIds = group.suppressedAlarmIds.filter((id) =>
+        memberIds.has(id));
+
+      if (group.state === 'closed') {
+        for (const alarm of group.alarms) {
+          if (alarm.state === 'suppressed') alarm.state = 'active';
+        }
+        group.suppressedAlarmIds = [];
+      }
+
+      this.groups.set(group.id, group);
+      this.groupLastTouchedAt.set(group.id, now);
+      for (const alarm of group.alarms) {
+        this.alarmIndex.set(alarm.id, group.id);
+      }
+      for (const alarmId of group.suppressedAlarmIds) {
+        this.suppressionCountedAlarmIds.add(alarmId);
+      }
+    }
+
+    for (const input of state.pending) {
+      if (this.alarmIndex.has(input.id)) continue;
+      // Suppression is group-scoped; an ungrouped alarm can never be holding a
+      // suppression record, so it is restored visible.
+      const alarm: CorrelatedAlarm = {
+        ...input,
+        state: input.state === 'suppressed' ? 'active' : input.state,
+      };
+      this.pending.push(alarm);
+      this.pendingLastTouchedAt.set(alarm.id, now);
+      this.alarmIndex.set(alarm.id, null);
+    }
+
+    this.metrics = { ...state.metrics };
+  }
+
+  private cloneGroup(group: AlarmGroup): AlarmGroup {
+    return {
+      ...group,
+      alarms: group.alarms.map((alarm) => ({ ...alarm })),
+      alarmIds: [...group.alarmIds],
+      joinedVia: { ...group.joinedVia },
+      suppressedAlarmIds: [...group.suppressedAlarmIds],
+    };
   }
 
   getMetrics(): CorrelationMetrics {
@@ -455,7 +599,7 @@ export class AlarmCorrelationEngine extends EventEmitter {
   ): IngestResult {
     const members = [peer, alarm].sort((a, b) => a.timestamp - b.timestamp);
     const group: AlarmGroup = {
-      id: `ACG-${randomUUID()}`,
+      id: this.groupIdFactory(),
       state: 'open',
       alarms: members,
       alarmIds: members.map((a) => a.id),
@@ -471,6 +615,11 @@ export class AlarmCorrelationEngine extends EventEmitter {
       lastAlarmAt: members[members.length - 1].timestamp,
     };
 
+    // A reused group id would silently merge two unrelated groups and orphan
+    // the suppression records of the first. Refuse rather than corrupt.
+    if (this.groups.has(group.id)) {
+      throw new Error(`Correlation group id "${group.id}" is already in use`);
+    }
     this.groups.set(group.id, group);
     this.groupLastTouchedAt.set(group.id, this.clock());
     this.metrics.groupsCreated++;
@@ -628,6 +777,12 @@ export class AlarmCorrelationEngine extends EventEmitter {
     }
     this.groupLastTouchedAt.delete(group.id);
     this.groups.delete(group.id);
+    // Carries the member ids so a durable projection can drop exactly the rows
+    // this engine just forgot, instead of guessing from a count.
+    this.emit('group-evicted', {
+      groupId: group.id,
+      alarmIds: [...group.alarmIds],
+    });
   }
 
   private removeFromPending(alarmId: string): void {
@@ -704,13 +859,13 @@ export class AlarmCorrelationEngine extends EventEmitter {
   private prunePending(referenceMs: number): void {
     const maxWindow = this.maxEnabledRuleWindowMs();
     const cutoff = referenceMs - maxWindow * 2;
-    let removed = 0;
+    const removedIds: string[] = [];
     this.pending = this.pending.filter((alarm) => {
       const keep = alarm.timestamp >= cutoff;
       if (!keep) {
         this.alarmIndex.delete(alarm.id);
         this.pendingLastTouchedAt.delete(alarm.id);
-        removed++;
+        removedIds.push(alarm.id);
       }
       return keep;
     });
@@ -719,25 +874,29 @@ export class AlarmCorrelationEngine extends EventEmitter {
       for (const alarm of excess) {
         this.alarmIndex.delete(alarm.id);
         this.pendingLastTouchedAt.delete(alarm.id);
+        removedIds.push(alarm.id);
       }
-      removed += excess.length;
     }
-    if (removed > 0) this.emit('pending-pruned', { removed });
+    if (removedIds.length > 0) {
+      this.emit('pending-pruned', { removed: removedIds.length, alarmIds: removedIds });
+    }
   }
 
   private prunePendingByProcessingTime(nowMs: number): void {
     const cutoff = nowMs - this.maxEnabledRuleWindowMs() * 2;
-    let removed = 0;
+    const removedIds: string[] = [];
     this.pending = this.pending.filter((alarm) => {
       const keep = (this.pendingLastTouchedAt.get(alarm.id) ?? nowMs) >= cutoff;
       if (!keep) {
         this.alarmIndex.delete(alarm.id);
         this.pendingLastTouchedAt.delete(alarm.id);
-        removed++;
+        removedIds.push(alarm.id);
       }
       return keep;
     });
-    if (removed > 0) this.emit('pending-pruned', { removed });
+    if (removedIds.length > 0) {
+      this.emit('pending-pruned', { removed: removedIds.length, alarmIds: removedIds });
+    }
   }
 
   private maxEnabledRuleWindowMs(): number {

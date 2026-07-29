@@ -1,0 +1,267 @@
+-- Migration: 0015_alarm_correlation_coordination
+-- Issue: #573 — [13.2] Persist and coordinate alarm-correlation state across replicas
+-- Related: #213 (process-local correlation engine), ADR-0026
+-- Date: 2026-07-28
+--
+-- ─── WHY THIS EXISTS ─────────────────────────────────────────────────────────
+--
+-- #213 shipped alarm correlation whose suppression defaults OFF and whose
+-- snapshots are labelled `coordinationMode: process-local`. That default is not
+-- timidity: suppression decides what an operator does and does not see, and a
+-- decision that lives only in one process's heap is lost on restart and can be
+-- contradicted by a second replica. These tables are the durable, replica-
+-- coordinated state ADR-0026 requires before suppression may be enabled in
+-- production.
+--
+-- ─── ORDERING MODEL ──────────────────────────────────────────────────────────
+--
+-- `alarm_correlation_journal` is a single, totally-ordered, append-only log of
+-- every correlation-affecting operation: alarm ingest, acknowledge, clear, and
+-- rule / topology / suppression-policy changes. The database allocates `seq`.
+-- Appends are serialised with pg_advisory_xact_lock (SQLite: BEGIN IMMEDIATE)
+-- so commit order equals `seq` order — without that, a BIGSERIAL value can
+-- commit after a larger one and a polling reader would step over an entry that
+-- has not become visible yet, permanently losing it.
+--
+-- Every replica consumes the same journal in `seq` order and applies each entry
+-- to its own deterministic correlation engine. All replicas therefore converge
+-- on identical group membership, root cause and suppression with no leader
+-- election. This is convergence by shared log, not an order-independent merge:
+-- the log defines the order, and which replica an HTTP request happened to
+-- land on cannot change it.
+--
+-- ─── IDENTIFIERS AND IDEMPOTENCY ─────────────────────────────────────────────
+--
+-- Correlation group ids are derived from the journal `seq` of the entry that
+-- formed them (`ACG-<seq>`, `ACG-<seq>-<n>` for the rare second group formed
+-- while applying one entry). They are never drawn from a per-process random
+-- source, so two replicas cannot mint conflicting ids for the same group, and
+-- because `seq` is monotonic and never reused for the life of the table, an id
+-- cannot be reused either.
+--
+-- `idempotency_key` is UNIQUE. A retried or duplicated delivery of the same
+-- logical operation re-appends the same key, conflicts, and reads back the seq
+-- already assigned. It never produces a second entry.
+--
+-- ─── PROJECTION AND RESTART ──────────────────────────────────────────────────
+--
+-- `alarm_correlation_state.applied_seq` is the watermark of the materialised
+-- projection. A replica applies an entry to its engine, then writes that
+-- entry's row changes inside a transaction that first runs
+--     UPDATE alarm_correlation_state SET applied_seq = :seq
+--      WHERE id = 'default' AND applied_seq < :seq
+-- and abandons the transaction when that matches no row. A replica that loses
+-- the race writes nothing, so the materialised rows are always the result of
+-- applying journal entries strictly in `seq` order, whichever replica got there
+-- first. On restart a replica loads the materialised rows, adopts
+-- `applied_seq`, and consumes only what is newer.
+--
+-- ─── SAFETY ──────────────────────────────────────────────────────────────────
+--
+-- Nothing here can hide an alarm. `suppression_enabled` defaults FALSE and
+-- records only the operator's intent; the runtime honours it exclusively while
+-- the durable projection reports healthy, and forces it back off — restoring
+-- and re-broadcasting every suppressed alarm — the moment it does not. The
+-- asymmetry is deliberate: losing storage or coordination can only ever reveal
+-- more alarms, never fewer.
+--
+-- ─── RETENTION ───────────────────────────────────────────────────────────────
+--
+-- The coordinator prunes, after each successful apply:
+--   * journal entries strictly BELOW `applied_seq` and older than
+--     ALARM_CORRELATION_JOURNAL_RETENTION_MS (default 7 days). Never at or
+--     above the watermark: an unprojected entry is the only record of an
+--     operator's acknowledge or clear.
+--   * closed groups, and ALL the alarms belonging to them, whose last event
+--     time is older than ALARM_CORRELATION_STATE_RETENTION_MS (default
+--     30 days). A closed group's members are removed regardless of their own
+--     lifecycle state, because a closed group can no longer suppress or
+--     un-suppress anything: the engine un-suppresses every member as part of
+--     closing it.
+-- Open groups, and every alarm belonging to one, are never pruned by age — so
+-- no alarm that could still be suppressed is ever aged out.
+
+-- ─── Journal ─────────────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_journal (
+  seq BIGINT GENERATED BY DEFAULT AS IDENTITY PRIMARY KEY,
+  -- Natural key of the logical operation, e.g. 'ingest:<alarmId>'.
+  idempotency_key VARCHAR(256) NOT NULL UNIQUE,
+  op VARCHAR(32) NOT NULL,
+  payload JSONB NOT NULL,
+  -- Authenticated control-plane principal, taken from the API key record and
+  -- never from a request body. This is the attribution that has to outlive the
+  -- process for the lifecycle record to be an audit record at all.
+  principal VARCHAR(128) NOT NULL,
+  -- Diagnostic only. It must never influence ordering or grouping.
+  origin_instance VARCHAR(64) NOT NULL,
+  recorded_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT alarm_correlation_journal_op_check CHECK (op IN (
+    'ingest',
+    'acknowledge',
+    'clear',
+    'rule-upsert',
+    'rule-remove',
+    'rule-enabled',
+    'topology-upsert',
+    'topology-remove',
+    'policy-set',
+    'sweep'
+  ))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_journal_recorded_at
+  ON alarm_correlation_journal(recorded_at);
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_journal_op
+  ON alarm_correlation_journal(op);
+
+-- The journal is append-only. Retention deletes strictly below the watermark
+-- are performed by the coordinator; UPDATE is never legitimate, because
+-- rewriting an entry would rewrite the attribution of an operator action.
+CREATE OR REPLACE FUNCTION alarm_correlation_journal_immutable()
+RETURNS TRIGGER AS $$
+BEGIN
+  RAISE EXCEPTION 'alarm_correlation_journal is append-only: UPDATE is not permitted';
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS alarm_correlation_journal_no_update ON alarm_correlation_journal;
+CREATE TRIGGER alarm_correlation_journal_no_update
+  BEFORE UPDATE ON alarm_correlation_journal
+  FOR EACH ROW EXECUTE FUNCTION alarm_correlation_journal_immutable();
+
+-- ─── Materialised group lifecycle ────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_groups (
+  id VARCHAR(64) PRIMARY KEY,
+  state VARCHAR(8) NOT NULL,
+  root_cause_alarm_id VARCHAR(128) NOT NULL,
+  formed_by_rule_id VARCHAR(128) NOT NULL,
+  -- Which rule admitted each member, keyed by alarm id, so a recovered group
+  -- can explain itself rather than merely existing.
+  joined_via JSONB NOT NULL DEFAULT '{}'::jsonb,
+  max_severity VARCHAR(16) NOT NULL,
+  -- Event time in epoch ms — the clock correlation actually reasons about.
+  created_at_ms BIGINT NOT NULL,
+  last_alarm_at_ms BIGINT NOT NULL,
+  closed_at_ms BIGINT,
+  close_reason VARCHAR(32),
+  updated_seq BIGINT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT alarm_correlation_groups_state_check CHECK (state IN ('open', 'closed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_groups_state
+  ON alarm_correlation_groups(state);
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_groups_last_alarm
+  ON alarm_correlation_groups(last_alarm_at_ms);
+
+-- ─── Materialised alarm lifecycle ────────────────────────────────────────────
+--
+-- This is the row that makes suppression recoverable. `suppressed` records that
+-- an operator is not currently seeing this alarm; `group_id`, `severity` and
+-- `state` are everything needed to restore it. If this row cannot be written,
+-- suppression must not be on.
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_alarms (
+  id VARCHAR(128) PRIMARY KEY,
+  -- NULL means tracked but ungrouped (the engine's "pending" set). Those rows
+  -- still matter: they carry lifecycle and attribution for standalone alarms.
+  group_id VARCHAR(64),
+  name VARCHAR(256) NOT NULL,
+  tag_id VARCHAR(256) NOT NULL,
+  equipment_id VARCHAR(256),
+  site_id VARCHAR(64),
+  process_area VARCHAR(256),
+  severity VARCHAR(16) NOT NULL,
+  state VARCHAR(16) NOT NULL,
+  message TEXT NOT NULL,
+  event_time_ms BIGINT NOT NULL,
+  -- number | string on the wire, so JSON preserves which one it was.
+  alarm_value JSONB,
+  alarm_limit JSONB,
+  source VARCHAR(256),
+  -- Control-plane principals copied from the journal entry. Immutable in the
+  -- same sense the journal is: the projection is rebuildable from the log, and
+  -- no route in this codebase can rewrite the log.
+  acknowledged_by VARCHAR(128),
+  cleared_by VARCHAR(128),
+  suppressed BOOLEAN NOT NULL DEFAULT FALSE,
+  is_root_cause BOOLEAN NOT NULL DEFAULT FALSE,
+  joined_via_rule_id VARCHAR(128),
+  -- Journal seq that ingested this alarm, and the seq of its latest state
+  -- change. The latter rides on every broadcast snapshot so a consumer can drop
+  -- an out-of-order or duplicated cross-instance echo.
+  ingest_seq BIGINT NOT NULL,
+  updated_seq BIGINT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT alarm_correlation_alarms_severity_check
+    CHECK (severity IN ('critical', 'high', 'medium', 'low', 'info')),
+  CONSTRAINT alarm_correlation_alarms_state_check
+    CHECK (state IN ('active', 'acknowledged', 'cleared', 'shelved', 'suppressed'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_alarms_group
+  ON alarm_correlation_alarms(group_id);
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_alarms_state
+  ON alarm_correlation_alarms(state);
+CREATE INDEX IF NOT EXISTS idx_alarm_corr_alarms_event_time
+  ON alarm_correlation_alarms(event_time_ms);
+
+-- ─── Durable configuration ───────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_rules (
+  id VARCHAR(128) PRIMARY KEY,
+  name VARCHAR(256) NOT NULL,
+  type VARCHAR(16) NOT NULL,
+  enabled BOOLEAN NOT NULL DEFAULT TRUE,
+  priority INTEGER NOT NULL,
+  config JSONB NOT NULL,
+  updated_by VARCHAR(128) NOT NULL,
+  updated_seq BIGINT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT alarm_correlation_rules_type_check
+    CHECK (type IN ('causal', 'hierarchy', 'temporal'))
+);
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_equipment (
+  equipment_id VARCHAR(256) PRIMARY KEY,
+  name VARCHAR(256),
+  parent_id VARCHAR(256),
+  causal_downstream JSONB NOT NULL DEFAULT '[]'::jsonb,
+  site_id VARCHAR(64),
+  process_area VARCHAR(256),
+  updated_by VARCHAR(128) NOT NULL,
+  updated_seq BIGINT NOT NULL,
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- ─── Coordination state (single row) ─────────────────────────────────────────
+--
+-- `suppression_enabled` defaults FALSE and records only the operator's intent.
+-- The runtime honours it exclusively while coordination reports healthy.
+
+CREATE TABLE IF NOT EXISTS alarm_correlation_state (
+  id VARCHAR(16) PRIMARY KEY,
+  applied_seq BIGINT NOT NULL DEFAULT 0,
+  suppression_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+  never_suppress_at_or_above VARCHAR(16) NOT NULL DEFAULT 'critical',
+  -- Always TRUE. The column exists so the persisted policy is complete and any
+  -- future change is a visible migration rather than a silent default.
+  unsuppress_on_root_clear BOOLEAN NOT NULL DEFAULT TRUE,
+  alarms_ingested BIGINT NOT NULL DEFAULT 0,
+  groups_created BIGINT NOT NULL DEFAULT 0,
+  groups_closed BIGINT NOT NULL DEFAULT 0,
+  alarms_suppressed BIGINT NOT NULL DEFAULT 0,
+  alarms_unsuppressed BIGINT NOT NULL DEFAULT 0,
+  updated_by VARCHAR(128) NOT NULL DEFAULT 'system',
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  CONSTRAINT alarm_correlation_state_singleton CHECK (id = 'default'),
+  CONSTRAINT alarm_correlation_state_unsuppress_check
+    CHECK (unsuppress_on_root_clear = TRUE),
+  CONSTRAINT alarm_correlation_state_severity_check
+    CHECK (never_suppress_at_or_above IN ('critical', 'high', 'medium', 'low', 'info'))
+);
+
+INSERT INTO alarm_correlation_state (id) VALUES ('default')
+ON CONFLICT (id) DO NOTHING;

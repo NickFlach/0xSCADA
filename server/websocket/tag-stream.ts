@@ -47,8 +47,17 @@ export interface TagStreamMetrics {
 
 // --- Tag Stream Server ---
 
+/**
+ * Supplies one canonical snapshot per active alarm on (re)connect (#573).
+ * Registered by the cached event bridge, which owns correlation state; a
+ * WebSocket server must not reach into the correlation service itself, and
+ * leaving it null simply means no alarm snapshot is sent.
+ */
+export type AlarmSnapshotProvider = () => Record<string, unknown>[];
+
 export class TagStreamServer {
   private wss: WebSocketServer | null = null;
+  private alarmSnapshotProvider: AlarmSnapshotProvider | null = null;
   private clients = new Map<string, TagStreamClient>();
   private latestValues = new Map<string, TagUpdate>();
   private totalUpdates = 0;
@@ -127,6 +136,9 @@ export class TagStreamServer {
 
       // Send current snapshot
       this.sendSnapshot(client);
+      // One canonical state per active alarm, so a reconnecting client is not
+      // left believing whatever it last saw before the connection dropped.
+      this.sendAlarmSnapshot(client);
 
       ws.on("message", (raw) => {
         try {
@@ -240,6 +252,30 @@ export class TagStreamServer {
     this.sendToClient(client, { event: "tag:snapshot", payload: snapshot });
   }
 
+  /** Register (or clear) the reconnect alarm-snapshot source. */
+  setAlarmSnapshotProvider(provider: AlarmSnapshotProvider | null): void {
+    this.alarmSnapshotProvider = provider;
+  }
+
+  /**
+   * One canonical snapshot per active alarm. Sent as a single `alarm:snapshot`
+   * frame rather than a burst of `alarm:update` frames, so a client can tell a
+   * reconnect catch-up apart from live changes and cannot mistake the catch-up
+   * for a wave of new alarms.
+   */
+  private sendAlarmSnapshot(client: TagStreamClient): void {
+    if (!this.alarmSnapshotProvider) return;
+    let alarms: Record<string, unknown>[];
+    try {
+      alarms = this.alarmSnapshotProvider();
+    } catch {
+      // A snapshot that cannot be built must not break the connection; live
+      // alarm delivery continues regardless.
+      return;
+    }
+    this.sendToClient(client, { event: "alarm:snapshot", payload: { alarms } });
+  }
+
   /** Handle client messages (subscribe/unsubscribe) */
   private handleClientMessage(client: TagStreamClient, msg: any): void {
     switch (msg.type) {
@@ -260,6 +296,9 @@ export class TagStreamServer {
         break;
       case "snapshot":
         this.sendSnapshot(client);
+        break;
+      case "alarm:snapshot":
+        this.sendAlarmSnapshot(client);
         break;
       case "ping":
         this.sendToClient(client, { event: "pong", payload: { timestamp: new Date().toISOString() } });

@@ -14,6 +14,12 @@ import {
   twinCheckpoints as pgTwinCheckpoints,
   predictiveTagThresholds as pgPredictiveTagThresholds,
   predictiveAlerts as pgPredictiveAlerts,
+  alarmCorrelationJournal as pgAlarmCorrelationJournal,
+  alarmCorrelationGroups as pgAlarmCorrelationGroups,
+  alarmCorrelationAlarms as pgAlarmCorrelationAlarms,
+  alarmCorrelationRules as pgAlarmCorrelationRules,
+  alarmCorrelationEquipment as pgAlarmCorrelationEquipment,
+  alarmCorrelationState as pgAlarmCorrelationState,
 } from '../schema';
 import {
   alarms as sqliteAlarms,
@@ -28,6 +34,12 @@ import {
   twinCheckpoints as sqliteTwinCheckpoints,
   predictiveTagThresholds as sqlitePredictiveTagThresholds,
   predictiveAlerts as sqlitePredictiveAlerts,
+  alarmCorrelationJournal as sqliteAlarmCorrelationJournal,
+  alarmCorrelationGroups as sqliteAlarmCorrelationGroups,
+  alarmCorrelationAlarms as sqliteAlarmCorrelationAlarms,
+  alarmCorrelationRules as sqliteAlarmCorrelationRules,
+  alarmCorrelationEquipment as sqliteAlarmCorrelationEquipment,
+  alarmCorrelationState as sqliteAlarmCorrelationState,
 } from '../schema-sqlite';
 
 /**
@@ -100,6 +112,42 @@ const cases = [
     sqlite: sqlitePredictiveTagThresholds,
   },
   { name: 'predictive_alerts', pg: pgPredictiveAlerts, sqlite: sqlitePredictiveAlerts },
+  // #573: the durable, replica-coordinated correlation state. A column present
+  // on only one dialect is a safety defect here, not a dev-mode inconvenience:
+  // `suppressed` on `alarm_correlation_alarms` is what makes an alarm the
+  // operator cannot currently see restorable after a restart, and `applied_seq`
+  // on `alarm_correlation_state` is what keeps two replicas from projecting the
+  // journal out of order.
+  {
+    name: 'alarm_correlation_journal',
+    pg: pgAlarmCorrelationJournal,
+    sqlite: sqliteAlarmCorrelationJournal,
+  },
+  {
+    name: 'alarm_correlation_groups',
+    pg: pgAlarmCorrelationGroups,
+    sqlite: sqliteAlarmCorrelationGroups,
+  },
+  {
+    name: 'alarm_correlation_alarms',
+    pg: pgAlarmCorrelationAlarms,
+    sqlite: sqliteAlarmCorrelationAlarms,
+  },
+  {
+    name: 'alarm_correlation_rules',
+    pg: pgAlarmCorrelationRules,
+    sqlite: sqliteAlarmCorrelationRules,
+  },
+  {
+    name: 'alarm_correlation_equipment',
+    pg: pgAlarmCorrelationEquipment,
+    sqlite: sqliteAlarmCorrelationEquipment,
+  },
+  {
+    name: 'alarm_correlation_state',
+    pg: pgAlarmCorrelationState,
+    sqlite: sqliteAlarmCorrelationState,
+  },
 ] as const;
 
 describe('schema parity (Postgres vs SQLite dev fallback)', () => {

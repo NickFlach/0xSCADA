@@ -28,11 +28,25 @@ const TAG_CACHE_TTL = 60; // seconds
 
 type CorrelationSource = Pick<
   AlarmCorrelationService,
-  'on' | 'off' | 'ingest'
+  'on' | 'off' | 'ingest' | 'submit' | 'getReconnectSnapshot'
 >;
+
+/**
+ * How many alarm ids keep a "latest delivered seq" for cross-instance
+ * de-duplication. Oldest entries are evicted first; an evicted id simply loses
+ * the shortcut and is delivered again, which is the safe direction.
+ */
+const MAX_DEDUPE_TRACKED_ALARMS = 20_000;
 
 interface AlarmSink {
   broadcastAlarm(alarm: any): void;
+  /**
+   * Optional so a test double can be a bare sink. Real WebSocket servers
+   * implement it and receive the reconnect snapshot source.
+   */
+  setAlarmSnapshotProvider?(
+    provider: (() => Record<string, unknown>[]) | null,
+  ): void;
 }
 
 /**
@@ -51,6 +65,22 @@ export class CachedEventBridge {
   private isInitialized = false;
   private isLocalAlarmFanoutInitialized = false;
   private readonly instanceId = randomUUID();
+  /**
+   * alarmId → highest correlation seq this replica has itself delivered.
+   *
+   * With durable coordination every snapshot carries the journal seq of the
+   * state it describes, and that seq is the same on every replica — so an
+   * alarm that arrives again over Redis (this instance's own echo, or another
+   * instance re-broadcasting the same applied entry) is recognised as
+   * already-delivered and dropped.
+   *
+   * Only locally computed state raises this watermark; see `handleIncoming`.
+   * Snapshots with no seq (process-local mode) are never dropped, because
+   * without a shared order there is no way to prove the copy is redundant, and
+   * delivering an alarm twice is a nuisance while dropping one is a safety
+   * failure.
+   */
+  private readonly deliveredSeqByAlarm = new Map<string, number>();
   private readonly alarmSnapshotHandler = (snapshot: AlarmWireSnapshot): void => {
     this.broadcastAlarmSnapshot(snapshot);
   };
@@ -68,6 +98,10 @@ export class CachedEventBridge {
   initializeLocalAlarmFanout(): void {
     if (this.isLocalAlarmFanoutInitialized) return;
     this.correlationService.on('alarm-snapshot', this.alarmSnapshotHandler);
+    const provider = () =>
+      this.getAlarmReconnectSnapshot() as unknown as Record<string, unknown>[];
+    this.tagAlarmSink.setAlarmSnapshotProvider?.(provider);
+    this.unifiedAlarmSink.setAlarmSnapshotProvider?.(provider);
     this.isLocalAlarmFanoutInitialized = true;
   }
 
@@ -170,7 +204,11 @@ export class CachedEventBridge {
   async publishAlarm(alarm: Record<string, unknown>): Promise<void> {
     this.initializeLocalAlarmFanout();
     try {
-      const outcome = this.correlationService.ingest(alarm);
+      // Goes through the shared journal when durable coordination is up, so
+      // every replica groups this alarm identically. The service itself falls
+      // back to process-local correlation if the journal cannot be written —
+      // it never drops the alarm.
+      const outcome = await this.correlationService.submit(alarm);
       if (outcome) return;
     } catch {
       // Correlation must never block alarm fan-out
@@ -179,6 +217,24 @@ export class CachedEventBridge {
     // Inputs without a normalizable timestamp still retain the bridge's
     // historical best-effort delivery behavior.
     this.broadcastRawAlarm(alarm);
+  }
+
+  /**
+   * One canonical snapshot per active alarm, for a client that has just
+   * (re)connected to `/ws` or `/ws/tags`.
+   *
+   * Delivering it also arms de-duplication: each alarm's seq is recorded as
+   * delivered, so a cross-instance echo of the very state the snapshot just
+   * carried is dropped instead of arriving as a duplicate immediately after
+   * reconnect. Newer states still get through, because the guard compares
+   * seqs rather than merely remembering the id.
+   */
+  getAlarmReconnectSnapshot(): AlarmWireSnapshot[] {
+    const snapshots = this.correlationService.getReconnectSnapshot();
+    for (const snapshot of snapshots) {
+      this.recordDelivered(snapshot.id, snapshot.correlation.seq);
+    }
+    return snapshots;
   }
 
   /**
@@ -215,6 +271,8 @@ export class CachedEventBridge {
   async destroy(): Promise<void> {
     if (this.isLocalAlarmFanoutInitialized) {
       this.correlationService.off('alarm-snapshot', this.alarmSnapshotHandler);
+      this.tagAlarmSink.setAlarmSnapshotProvider?.(null);
+      this.unifiedAlarmSink.setAlarmSnapshotProvider?.(null);
       this.isLocalAlarmFanoutInitialized = false;
     }
     if (this.subscriber) {
@@ -237,9 +295,21 @@ export class CachedEventBridge {
       case CHANNEL_EVENTS:
         unifiedStreamServer.broadcastEvent(data);
         break;
-      case CHANNEL_ALARMS:
+      case CHANNEL_ALARMS: {
+        // Own echo: this instance already delivered it locally before publishing.
         if (data?._bridgeOrigin === this.instanceId) break;
         if (data && typeof data === 'object') delete data._bridgeOrigin;
+        // Cross-instance duplicate of a state already delivered here.
+        //
+        // Deliberately does NOT record the incoming seq. Recording it would let
+        // anything able to publish on this channel push an alarm's watermark to
+        // an arbitrary value and have later, genuine states for that alarm
+        // dropped — a way to HIDE an alarm, which is the one outcome this
+        // subsystem must never allow. The watermark is therefore raised only by
+        // state this replica computed itself. The cost is that a replica which
+        // has not yet consumed the journal entry may deliver a second copy of
+        // the same state; a duplicate is a nuisance, a hidden alarm is not.
+        if (this.alreadyDelivered(data)) break;
         try {
           this.tagAlarmSink.broadcastAlarm(data);
         } catch {
@@ -251,10 +321,19 @@ export class CachedEventBridge {
           // WebSocket delivery is best effort.
         }
         break;
+      }
     }
   }
 
   private broadcastAlarmSnapshot(snapshot: AlarmWireSnapshot): void {
+    // The ONLY place the de-duplication watermark is raised on the broadcast
+    // path: this snapshot was computed by this replica's own engine, so its
+    // seq is trustworthy. `broadcastRawAlarm` deliberately does not record,
+    // because it is also the fallback for an arbitrary producer payload — and
+    // a payload carrying an inflated `correlation.seq` would push the
+    // watermark forward and have later genuine states for that alarm id
+    // dropped, i.e. a way to HIDE an alarm.
+    this.recordDelivered(snapshot.id, correlationSeq(snapshot));
     this.broadcastRawAlarm(snapshot);
   }
 
@@ -283,6 +362,42 @@ export class CachedEventBridge {
         // Redis fan-out is optional and process-local delivery already ran.
       });
   }
+
+  /**
+   * True only when this exact alarm state — same id, same shared journal seq or
+   * older — has already reached local clients from state this replica computed
+   * itself. Anything without a seq is always delivered: an unnecessary
+   * duplicate is a nuisance, a dropped alarm is not.
+   */
+  private alreadyDelivered(alarm: Record<string, unknown> | null | undefined): boolean {
+    if (!alarm || typeof alarm.id !== 'string') return false;
+    const seq = correlationSeq(alarm);
+    if (seq === null) return false;
+    const delivered = this.deliveredSeqByAlarm.get(alarm.id);
+    return delivered !== undefined && seq <= delivered;
+  }
+
+  private recordDelivered(alarmId: string | undefined, seq: number | null): void {
+    if (!alarmId || seq === null) return;
+    const previous = this.deliveredSeqByAlarm.get(alarmId);
+    if (previous !== undefined && previous >= seq) return;
+    this.deliveredSeqByAlarm.delete(alarmId);
+    this.deliveredSeqByAlarm.set(alarmId, seq);
+    while (this.deliveredSeqByAlarm.size > MAX_DEDUPE_TRACKED_ALARMS) {
+      const oldest = this.deliveredSeqByAlarm.keys().next();
+      if (oldest.done) break;
+      this.deliveredSeqByAlarm.delete(oldest.value);
+    }
+  }
+}
+
+/** Shared journal seq carried on a correlated snapshot, when there is one. */
+function correlationSeq(alarm: unknown): number | null {
+  if (!alarm || typeof alarm !== 'object') return null;
+  const correlation = (alarm as { correlation?: unknown }).correlation;
+  if (!correlation || typeof correlation !== 'object') return null;
+  const seq = (correlation as { seq?: unknown }).seq;
+  return typeof seq === 'number' && Number.isFinite(seq) ? seq : null;
 }
 
 export const cachedEventBridge = new CachedEventBridge();
