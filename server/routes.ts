@@ -22,6 +22,7 @@ import { digitalTwinService } from "./services/twin";
 import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
 import { alarmCorrelationService } from "./services/alarm-correlation";
 import { predictiveRoutes } from "./routes/predictive";
+import { capacityReadinessRoutes } from "./routes/capacity-readiness";
 import { predictiveMaintenanceService } from "./services/predictive";
 import { tuningRoutes } from "./routes/tuning";
 import { tuningService } from "./services/tuning";
@@ -75,6 +76,7 @@ export async function registerRoutes(
 
   // P1 Wiring: Intelligence, Governance, and Security modules
   app.use("/api/intelligence", intelligenceRoutes);
+  app.use("/api/governance", capacityReadinessRoutes);  // ADR-0014 [14.8] (#228)
   app.use("/api/twin", twinRoutes);  // ADR-0013 [13.3] (#214)
   app.use("/api/alarm-correlation", alarmCorrelationRoutes);  // ADR-0013 [13.2] (#213)
   app.use("/api/predictive", predictiveRoutes);  // ADR-0013 [13.1] (#212)
