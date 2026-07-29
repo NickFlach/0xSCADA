@@ -1,0 +1,42 @@
+name: DNP3 OpenDNP3 conformance
+
+on:
+  pull_request:
+    paths:
+      - "server/protocols/dnp3-outstation/**"
+      - "test/conformance/dnp3/**"
+      - "scripts/run-dnp3-opendnp3-smoke.sh"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dnp3-opendnp3-conformance.yml"
+  push:
+    branches: [main]
+    paths:
+      - "server/protocols/dnp3-outstation/**"
+      - "test/conformance/dnp3/**"
+      - "scripts/run-dnp3-opendnp3-smoke.sh"
+      - "package.json"
+      - "package-lock.json"
+      - ".github/workflows/dnp3-opendnp3-conformance.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dnp3-opendnp3-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Run against pinned OpenDNP3 reference master
+        run: bash scripts/run-dnp3-opendnp3-smoke.sh

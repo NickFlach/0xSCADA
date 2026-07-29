@@ -24,8 +24,8 @@
  * defaults to false) AND the embedder installs a control sink via
  * `setControlSink()`. A default-constructed outstation is read-only, and
  * `startDnp3Outstation()` installs a sink only when DNP3_OUTSTATION_ALLOW_CONTROLS
- * is set — which itself requires an SAv5 Update Key or an explicit declaration
- * that the deployment accepts unauthenticated controls.
+ * is set — which itself requires an SAv5 Control Direction Session Key or an
+ * explicit declaration that the deployment accepts unauthenticated controls.
  *
  * ── SERVER STARTUP ───────────────────────────────────────────────────────────
  * Nothing here starts a listener on import. `startDnp3Outstation()` (below) is
@@ -39,57 +39,65 @@
  *     two masters connect at once the first CONFIRM drains events for both.
  *     DNP3 outstations conventionally serve a single master.
  *   - Full secondary link-confirm + frame-count-bit (FCB) state machine.
- *   - WRITE g80v1 (master clearing the DEVICE_RESTART IIN bit).
- *   - Group-120 free-format object framing (qualifier 0x5B); the SAv5 objects
- *     use the simple count-1 header this module also emits.
  *   - Unconfirmed events are re-sent on the next Class poll (correct), but
  *     there is no independent retry timer.
  *   - DNP3 serial transport (this is TCP only).
- *   - Nothing here has been exercised against opendnp3 or any real utility
- *     master; the wire behaviour is verified only by this repository's tests.
+ *   - SAv5 session-key establishment/key-wrap and aggressive mode are not
+ *     implemented. A deployment provisions the already-established Control
+ *     Direction Session Key and is limited to one authenticated association.
+ *   - The automated OpenDNP3 3.1.2 smoke covers startup, static/event polls,
+ *     unsolicited responses and SELECT/OPERATE. SAv5 remains covered by this
+ *     repository's deterministic handshake and live-dispatch tests.
  */
 
-import { z } from 'zod';
-import { log, logError, logWarn } from '../../logger';
-import { Dnp3PointMap, Dnp3PointMapConfigSchema, deriveFlags, type PointSample, type Dnp3PointType } from './point-map';
+import { z } from "zod";
+import { log, logError, logWarn } from "../../logger";
+import {
+  Dnp3PointMap,
+  Dnp3PointMapConfigSchema,
+  deriveFlags,
+  type PointSample,
+  type Dnp3PointType,
+} from "./point-map";
 import {
   Dnp3EventBuffer,
   DEFAULT_EVENT_BUFFER_CONFIG,
   type EventBufferConfig,
   type EventClass,
-} from './event-buffer';
+} from "./event-buffer";
 import {
   buildEventObjects,
   DEFAULT_EVENT_VARIATIONS,
   type EventVariationPolicy,
-} from './event-objects';
+} from "./event-objects";
 import {
   Dnp3ControlProcessor,
   type Dnp3ControlConfig,
   type Dnp3ControlSink,
-} from './controls';
+} from "./controls";
 import {
   Sav5Outstation,
   isCriticalFunction,
   encodeChallengeObject,
   decodeReplyObject,
   type Sav5VerifyResult,
-} from './secure-auth';
+} from "./secure-auth";
 import {
   parseRequest,
   buildResponseHeader,
+  buildFreeFormat16Object,
   buildClass0Blocks,
   buildIin,
   classReadTargets,
   APP_CTRL_SEQ_MASK,
   type ParsedRequest,
-} from './app-layer';
-import { DNP3_FUNCTION, DNP3_GROUP } from './app-objects';
+} from "./app-layer";
+import { DNP3_FUNCTION, DNP3_GROUP } from "./app-objects";
 import {
   createSession,
   type Dnp3ResponseFragment,
   type OutstationSession,
-} from './session';
+} from "./session";
 import {
   Dnp3TcpServer,
   DEFAULT_BIND_HOST,
@@ -100,20 +108,20 @@ import {
   DEFAULT_SOCKET_TIMEOUT_MS,
   DNP3_MAX_LINK_FRAME_BYTES,
   type Dnp3ApplicationDispatcher,
-} from './server';
+} from "./server";
 import {
   createDnp3TagStorePort,
   createTagStoreControlSink,
   Dnp3TagStorePoller,
   type Dnp3TagStorePort,
-} from './tag-store-bridge';
+} from "./tag-store-bridge";
 import {
   describeDnp3OutstationConfig,
   isDnp3OutstationEnabled,
   loadDnp3OutstationConfig,
   loadDnp3PointMapFile,
-} from './config';
-import { isLoopbackHost } from '../peer-allowlist';
+} from "./config";
+import { isLoopbackHost } from "../peer-allowlist";
 
 /** Octets of application header (APP_CONTROL + FUNCTION + IIN) on a response. */
 const APP_HEADER_LEN = 4;
@@ -133,7 +141,12 @@ export const Dnp3OutstationConfigSchema = z.object({
    */
   allowedPeers: z.array(z.string().min(1)).min(1).optional(),
   /** Hard cap on simultaneous master associations. */
-  maxConnections: z.number().int().min(1).max(64).default(DEFAULT_MAX_CONNECTIONS),
+  maxConnections: z
+    .number()
+    .int()
+    .min(1)
+    .max(64)
+    .default(DEFAULT_MAX_CONNECTIONS),
   /** Idle socket timeout in ms (0 disables). */
   socketTimeoutMs: z.number().int().min(0).default(DEFAULT_SOCKET_TIMEOUT_MS),
   /**
@@ -169,11 +182,15 @@ export const Dnp3OutstationConfigSchema = z.object({
   /** Which event variations to emit (time representation per event type). */
   eventVariations: z
     .object({
-      binary: z.enum(['no-time', 'absolute-time', 'relative-time']).default('absolute-time'),
-      counter: z.enum(['no-time', 'absolute-time']).default('absolute-time'),
-      analog: z.enum(['no-time', 'absolute-time']).default('absolute-time'),
+      binary: z
+        .enum(["no-time", "absolute-time", "relative-time"])
+        .default("absolute-time"),
+      counter: z.enum(["no-time", "absolute-time"]).default("absolute-time"),
+      analog: z.enum(["no-time", "absolute-time"]).default("absolute-time"),
     })
     .default({}),
+  /** SAv5 user whose Control Direction Session Key protects critical requests. */
+  sav5UserNumber: z.number().int().min(1).max(0xffff).default(1),
   /**
    * DNP3 control (SELECT/OPERATE/DIRECT-OPERATE) policy. Disabled by default:
    * the outstation is read-only until an operator opts in AND a control sink is
@@ -196,16 +213,16 @@ export {
   createSession,
   type Dnp3ResponseFragment,
   type OutstationSession,
-} from './session';
+} from "./session";
 export {
   Dnp3LinkFrameReader,
   Dnp3TcpServer,
   DNP3_MAX_LINK_FRAME_BYTES,
   type Dnp3ApplicationDispatcher,
   type Dnp3TcpServerConfig,
-} from './server';
-export * from './config';
-export * from './tag-store-bridge';
+} from "./server";
+export * from "./config";
+export * from "./tag-store-bridge";
 
 /**
  * Context object passed to the pure request handler so it can be unit tested
@@ -243,7 +260,8 @@ export function createOutstationContext(opts?: {
   const pointMap = opts?.pointMap ?? new Dnp3PointMap();
   return {
     pointMap,
-    eventBuffer: opts?.eventBuffer ?? new Dnp3EventBuffer(DEFAULT_EVENT_BUFFER_CONFIG),
+    eventBuffer:
+      opts?.eventBuffer ?? new Dnp3EventBuffer(DEFAULT_EVENT_BUFFER_CONFIG),
     secureAuth: opts?.secureAuth ?? new Sav5Outstation(),
     controls: new Dnp3ControlProcessor(
       pointMap,
@@ -267,7 +285,11 @@ export interface Dnp3RequestResult {
   challenged: boolean;
 }
 
-const NO_RESPONSE: Dnp3RequestResult = { response: Buffer.alloc(0), fragments: [], challenged: false };
+const NO_RESPONSE: Dnp3RequestResult = {
+  response: Buffer.alloc(0),
+  fragments: [],
+  challenged: false,
+};
 
 /**
  * Handle one parsed application request and return the application response
@@ -283,23 +305,80 @@ const NO_RESPONSE: Dnp3RequestResult = { response: Buffer.alloc(0), fragments: [
 export function handleApplicationRequest(
   ctx: OutstationContext,
   req: ParsedRequest,
-  opts?: { userNumber?: number; now?: number; session?: OutstationSession; skipSecureAuth?: boolean },
+  opts?: {
+    userNumber?: number;
+    now?: number;
+    session?: OutstationSession;
+    skipSecureAuth?: boolean;
+  },
 ): Dnp3RequestResult {
   const now = opts?.now ?? Date.now();
   const userNumber = opts?.userNumber ?? 1;
   const session = opts?.session ?? ctx.session;
 
+  if (!opts?.skipSecureAuth && req.func === DNP3_FUNCTION.AUTH_REQUEST_NO_ACK) {
+    const object = req.objects[0];
+    if (
+      req.objectsComplete &&
+      req.objects.length === 1 &&
+      object?.group === DNP3_GROUP.SECURE_AUTH &&
+      object.variation === 7 &&
+      object.qualifier === 0x5b &&
+      object.count === 1 &&
+      object.freeFormat?.length === 1
+    ) {
+      ctx.secureAuth.clearAssociation(session.sav5AssociationId);
+    }
+    return NO_RESPONSE;
+  }
+
+  if (
+    !opts?.skipSecureAuth &&
+    ctx.secureAuth.isWaiting(session.sav5AssociationId, now)
+  ) {
+    logWarn(
+      `DNP3 SAv5: discarded function 0x${req.func.toString(16)} while association is waiting for a reply`,
+    );
+    return NO_RESPONSE;
+  }
+
+  if (isCriticalFunction(req.func) && !req.objectsComplete) {
+    logWarn(
+      `DNP3 outstation: rejected mutating function 0x${req.func.toString(16)} with incomplete object parsing`,
+    );
+    if (req.func === DNP3_FUNCTION.DIRECT_OPERATE_NR) return NO_RESPONSE;
+    const response = buildResponseHeader({
+      seq: req.seq,
+      iin: currentIin(ctx) | buildIin({ parameterError: true }),
+    });
+    return singleFragment(response, req.seq);
+  }
+
   // ── Secure Authentication: challenge critical requests ──────────────────
-  if (!opts?.skipSecureAuth && isCriticalFunction(req.func) && ctx.secureAuth.hasUser(userNumber)) {
+  if (
+    !opts?.skipSecureAuth &&
+    isCriticalFunction(req.func) &&
+    ctx.secureAuth.hasUser(userNumber)
+  ) {
     // The Critical ASDU is the whole application fragment (IEEE 1815 §7.5.2.2),
     // so the MAC covers the function code and application control octet too.
-    const challenge = ctx.secureAuth.issueChallenge(userNumber, req.raw, { now });
-    const header = buildResponseHeader({ seq: req.seq, iin: currentIin(ctx) });
-    // g120v1 object header (qualifier 0x5B free-format is spec; we use a simple
-    // count-1 header here as the integration seam — see module doc).
-    const objHeader = Buffer.from([DNP3_GROUP.SECURE_AUTH, 0x01, 0x07, 0x01]);
+    const challenge = ctx.secureAuth.issueChallenge(
+      userNumber,
+      session.sav5AssociationId,
+      req.raw,
+      { now, appSeq: req.seq },
+    );
+    const header = buildResponseHeader({
+      seq: req.seq,
+      functionCode: DNP3_FUNCTION.AUTH_RESPONSE,
+      iin: currentIin(ctx),
+    });
     const body = encodeChallengeObject(challenge);
-    const bytes = Buffer.concat([header, objHeader, body]);
+    const bytes = Buffer.concat([
+      header,
+      buildFreeFormat16Object(DNP3_GROUP.SECURE_AUTH, 1, body),
+    ]);
+    ctx.secureAuth.bindChallengeFragment(session.sav5AssociationId, bytes);
     return {
       response: bytes,
       fragments: [{ bytes, seq: req.seq, con: false, eventSeqs: [] }],
@@ -318,6 +397,9 @@ export function handleApplicationRequest(
   switch (req.func) {
     case DNP3_FUNCTION.READ:
       return dispatchFragments(handleRead(ctx, req), session);
+
+    case DNP3_FUNCTION.WRITE:
+      return handleWrite(ctx, req);
 
     case DNP3_FUNCTION.SELECT:
     case DNP3_FUNCTION.OPERATE:
@@ -346,7 +428,9 @@ export function handleApplicationRequest(
         seq: req.seq,
         iin: currentIin(ctx) | buildIin({ noFuncSupport: true }),
       });
-      logWarn(`DNP3 outstation: unsupported function code 0x${req.func.toString(16)}`);
+      logWarn(
+        `DNP3 outstation: unsupported function code 0x${req.func.toString(16)}`,
+      );
       return singleFragment(header, req.seq);
     }
   }
@@ -354,7 +438,61 @@ export function handleApplicationRequest(
 
 /** Wrap a single already-built fragment (no events, no confirm needed). */
 function singleFragment(bytes: Buffer, seq: number): Dnp3RequestResult {
-  return { response: bytes, fragments: [{ bytes, seq, con: false, eventSeqs: [] }], challenged: false };
+  return {
+    response: bytes,
+    fragments: [{ bytes, seq, con: false, eventSeqs: [] }],
+    challenged: false,
+  };
+}
+
+/** IIN1.7 is the DEVICE_RESTART bit addressed by WRITE g80v1. */
+const DEVICE_RESTART_IIN_INDEX = 7;
+
+/**
+ * Handle the standard WRITE g80v1 used by masters to acknowledge a device
+ * restart. No other database writes are exposed here.
+ *
+ * A conforming master writes the single packed bit at IIN index 7 to zero after
+ * it has completed startup integrity. Supporting this small write is important:
+ * without it the outstation advertises DEVICE_RESTART forever and reference
+ * masters continuously repeat their startup sequence.
+ */
+function handleWrite(
+  ctx: OutstationContext,
+  req: ParsedRequest,
+): Dnp3RequestResult {
+  const object = req.objects[0];
+  if (
+    req.objects.length !== 1 ||
+    !object ||
+    object.group !== DNP3_GROUP.INTERNAL_INDICATIONS ||
+    object.variation !== 1
+  ) {
+    const response = buildResponseHeader({
+      seq: req.seq,
+      iin: currentIin(ctx) | buildIin({ objectUnknown: true }),
+    });
+    return singleFragment(response, req.seq);
+  }
+
+  const { range, data } = object;
+  if (
+    !range ||
+    !data ||
+    range.start !== DEVICE_RESTART_IIN_INDEX ||
+    range.stop !== DEVICE_RESTART_IIN_INDEX ||
+    data.length !== 1 ||
+    (data[0] & 0x01) !== 0
+  ) {
+    const response = buildResponseHeader({
+      seq: req.seq,
+      iin: currentIin(ctx) | buildIin({ parameterError: true }),
+    });
+    return singleFragment(response, req.seq);
+  }
+
+  ctx.restartPending = false;
+  return singleFragment(emptyResponse(ctx, req.seq), req.seq);
 }
 
 /**
@@ -362,7 +500,10 @@ function singleFragment(bytes: Buffer, seq: number): Dnp3RequestResult {
  * Fragments that carry events (or that are not final) set CON, so the master's
  * CONFIRM both releases the next fragment and clears the reported events.
  */
-function dispatchFragments(fragments: Dnp3ResponseFragment[], session: OutstationSession): Dnp3RequestResult {
+function dispatchFragments(
+  fragments: Dnp3ResponseFragment[],
+  session: OutstationSession,
+): Dnp3RequestResult {
   if (fragments.length === 0) return NO_RESPONSE;
   const [first, ...rest] = fragments;
   session.pendingFragments = rest;
@@ -374,11 +515,17 @@ function dispatchFragments(fragments: Dnp3ResponseFragment[], session: Outstatio
  * Application CONFIRM from the master: permanently remove the events carried by
  * the confirmed fragment and release the next fragment, if any.
  */
-function handleConfirm(ctx: OutstationContext, req: ParsedRequest, session: OutstationSession): Dnp3RequestResult {
+function handleConfirm(
+  ctx: OutstationContext,
+  req: ParsedRequest,
+  session: OutstationSession,
+): Dnp3RequestResult {
   const awaiting = session.awaitingConfirm;
   if (!awaiting) return NO_RESPONSE;
   if (awaiting.seq !== req.seq) {
-    logWarn(`DNP3 outstation: CONFIRM seq ${req.seq} does not match outstanding fragment seq ${awaiting.seq}`);
+    logWarn(
+      `DNP3 outstation: CONFIRM seq ${req.seq} does not match outstanding fragment seq ${awaiting.seq}`,
+    );
     return NO_RESPONSE;
   }
   if (awaiting.eventSeqs.length > 0) {
@@ -392,13 +539,20 @@ function handleConfirm(ctx: OutstationContext, req: ParsedRequest, session: Outs
 }
 
 /** Handle a control function code (SELECT / OPERATE / DIRECT-OPERATE). */
-function handleControlRequest(ctx: OutstationContext, req: ParsedRequest, now: number): Dnp3RequestResult {
+function handleControlRequest(
+  ctx: OutstationContext,
+  req: ParsedRequest,
+  now: number,
+): Dnp3RequestResult {
   const result = ctx.controls.process(req, now);
   if (req.func === DNP3_FUNCTION.DIRECT_OPERATE_NR) {
     // "No response" variant: the operation runs, nothing is transmitted.
     return NO_RESPONSE;
   }
-  const header = buildResponseHeader({ seq: req.seq, iin: currentIin(ctx) | result.iin });
+  const header = buildResponseHeader({
+    seq: req.seq,
+    iin: currentIin(ctx) | result.iin,
+  });
   return singleFragment(Buffer.concat([header, result.objects]), req.seq);
 }
 
@@ -408,10 +562,14 @@ function handleControlRequest(ctx: OutstationContext, req: ParsedRequest, now: n
  * the event buffer's chronological order; both are packed to respect
  * `maxTxFragmentSize`.
  */
-function handleRead(ctx: OutstationContext, req: ParsedRequest): Dnp3ResponseFragment[] {
+function handleRead(
+  ctx: OutstationContext,
+  req: ParsedRequest,
+): Dnp3ResponseFragment[] {
   const targets = classReadTargets(req);
   // Default (no recognised class object, or explicit class 0): all static data.
-  const wantStatic = targets.class0 || (!targets.class1 && !targets.class2 && !targets.class3);
+  const wantStatic =
+    targets.class0 || (!targets.class1 && !targets.class2 && !targets.class3);
 
   const eventClasses: EventClass[] = [];
   if (targets.class1) eventClasses.push(1);
@@ -443,7 +601,8 @@ function handleRead(ctx: OutstationContext, req: ParsedRequest): Dnp3ResponseFra
     }
   }
 
-  let pending = eventClasses.length > 0 ? ctx.eventBuffer.peek(eventClasses) : [];
+  let pending =
+    eventClasses.length > 0 ? ctx.eventBuffer.peek(eventClasses) : [];
   while (pending.length > 0) {
     const encoded = buildEventObjects(pending, {
       pointMap: ctx.pointMap,
@@ -482,8 +641,19 @@ function handleRead(ctx: OutstationContext, req: ParsedRequest): Dnp3ResponseFra
     // Non-final fragments must be confirmed before the next is sent; fragments
     // carrying events must be confirmed before those events can be dropped.
     const con = frag.eventSeqs.length > 0 || i < lastIndex;
-    const header = buildResponseHeader({ seq, fir: i === 0, fin: i === lastIndex, con, iin });
-    return { bytes: Buffer.concat([header, ...frag.blocks]), seq, con, eventSeqs: frag.eventSeqs };
+    const header = buildResponseHeader({
+      seq,
+      fir: i === 0,
+      fin: i === lastIndex,
+      con,
+      iin,
+    });
+    return {
+      bytes: Buffer.concat([header, ...frag.blocks]),
+      seq,
+      con,
+      eventSeqs: frag.eventSeqs,
+    };
   });
 
   // Reported-but-unconfirmed events stay buffered (and are re-sent on the next
@@ -518,10 +688,17 @@ function currentIin(ctx: OutstationContext): number {
 export function handleSecureAuthReply(
   ctx: OutstationContext,
   replyObjectBody: Buffer,
+  replyAppSeq: number,
+  session: OutstationSession = ctx.session,
   now: number = Date.now(),
 ): Sav5VerifyResult {
   const reply = decodeReplyObject(replyObjectBody);
-  return ctx.secureAuth.verifyReply(reply, now);
+  return ctx.secureAuth.verifyReply(
+    reply,
+    session.sav5AssociationId,
+    replyAppSeq,
+    now,
+  );
 }
 
 /**
@@ -537,7 +714,10 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
   readonly config: ResolvedConfig;
   readonly ctx: OutstationContext;
 
-  constructor(config: Dnp3OutstationConfig = {}, eventBufferConfig: EventBufferConfig = DEFAULT_EVENT_BUFFER_CONFIG) {
+  constructor(
+    config: Dnp3OutstationConfig = {},
+    eventBufferConfig: EventBufferConfig = DEFAULT_EVENT_BUFFER_CONFIG,
+  ) {
     this.config = Dnp3OutstationConfigSchema.parse(config);
     const pointMap = new Dnp3PointMap(this.config.pointMap);
     this.ctx = {
@@ -553,9 +733,14 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
     };
   }
 
-  /** Provision an SAv5 Update Key for a user. */
-  setUpdateKey(userNumber: number, key: Buffer): void {
-    this.ctx.secureAuth.setUpdateKey(userNumber, key);
+  /** Provision the current SAv5 Control Direction Session Key for a user. */
+  setControlDirectionKey(userNumber: number, key: Buffer): void {
+    if (this.config.maxConnections !== 1) {
+      throw new Error(
+        "SAv5 key provisioning requires maxConnections=1 because session keys are association-scoped",
+      );
+    }
+    this.ctx.secureAuth.setControlDirectionKey(userNumber, key);
   }
 
   /**
@@ -566,7 +751,9 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
   setControlSink(sink: Dnp3ControlSink | null): void {
     this.ctx.controls.setSink(sink);
     if (sink && !this.config.controls.enabled) {
-      logWarn('DNP3 outstation: control sink installed but controls.enabled is false — controls stay rejected');
+      logWarn(
+        "DNP3 outstation: control sink installed but controls.enabled is false — controls stay rejected",
+      );
     }
   }
 
@@ -601,7 +788,7 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
   updateTag(tagId: string, sample: PointSample): void {
     const changedKeys = this.ctx.pointMap.applyTagUpdate(tagId, sample);
     for (const key of changedKeys) {
-      const [type, idxStr] = key.split(':') as [Dnp3PointType, string];
+      const [type, idxStr] = key.split(":") as [Dnp3PointType, string];
       const index = Number(idxStr);
       const def = this.ctx.pointMap.getPoint(type, index);
       if (!def || !def.eventClass) continue;
@@ -645,7 +832,7 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
     this.tcp = tcp;
     log(
       `DNP3 outstation ready on ${this.config.host}:${tcp.boundPort ?? this.config.port} ` +
-        `(link addr ${this.config.localAddress}, controls ${this.ctx.controls.writable ? 'ENABLED' : 'disabled'})`,
+        `(link addr ${this.config.localAddress}, controls ${this.ctx.controls.writable ? "ENABLED" : "disabled"})`,
     );
     // Periodic unsolicited evaluation for the delay-based trigger.
     this.unsolicitedTimer = setInterval(() => this.maybeSendUnsolicited(), 500);
@@ -672,25 +859,55 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
    */
   dispatch(req: ParsedRequest, session: OutstationSession): Buffer {
     const { response } = handleApplicationRequest(this.ctx, req, {
-      userNumber: 1,
+      userNumber: this.config.sav5UserNumber,
       session,
     });
-    // A successful read with the device-restart bit acknowledged clears it once
-    // the master writes IIN1.7 = 0 (WRITE g80v1). TODO: handle that write.
     return response;
   }
 
   /**
-   * Verify a g120v2 reply and, on success, execute the ASDU it authorises.
-   * The reply object body follows the 4-octet object header this module emits
-   * for group 120 (see the free-format TODO in the module doc).
+   * Verify a qualifier-0x5B g120v2 reply and, on success, execute the ASDU it
+   * authorises.
    */
-  dispatchSecureAuthReply(req: ParsedRequest, session: OutstationSession): Buffer {
+  dispatchSecureAuthReply(
+    req: ParsedRequest,
+    session: OutstationSession,
+  ): Buffer {
+    const object = req.objects[0];
+    if (
+      req.func !== DNP3_FUNCTION.AUTH_REQUEST ||
+      req.objects.length !== 1 ||
+      !req.objectsComplete ||
+      !object ||
+      object.group !== DNP3_GROUP.SECURE_AUTH ||
+      object.variation !== 2 ||
+      object.qualifier !== 0x5b ||
+      object.count !== 1 ||
+      object.freeFormat?.length !== 1
+    ) {
+      // A Reply attempt is single-use. Malformed FC20 framing must not leave
+      // the queued critical ASDU reusable under the same challenge. FC21 is
+      // exclusively the no-ack Error carrier and is not itself a Reply event.
+      if (req.func === DNP3_FUNCTION.AUTH_REQUEST) {
+        this.ctx.secureAuth.clearAssociation(session.sav5AssociationId);
+      }
+      logWarn(
+        "DNP3 SAv5: malformed AUTH_REQUEST; expected one qualifier-0x5B g120v2 object",
+      );
+      return Buffer.alloc(0);
+    }
+
     let verify: Sav5VerifyResult;
     try {
-      verify = handleSecureAuthReply(this.ctx, req.rawObjects.subarray(4));
+      verify = handleSecureAuthReply(
+        this.ctx,
+        object.freeFormat[0],
+        req.seq,
+        session,
+      );
     } catch (err) {
-      logError(err, 'DNP3 outstation: malformed SAv5 reply');
+      this.ctx.secureAuth.clearAssociation(session.sav5AssociationId);
+      logError(err, "DNP3 outstation: malformed SAv5 reply");
       return Buffer.alloc(0);
     }
     if (!verify.ok) {
@@ -702,10 +919,12 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
     try {
       authorised = parseRequest(verify.criticalAsdu);
     } catch (err) {
-      logError(err, 'DNP3 outstation: authorised ASDU failed to parse');
+      logError(err, "DNP3 outstation: authorised ASDU failed to parse");
       return Buffer.alloc(0);
     }
-    log(`DNP3 SAv5: reply verified, dispatching authorised function 0x${authorised.func.toString(16)}`);
+    log(
+      `DNP3 SAv5: reply verified, dispatching authorised function 0x${authorised.func.toString(16)}`,
+    );
     const { response } = handleApplicationRequest(this.ctx, authorised, {
       userNumber: verify.userNumber,
       session,
@@ -715,8 +934,9 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
   }
 
   /** A dropped link invalidates any armed SELECT. */
-  onAssociationClosed(_session: OutstationSession): void {
+  onAssociationClosed(session: OutstationSession): void {
     this.ctx.controls.disarm();
+    this.ctx.secureAuth.clearAssociation(session.sav5AssociationId);
   }
 
   /**
@@ -758,20 +978,22 @@ export class Dnp3Outstation implements Dnp3ApplicationDispatcher {
     if (sent === 0) return;
     this.ctx.eventBuffer.markReported(encoded.encodedSeqs);
     log(
-      `DNP3 outstation: sent unsolicited response (classes ${decision.classes.join(',')}, ` +
+      `DNP3 outstation: sent unsolicited response (classes ${decision.classes.join(",")}, ` +
         `reason ${decision.reason}, ${encoded.encodedSeqs.length} event(s))`,
     );
   }
 }
 
 /** Factory mirroring the modbus driver convention. */
-export function createDnp3Outstation(config?: Dnp3OutstationConfig): Dnp3Outstation {
+export function createDnp3Outstation(
+  config?: Dnp3OutstationConfig,
+): Dnp3Outstation {
   return new Dnp3Outstation(config);
 }
 
 // ── Startup path ────────────────────────────────────────────────────────────
 
-const LOG_SCOPE = 'dnp3-outstation';
+const LOG_SCOPE = "dnp3-outstation";
 
 /** A started outstation plus everything that has to be torn down with it. */
 export interface Dnp3OutstationService {
@@ -813,7 +1035,10 @@ export async function startDnp3Outstation(
   }
 
   const config = loadDnp3OutstationConfig(env);
-  const pointMapConfig = loadDnp3PointMapFile(config.pointMapFile, options.readFile);
+  const pointMapConfig = loadDnp3PointMapFile(
+    config.pointMapFile,
+    options.readFile,
+  );
 
   const outstation = new Dnp3Outstation({
     host: config.host,
@@ -824,6 +1049,7 @@ export async function startDnp3Outstation(
     socketTimeoutMs: config.socketTimeoutMs,
     maxRxBufferBytes: config.maxRxBufferBytes,
     maxTxQueueBytes: config.maxTxQueueBytes,
+    sav5UserNumber: config.sav5UserNumber,
     unsolicitedEnabled: config.unsolicitedEnabled,
     controls: {
       enabled: config.allowControls,
@@ -832,10 +1058,10 @@ export async function startDnp3Outstation(
     pointMap: pointMapConfig,
   });
 
-  if (config.sav5UpdateKeyHex) {
-    outstation.setUpdateKey(
+  if (config.sav5ControlKeyHex) {
+    outstation.setControlDirectionKey(
       config.sav5UserNumber,
-      Buffer.from(config.sav5UpdateKeyHex, 'hex'),
+      Buffer.from(config.sav5ControlKeyHex, "hex"),
     );
   }
 
@@ -853,13 +1079,13 @@ export async function startDnp3Outstation(
     logWarn(
       `DNP3 Outstation Mode has CONTROLS ENABLED: ${writable.length} of ` +
         `${pointMapConfig.points.length} mapped points are writable by a master ` +
-        `(${writable.map((p) => `${p.type}:${p.index}→${p.tagId}`).join(', ') || 'none'}). ` +
-        (config.sav5UpdateKeyHex
+        `(${writable.map((p) => `${p.type}:${p.index}→${p.tagId}`).join(", ") || "none"}). ` +
+        (config.sav5ControlKeyHex
           ? `SAv5 challenges those commands for user ${config.sav5UserNumber}; reads and the ` +
-            'TCP peer itself remain unauthenticated.'
-          : 'SAv5 is NOT provisioned, so these commands carry no authentication at all — ' +
-            'the peer allowlist and network segmentation are the only controls in front of ' +
-            'these tags.'),
+            "TCP peer itself remain unauthenticated."
+          : "SAv5 is NOT provisioned, so these commands carry no authentication at all — " +
+            "the peer allowlist and network segmentation are the only controls in front of " +
+            "these tags."),
       LOG_SCOPE,
     );
   }
@@ -867,9 +1093,9 @@ export async function startDnp3Outstation(
   if (!isLoopbackHost(config.host)) {
     logWarn(
       `DNP3 Outstation Mode is bound to the non-loopback address ${config.host}. ` +
-        `Peers are restricted to [${config.allowedPeers.join(', ')}], but DNP3 does ` +
-        'not authenticate the TCP peer and does not authenticate reads at all; keep ' +
-        'this listener on a segmented control network.',
+        `Peers are restricted to [${config.allowedPeers.join(", ")}], but DNP3 does ` +
+        "not authenticate the TCP peer and does not authenticate reads at all; keep " +
+        "this listener on a segmented control network.",
       LOG_SCOPE,
     );
   }
