@@ -284,7 +284,7 @@ export class ModbusTcpServer {
     });
 
     socket.on("error", (err) => {
-      logWarn(`Modbus client socket error: ${err.message}`, "modbus-server");
+      logWarn("Modbus client socket error", "modbus-server", { errorMessage: err.message });
     });
 
     socket.on("close", () => {

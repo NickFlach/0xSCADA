@@ -513,7 +513,7 @@ export class Dnp3TcpServer {
     });
 
     socket.on("error", (err) => {
-      logWarn(`DNP3 master socket error: ${err.message}`, LOG_SCOPE);
+      logWarn("DNP3 master socket error", LOG_SCOPE, { errorMessage: err.message });
     });
 
     socket.on("close", () => {
