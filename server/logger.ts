@@ -36,6 +36,25 @@ const logger = pino({
  * they remain the right place to put an untrusted value.
  */
 export function escapeLogMessage(message: string): string {
+  // Total by construction. The declared type says `string`, but `logError` is
+  // `(error: unknown, message?: string)` and six call sites pass it
+  // message-first with an `as any` on the second argument — so an Error object
+  // arrives here, `for…of` throws "message is not iterable", and the throw
+  // escapes the CATCH BLOCK that was trying to report the original failure.
+  // `FluxCommander.pollAll` died that way and took its ack POST with it.
+  //
+  // pino tolerated the swapped arguments before this escaping existed, which is
+  // why the argument-order bug survived unnoticed. Restoring that tolerance is
+  // the right call regardless of the call sites: on a control-plane surface a
+  // logging helper must never be able to kill a polling loop, and it has no
+  // business being the thing that decides a caller's fate.
+  //
+  // Non-strings are returned untouched rather than coerced — pino formats them
+  // itself, and `String(err)` would flatten an Error to "Error: ..." and lose
+  // the stack that makes it useful.
+  if (typeof message !== 'string') {
+    return message as unknown as string;
+  }
   let escaped = '';
   for (const char of message) {
     const code = char.codePointAt(0) ?? 0;
