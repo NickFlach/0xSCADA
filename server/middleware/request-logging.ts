@@ -52,7 +52,7 @@ export function formatRequestLog(details: RequestLogDetails): string {
  * one-time credential set `res.locals.sensitiveResponse` before responding.
  */
 export function requestLoggingMiddleware(
-  writeLog: (line: string) => void = log,
+  writeLog: (message: string, ...args: any[]) => void = log,
 ): RequestHandler {
   return (req: Request, res: Response, next: NextFunction): void => {
     const startedAt = Date.now();
@@ -67,14 +67,16 @@ export function requestLoggingMiddleware(
 
     res.on("finish", () => {
       if (!path.toLowerCase().startsWith("/api")) return;
-      writeLog(formatRequestLog({
+      writeLog("HTTP request completed", {
         method: req.method,
         path: redactSensitiveRequestPath(path),
         statusCode: res.statusCode,
         durationMs: Date.now() - startedAt,
-        responseBody: capturedJsonResponse,
+        responseBody: res.locals.sensitiveResponse === true
+          ? SENSITIVE_RESPONSE_LOG_MARKER
+          : capturedJsonResponse,
         sensitiveResponse: res.locals.sensitiveResponse === true,
-      }));
+      });
     });
 
     next();
