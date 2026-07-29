@@ -10,7 +10,7 @@
  * Issue: #465
  */
 
-import { describe, it, expect } from "vitest";
+import { describe, it, expect, vi } from "vitest";
 import { readFile } from "node:fs/promises";
 import {
   GooseSubscriber,
@@ -219,6 +219,7 @@ describe("pcap replay → subscriber", () => {
 
 describe("pcap replay — timing", () => {
   const GAP_MS = 150;
+  const WALL_START_MS = 10_000;
 
   /** Two GOOSE frames GAP_MS apart in recorded capture time. */
   function twoFrameCapture(): Buffer {
@@ -242,40 +243,79 @@ describe("pcap replay — timing", () => {
     ]);
   }
 
-  /** Replay in realtime mode, returning wall-clock arrival offsets in ms. */
-  async function realtimeArrivals(speed: number): Promise<number[]> {
+  it("schedules frames at their recorded offsets from replay start", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WALL_START_MS);
+    const backend = new GoosePcapReplayBackend({
+      buffer: twoFrameCapture(),
+      realtime: true,
+      speed: 1,
+    });
+    const arrivals: number[] = [];
+
+    try {
+      await backend.open(() => arrivals.push(Date.now()));
+      expect(arrivals).toEqual([]);
+
+      // Realtime scheduling targets each recorded offset from replay start. A
+      // callback-to-callback wall-clock measurement is not equivalent: if the
+      // first zero-delay timer is starved, the replay deliberately catches up.
+      await vi.advanceTimersToNextTimerAsync();
+      expect(arrivals).toEqual([WALL_START_MS]);
+
+      await vi.advanceTimersByTimeAsync(GAP_MS - 1);
+      expect(arrivals).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(arrivals).toEqual([WALL_START_MS, WALL_START_MS + GAP_MS]);
+      await expect(backend.completion()).resolves.toMatchObject({ delivered: 2 });
+    } finally {
+      await backend.close();
+      vi.useRealTimers();
+    }
+  });
+
+  it("scales the recorded offset by the speed multiplier", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(WALL_START_MS);
+    const speed = 5;
+    const scaledGapMs = GAP_MS / speed;
     const backend = new GoosePcapReplayBackend({
       buffer: twoFrameCapture(),
       realtime: true,
       speed,
     });
     const arrivals: number[] = [];
-    const started = Date.now();
-    await backend.open(() => arrivals.push(Date.now() - started));
-    await backend.completion();
-    await backend.close();
-    return arrivals;
-  }
 
-  it("honours the recorded inter-frame gap in realtime mode", async () => {
-    const arrivals = await realtimeArrivals(1);
-    expect(arrivals).toHaveLength(2);
-    // Timer coarseness only ever delays; the gap must not collapse to zero.
-    expect(arrivals[1] - arrivals[0]).toBeGreaterThanOrEqual(GAP_MS * 0.7);
+    try {
+      await backend.open(() => arrivals.push(Date.now()));
+      await vi.advanceTimersToNextTimerAsync();
+      expect(arrivals).toEqual([WALL_START_MS]);
+
+      await vi.advanceTimersByTimeAsync(scaledGapMs - 1);
+      expect(arrivals).toHaveLength(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(arrivals).toEqual([WALL_START_MS, WALL_START_MS + scaledGapMs]);
+      await expect(backend.completion()).resolves.toMatchObject({ delivered: 2 });
+    } finally {
+      await backend.close();
+      vi.useRealTimers();
+    }
   });
 
-  it("compresses the gap by the speed multiplier", async () => {
-    const arrivals = await realtimeArrivals(5);
-    expect(arrivals).toHaveLength(2);
-    expect(arrivals[1] - arrivals[0]).toBeLessThan(GAP_MS * 0.8);
-  });
+  it("drains the whole capture before open() resolves in no-delay mode", async () => {
+    const backend = new GoosePcapReplayBackend({
+      buffer: encodeReplayPcap(),
+      realtime: false,
+    });
+    const delivered: Buffer[] = [];
 
-  it("drains the whole capture immediately in no-delay mode", async () => {
-    const started = Date.now();
-    const { backend } = await replayFixture();
+    await backend.open((frame) => delivered.push(frame));
+    // No-delay mode has no timer chain: every GOOSE frame is delivered
+    // synchronously inside open(), before its promise resolves.
+    expect(delivered).toHaveLength(8);
     expect(backend.getStats().delivered).toBe(8);
-    // The capture spans 440 ms of recorded time; no-delay replay must not sleep.
-    expect(Date.now() - started).toBeLessThan(300);
+    await expect(backend.completion()).resolves.toMatchObject({ delivered: 8 });
+    await backend.close();
   });
 });
 
