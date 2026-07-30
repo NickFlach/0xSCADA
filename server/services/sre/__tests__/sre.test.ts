@@ -92,10 +92,80 @@ describe('AutoRemediationEngine', () => {
       actionId: 'scale-out',
       context,
       idempotencyKey: 'scale-gateway-apply-1',
+      dryRun: false,
     });
     expect(result).toMatchObject({ status: 'succeeded', changed: true, verified: true });
     expect(setReplicas).toHaveBeenCalledTimes(1);
     expect(replicas).toBe(4);
+  });
+
+  it('refuses to execute when dryRun is not stated', async () => {
+    // The gate on the mutating path is `if (request.dryRun)`, so while the
+    // field was optional an omitted one was `undefined` — falsy — and the
+    // remediation RAN. Only the HTTP route defaulted it to true; this service
+    // is exported and called directly, so a second caller got a live
+    // infrastructure change by saying nothing at all.
+    //
+    // `dryRun` is now required, so the compiler stops that at the call site.
+    // This asserts the runtime half, for a caller reaching the engine from
+    // untyped JS or through a cast: an absent flag must never read as execute.
+    let replicas = 2;
+    const setReplicas = vi.fn(async (_component: string, desired: number) => {
+      replicas = desired;
+    });
+    const action = createScaleOutAction({
+      currentReplicas: async () => replicas,
+      setReplicas,
+      readyReplicas: async () => replicas,
+    });
+    const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
+    const context = { component: 'gateway', desiredReplicas: 4, maximumReplicas: 6 };
+
+    const omitted = { actionId: 'scale-out', context, idempotencyKey: 'no-dry-run-stated' };
+    const result = await engine.execute(
+      omitted as unknown as Parameters<typeof engine.execute>[0],
+    );
+
+    expect(setReplicas, 'an unstated dryRun performed a live scale').not.toHaveBeenCalled();
+    expect(replicas).toBe(2);
+    expect(result.changed).toBe(false);
+    expect(result.status).not.toBe('succeeded');
+  });
+
+  it('fingerprints an unstated dryRun the same as an explicit dry run', async () => {
+    // `dryRun` is part of the idempotency fingerprint. It must be hashed as the
+    // RESOLVED boolean, not the raw field: an absent flag and an explicit
+    // `true` both plan, so hashing them differently makes two identical
+    // requests look like a key reused for different work, and the second one
+    // throws instead of returning the first's result.
+    let replicas = 2;
+    const setReplicas = vi.fn(async (_component: string, desired: number) => {
+      replicas = desired;
+    });
+    const action = createScaleOutAction({
+      currentReplicas: async () => replicas,
+      setReplicas,
+      readyReplicas: async () => replicas,
+    });
+    const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
+    const context = { component: 'gateway', desiredReplicas: 4, maximumReplicas: 6 };
+    const key = 'same-key-absent-then-explicit';
+
+    const omitted = { actionId: 'scale-out', context, idempotencyKey: key };
+    const first = await engine.execute(
+      omitted as unknown as Parameters<typeof engine.execute>[0],
+    );
+    const second = await engine.execute({
+      actionId: 'scale-out',
+      context,
+      idempotencyKey: key,
+      dryRun: true,
+    });
+
+    expect(first.status).toBe('planned');
+    expect(second.status).toBe('planned');
+    expect(second.reused, 'the second call was treated as different work').toBe(true);
+    expect(setReplicas).not.toHaveBeenCalled();
   });
 
   it('reuses idempotent results and rejects key collisions', async () => {
@@ -110,6 +180,7 @@ describe('AutoRemediationEngine', () => {
       actionId: 'scale-out',
       context: { component: 'api', desiredReplicas: 2, maximumReplicas: 4 },
       idempotencyKey: 'incident-123-scale',
+      dryRun: false,
     };
 
     const first = await engine.execute(request);
@@ -137,6 +208,7 @@ describe('AutoRemediationEngine', () => {
       actionId: 'gateway-failover',
       context: { gatewayId: 'gw-1' },
       idempotencyKey: 'incident-456-failover',
+      dryRun: false,
     });
     expect(result.status).toBe('blocked');
     expect(result.message).toMatch(/no healthy peer/i);
@@ -156,6 +228,7 @@ describe('AutoRemediationEngine', () => {
       actionId: 'scale-out',
       context: { component: 'historian', desiredReplicas: 4, maximumReplicas: 5 },
       idempotencyKey: 'incident-789-scale',
+      dryRun: false,
     });
     expect(result).toMatchObject({
       status: 'rolled-back',
@@ -182,6 +255,7 @@ describe('AutoRemediationEngine', () => {
       actionId: 'scale-out',
       context: { component: 'api', desiredReplicas: 3, maximumReplicas: 4 },
       idempotencyKey: 'concurrent-scale-out',
+      dryRun: false,
     });
     expect(result).toMatchObject({ status: 'skipped', changed: false });
     expect(result.message).toMatch(/scale-down is forbidden/);
@@ -207,12 +281,14 @@ describe('AutoRemediationEngine', () => {
       actionId: dangerous.id,
       context: {},
       idempotencyKey: 'db-promote-unapproved',
+      dryRun: false,
     });
     expect(blocked.status).toBe('blocked');
     const approved = await engine.execute({
       actionId: dangerous.id,
       context: {},
       idempotencyKey: 'db-promote-approved',
+      dryRun: false,
       approvedBy: 'incident-commander@example.com',
     });
     expect(approved.status).toBe('succeeded');
@@ -234,6 +310,7 @@ describe('AutoRemediationEngine', () => {
       actionId: action.id,
       context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
       idempotencyKey: 'not-allowlisted',
+      dryRun: false,
     });
     expect(result.status).toBe('blocked');
     expect(result.message).toMatch(/allowlist/);
@@ -269,6 +346,7 @@ describe('AutoRemediationEngine', () => {
       actionId: action.id,
       context: {},
       idempotencyKey: 'slow-first',
+      dryRun: false,
     });
     clock = 10 * 60_000;
     release();
@@ -277,6 +355,7 @@ describe('AutoRemediationEngine', () => {
       actionId: action.id,
       context: {},
       idempotencyKey: 'slow-second',
+      dryRun: false,
     });
     expect(second.status).toBe('blocked');
     expect(execute).toHaveBeenCalledTimes(1);
@@ -302,7 +381,7 @@ describe('AutoRemediationEngine', () => {
     };
     const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
     const context = { desired: 2 };
-    const request = { actionId: action.id, context, idempotencyKey: 'snapshot-1' };
+    const request = { actionId: action.id, context, idempotencyKey: 'snapshot-1', dryRun: false };
     const running = engine.execute(request);
     context.desired = 99;
     release();
@@ -320,6 +399,7 @@ describe('RemediationRuntime', () => {
       actionId: 'scale-out',
       context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
       idempotencyKey: 'runtime-unconfigured',
+      dryRun: false,
     })).rejects.toBeInstanceOf(RemediationRuntimeUnavailableError);
 
     let replicas = 1;
@@ -337,6 +417,7 @@ describe('RemediationRuntime', () => {
       actionId: 'scale-out',
       context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
       idempotencyKey: 'runtime-configured',
+      dryRun: false,
     });
     expect(result.status).toBe('succeeded');
     expect(runtime.status()).toMatchObject({
@@ -370,6 +451,7 @@ describe('RemediationRuntime', () => {
       actionId: 'scale-out',
       context: { component: 'api', desiredReplicas: 2, maximumReplicas: 3 },
       idempotencyKey: 'audit-retry',
+      dryRun: false,
     };
     await expect(runtime.execute(request)).rejects.toBeInstanceOf(RemediationAuditPersistenceError);
     expect(replicas).toBe(2);

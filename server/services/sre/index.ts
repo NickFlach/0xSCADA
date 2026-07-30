@@ -335,7 +335,22 @@ export interface RemediationRequest<Context = unknown> {
   actionId: string;
   context: Context;
   idempotencyKey: string;
-  dryRun?: boolean;
+  /**
+   * Whether to plan the remediation instead of performing it. REQUIRED, and
+   * deliberately not optional.
+   *
+   * This field was `dryRun?: boolean`, and the only gate on the mutating path
+   * is `if (request.dryRun)` — so an omitted field was `undefined`, which is
+   * falsy, which EXECUTED. The HTTP route defaulted it to `true`, but this
+   * service is exported and called directly, so every safety property rested
+   * on one route's Zod schema and any second caller got execute-by-omission
+   * with no error.
+   *
+   * Making it required is the point: "should this mutate production" has no
+   * sensible default, and a required field is the only version a reviewer can
+   * check by reading the call site.
+   */
+  dryRun: boolean;
   /** Required for actions above the engine's automatic risk ceiling. */
   approvedBy?: string;
 }
@@ -465,11 +480,32 @@ export class AutoRemediationEngine {
     } catch {
       throw new Error('remediation context must be structured-cloneable data');
     }
-    const normalizedRequest: RemediationRequest<Context> = { ...request, context };
+    // Resolve `dryRun` ONCE, here, and fail safe when it is absent.
+    //
+    // The type is required, which stops a typed caller omitting it. That is not
+    // sufficient on its own: types are erased, so anything arriving from
+    // untyped JS, a cast, or a JSON body that was not schema-checked still
+    // reaches this method with the field missing — and the gate downstream is
+    // `if (request.dryRun)`, which reads `undefined` as "execute". A remediation
+    // engine must not perform a live infrastructure change because a caller
+    // said nothing, so an absent flag resolves to a dry run.
+    //
+    // Not silent: `dryRunAssumed` puts it in the result message, because a
+    // caller that meant to execute and quietly got a plan is its own bug.
+    const dryRunAssumed = typeof request.dryRun !== 'boolean';
+    const dryRun = dryRunAssumed ? true : request.dryRun;
+    const normalizedRequest: RemediationRequest<Context> = { ...request, context, dryRun };
+
+    // `dryRun` joins the fingerprint as the RESOLVED boolean. If it were hashed
+    // as the raw field, an absent value and an explicit `false` would hash
+    // differently while behaving identically, and — worse — an absent value and
+    // an explicit `true` would hash differently while both planning, so a plan
+    // could collide with a real execution on one idempotency key and return the
+    // wrong cached result.
     const fingerprint = hash({
       actionId: normalizedRequest.actionId,
       context: normalizedRequest.context,
-      dryRun: normalizedRequest.dryRun ?? false,
+      dryRun,
       approvedBy: normalizedRequest.approvedBy ?? null,
     });
     const prior = this.cached.get(request.idempotencyKey);
@@ -505,6 +541,12 @@ export class AutoRemediationEngine {
     }
   }
 
+  /**
+   * Run one attempt. The `request` here is ALWAYS the normalized one built by
+   * `execute()` — in particular its `dryRun` is the resolved boolean, never the
+   * caller's possibly-absent field. Everything below may therefore read
+   * `request.dryRun` directly; do not call this with a raw caller request.
+   */
   private async executeOnce<Context>(
     action: RemediationAction<Context>,
     request: RemediationRequest<Context>,
@@ -525,7 +567,7 @@ export class AutoRemediationEngine {
         idempotencyKey: request.idempotencyKey,
         approvedBy: request.approvedBy?.trim() || undefined,
         risk: action.risk,
-        dryRun: request.dryRun ?? false,
+        dryRun: request.dryRun,
         reused: false,
         startedAt: started.toISOString(),
         completedAt: this.now().toISOString(),
