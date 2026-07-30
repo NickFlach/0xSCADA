@@ -71,7 +71,7 @@ export const healthManager = new HealthManager(/* cacheTtlMs */ 10_000);
 // 1. Database (required) — must be healthy before anything else
 healthManager.register(
   createDatabaseCheck(async () => {
-    const h = await (storage as any).healthCheck();
+    const h = await storage.healthCheck();
     if (!h.connected) throw new Error('Database not connected');
     return h;
   })

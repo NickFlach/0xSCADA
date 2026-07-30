@@ -12,7 +12,7 @@ const router = Router();
 // Vendors
 router.get("/vendors", async (req, res) => {
   try {
-    const vendors = await (storage as any).getVendors();
+    const vendors = await storage.getVendors();
     res.json(vendors);
   } catch (error) {
     logError(error, "Error fetching vendors:");
@@ -22,7 +22,7 @@ router.get("/vendors", async (req, res) => {
 
 router.get("/vendors/:id", async (req, res) => {
   try {
-    const vendor = await (storage as any).getVendorById(req.params.id);
+    const vendor = await storage.getVendorById(req.params.id);
     if (!vendor) {
       return res.status(404).json({ error: "Vendor not found" });
     }
@@ -35,7 +35,7 @@ router.get("/vendors/:id", async (req, res) => {
 
 router.post("/vendors", async (req, res) => {
   try {
-    const vendor = await (storage as any).createVendor(req.body);
+    const vendor = await storage.createVendor(req.body);
     res.status(201).json(vendor);
   } catch (error) {
     logError(error, "Error creating vendor:");
@@ -46,7 +46,7 @@ router.post("/vendors", async (req, res) => {
 // Template Packages
 router.get("/templates", async (req, res) => {
   try {
-    const templates = await (storage as any).getTemplatePackages();
+    const templates = await storage.getTemplatePackages();
     res.json(templates);
   } catch (error) {
     logError(error, "Error fetching templates:");
@@ -56,7 +56,7 @@ router.get("/templates", async (req, res) => {
 
 router.get("/templates/vendor/:vendorId", async (req, res) => {
   try {
-    const templates = await (storage as any).getTemplatePackagesByVendor(req.params.vendorId);
+    const templates = await storage.getTemplatePackagesByVendor(req.params.vendorId);
     res.json(templates);
   } catch (error) {
     logError(error, "Error fetching templates:");
@@ -66,7 +66,7 @@ router.get("/templates/vendor/:vendorId", async (req, res) => {
 
 router.post("/templates", async (req, res) => {
   try {
-    const template = await (storage as any).createTemplatePackage(req.body);
+    const template = await storage.createTemplatePackage(req.body);
     res.status(201).json(template);
   } catch (error) {
     logError(error, "Error creating template:");
@@ -77,7 +77,7 @@ router.post("/templates", async (req, res) => {
 // Data Type Mappings
 router.get("/data-types/vendor/:vendorId", async (req, res) => {
   try {
-    const mappings = await (storage as any).getDataTypeMappingsByVendor(req.params.vendorId);
+    const mappings = await storage.getDataTypeMappingsByVendor(req.params.vendorId);
     res.json(mappings);
   } catch (error) {
     logError(error, "Error fetching data type mappings:");
@@ -87,7 +87,7 @@ router.get("/data-types/vendor/:vendorId", async (req, res) => {
 
 router.post("/data-types", async (req, res) => {
   try {
-    const mapping = await (storage as any).createDataTypeMapping(req.body);
+    const mapping = await storage.createDataTypeMapping(req.body);
     res.status(201).json(mapping);
   } catch (error) {
     logError(error, "Error creating data type mapping:");
@@ -98,7 +98,7 @@ router.post("/data-types", async (req, res) => {
 // Controllers
 router.get("/controllers", async (req, res) => {
   try {
-    const controllers = await (storage as any).getControllers();
+    const controllers = await storage.getControllers();
     res.json(controllers);
   } catch (error) {
     logError(error, "Error fetching controllers:");
@@ -108,7 +108,7 @@ router.get("/controllers", async (req, res) => {
 
 router.get("/controllers/vendor/:vendorId", async (req, res) => {
   try {
-    const controllers = await (storage as any).getControllersByVendor(req.params.vendorId);
+    const controllers = await storage.getControllersByVendor(req.params.vendorId);
     res.json(controllers);
   } catch (error) {
     logError(error, "Error fetching controllers:");
@@ -118,7 +118,7 @@ router.get("/controllers/vendor/:vendorId", async (req, res) => {
 
 router.get("/controllers/site/:siteId", async (req, res) => {
   try {
-    const controllers = await (storage as any).getControllersBySite(req.params.siteId);
+    const controllers = await storage.getControllersBySite(req.params.siteId);
     res.json(controllers);
   } catch (error) {
     logError(error, "Error fetching controllers:");
@@ -128,7 +128,7 @@ router.get("/controllers/site/:siteId", async (req, res) => {
 
 router.post("/controllers", async (req, res) => {
   try {
-    const controller = await (storage as any).createController(req.body);
+    const controller = await storage.createController(req.body);
     res.status(201).json(controller);
   } catch (error) {
     logError(error, "Error creating controller:");
