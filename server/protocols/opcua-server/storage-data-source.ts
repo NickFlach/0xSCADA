@@ -19,7 +19,12 @@
 
 import type { DataType, Quality } from "@shared/types/core/common";
 import type { TagDataSource } from "./index";
-import type { SourceSite, SourceTag, TagSample } from "./types";
+import type {
+  SourceSite,
+  SourceTag,
+  TagSample,
+  TagWriteRequest,
+} from "./types";
 
 /** Update shape emitted by the existing tag-stream fabric. */
 export interface IncomingTagUpdate {
@@ -34,6 +39,8 @@ export interface StorageDataSourceDeps {
   loadSites: () => Promise<SourceSite[]>;
   /** Load the tag catalogue (distinct `historian_data` tag ids per site). */
   loadTagDefs: () => Promise<SourceTag[]>;
+  /** Optional fail-closed write backend. Absence keeps every node read-only. */
+  writeTag?: (request: TagWriteRequest) => Promise<void>;
 }
 
 /** Infer a 0xSCADA DataType from a runtime value. */
@@ -82,6 +89,26 @@ export class StorageTagDataSource implements TagDataSource {
     return () => {
       this.listeners.delete(onChange);
     };
+  }
+
+  async writeTag(request: TagWriteRequest): Promise<void> {
+    if (!this.deps.writeTag) {
+      throw new Error("OPC-UA writes are not configured");
+    }
+    if (
+      typeof request.value !== "number" &&
+      typeof request.value !== "string" &&
+      typeof request.value !== "boolean"
+    ) {
+      throw new Error("OPC-UA writes only accept scalar tag values");
+    }
+    await this.deps.writeTag(request);
+    this.pushTagUpdate({
+      tagName: request.tagId,
+      value: request.value,
+      quality: "good",
+      timestamp: request.timestamp.toISOString(),
+    });
   }
 
   /**

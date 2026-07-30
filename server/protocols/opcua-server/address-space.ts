@@ -101,7 +101,7 @@ export function tagVariableNodeId(
 /** Compute the UA AccessLevel byte for a tag (read-only by default). */
 export function accessLevelFor(tag: SourceTag): number {
   let level = UaAccessLevel.CurrentRead;
-  if (tag.writable) {
+  if (tag.writable && tag.direction === "input") {
     level |= UaAccessLevel.CurrentWrite;
   }
   return level;
@@ -202,6 +202,8 @@ export function buildAddressSpace(
       accessLevel: accessLevelFor(tag),
       units: tag.units,
       tagId: tag.tagId,
+      siteId: tag.siteId,
+      direction: tag.direction,
     });
     // tagIndex is keyed by bare tagId for value routing on data-change. If the
     // same tagId exists in multiple sites the last sorted site wins; callers

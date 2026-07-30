@@ -59,6 +59,10 @@ interface UaBrowseResult {
 interface UaSession {
   browse(nodeToBrowse: string): Promise<UaBrowseResult>;
   readVariableValue(nodeId: string): Promise<UaDataValue>;
+  writeSingleNode(
+    nodeId: string,
+    value: { dataType: unknown; value: unknown },
+  ): Promise<{ name: string }>;
   createSubscription2(options: Record<string, unknown>): Promise<UaSubscription>;
   close(): Promise<void>;
 }
@@ -85,6 +89,7 @@ interface UaClientApi {
   AttributeIds: Record<string, number>;
   TimestampsToReturn: Record<string, number>;
   UserTokenType: Record<string, number>;
+  DataType: Record<string, unknown>;
 }
 
 async function loadClientApi(): Promise<UaClientApi> {
@@ -112,12 +117,20 @@ const TAGS: SourceTag[] = [
     dataType: "array",
     elementDataType: "number",
   },
+  {
+    tagId: "SETPOINT",
+    siteId: "SITE-01",
+    dataType: "number",
+    writable: true,
+    direction: "input",
+  },
 ];
 
 /** In-memory {@link TagDataSource}: the 0xSCADA side is not what is under test. */
 class InMemoryTagDataSource implements TagDataSource {
   private readonly latest = new Map<string, TagSample>();
   private readonly listeners = new Set<(sample: TagSample) => void>();
+  readonly writes: { tagId: string; username: string; value: unknown }[] = [];
 
   async loadSites(): Promise<SourceSite[]> {
     return [SITE];
@@ -136,6 +149,17 @@ class InMemoryTagDataSource implements TagDataSource {
     return () => {
       this.listeners.delete(onChange);
     };
+  }
+
+  async writeTag(request: {
+    tagId: string;
+    username: string;
+    value: unknown;
+  }): Promise<void> {
+    if (request.username !== OPERATOR.username) {
+      throw new Error("opcua.write scope denied");
+    }
+    this.writes.push(request);
   }
 
   push(sample: TagSample): void {
@@ -314,6 +338,12 @@ describe.skipIf(!nodeOpcuaAvailable)(
         const wrongShapeRead = await session.readVariableValue(arrayNodeId);
         expect(wrongShapeRead.statusCode.name).toBe("Bad");
 
+        const refused = await session.writeSingleNode(tagNodeId, {
+          dataType: api.DataType.Double,
+          value: 99,
+        });
+        expect(refused.name).toBe("BadNotWritable");
+
         // 3. Subscribe and receive a DataChangeNotification for a pushed update.
         const subscription = await session.createSubscription2({
           requestedPublishingInterval: 50,
@@ -375,12 +405,14 @@ describe.skipIf(!nodeOpcuaAvailable)(
     let pkiFolder: string;
     let server: OxScadaOpcuaServer;
     let api: UaClientApi;
+    let dataSource: InMemoryTagDataSource;
 
     beforeAll(async () => {
       api = await loadClientApi();
       pkiFolder = fs.mkdtempSync(path.join(os.tmpdir(), "oxscada-opcua-auth-"));
       // The shipped default: anonymous access OFF.
-      server = makeServer(new InMemoryTagDataSource(), pkiFolder, {
+      dataSource = new InMemoryTagDataSource();
+      server = makeServer(dataSource, pkiFolder, {
         securityPolicy: "None",
         allowAnonymous: false,
         trustUnknownClientCertificates: true,
@@ -427,6 +459,31 @@ describe.skipIf(!nodeOpcuaAvailable)(
         return true;
       });
       expect(closed).toBe(true);
+    }, 60_000);
+
+    test("accepts an explicitly enabled input write and attributes it", async () => {
+      await withClient(async (client) => {
+        const session = await client.createSession({
+          type: api.UserTokenType.UserName,
+          userName: OPERATOR.username,
+          password: PASSWORD,
+        });
+        try {
+          const ns = server.addressSpacePlan!.namespaceIndex;
+          const status = await session.writeSingleNode(
+            `ns=${ns};s=Tags/SITE-01/SETPOINT`,
+            { dataType: api.DataType.Double, value: 33.5 },
+          );
+          expect(status.name).toBe("Good");
+        } finally {
+          await session.close();
+        }
+      });
+      expect(dataSource.writes).toContainEqual(expect.objectContaining({
+        tagId: "SETPOINT",
+        username: OPERATOR.username,
+        value: 33.5,
+      }));
     }, 60_000);
 
     test("refuses a bad password", async () => {

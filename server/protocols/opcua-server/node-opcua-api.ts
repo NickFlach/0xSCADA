@@ -33,6 +33,12 @@ export interface UaVariable {
     statusCode?: unknown,
     sourceTimestamp?: Date,
   ): void;
+  writeValue(
+    context: { getUserName(): string },
+    dataValue: { value: { value: unknown } },
+    indexRange: unknown,
+    callback: (err: Error | null, statusCode?: unknown) => void,
+  ): void;
 }
 
 /** Options accepted by `Namespace.addVariable` that this server sets. */

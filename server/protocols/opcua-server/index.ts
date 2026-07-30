@@ -47,6 +47,7 @@ import type {
   SourceSite,
   SourceTag,
   TagSample,
+  TagWriteRequest,
   UaVariableNode,
 } from "./types";
 import { UaDataType } from "./types";
@@ -68,6 +69,8 @@ export interface TagDataSource {
    * DataChangeNotifications.
    */
   subscribe(onChange: (sample: TagSample) => void): () => void;
+  /** Persist/dispatch an authorized control write and its audit record. */
+  writeTag?(request: TagWriteRequest): Promise<void>;
 }
 
 export interface OpcuaServerDeps {
@@ -383,6 +386,36 @@ export class OxScadaOpcuaServer {
           },
         },
       });
+      if (
+        variable.accessLevel & 0x02 &&
+        variable.direction === "input" &&
+        this.dataSource.writeTag
+      ) {
+        const writeTag = this.dataSource.writeTag.bind(this.dataSource);
+        uaVar.writeValue = (context, dataValue, _indexRange, callback) => {
+          const username = context.getUserName();
+          if (!username || username === "anonymous") {
+            callback(null, StatusCodes.BadUserAccessDenied);
+            return;
+          }
+          writeTag({
+            tagId: variable.tagId,
+            siteId: variable.siteId,
+            value: dataValue.value.value,
+            username,
+            timestamp: new Date(),
+          }).then(
+            () => {
+              uaVar.setValueFromSource(dataValue.value, StatusCodes.Good, new Date());
+              callback(null, StatusCodes.Good);
+            },
+            (error: unknown) => {
+              logError(error, `[opcua-server] write denied for ${variable.tagId}`);
+              callback(null, StatusCodes.BadUserAccessDenied);
+            },
+          );
+        };
+      }
       this.uaVariables.set(variable.nodeId, uaVar);
     }
   }

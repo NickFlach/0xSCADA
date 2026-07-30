@@ -136,6 +136,10 @@ const BaseOpcuaServerConfigSchema = z
     minSamplingIntervalMs: z.coerce.number().int().min(10).default(100),
     /** Max concurrent client connections per endpoint. */
     maxSessions: z.coerce.number().int().min(1).default(100),
+    /** Master switch for the control write path. Off by default. */
+    writesEnabled: z.boolean().default(false),
+    /** Explicit per-tag allowlist. Empty means no writable tags. */
+    writableTags: z.array(z.string().trim().min(1)).default([]),
   })
   .strict();
 
@@ -314,6 +318,11 @@ export function loadOpcuaServerConfigFromEnv(
       env.OPCUA_SERVER_TRUST_UNKNOWN_CLIENT_CERTS,
       false,
     ),
+    writesEnabled: parseEnvBoolean(
+      "OPCUA_SERVER_WRITES_ENABLED",
+      env.OPCUA_SERVER_WRITES_ENABLED,
+      false,
+    ),
   };
 
   const host = optional(env.OPCUA_SERVER_HOST);
@@ -334,6 +343,10 @@ export function loadOpcuaServerConfigFromEnv(
   if (sampling !== undefined) raw.minSamplingIntervalMs = sampling;
   const maxSessions = optional(env.OPCUA_SERVER_MAX_SESSIONS);
   if (maxSessions !== undefined) raw.maxSessions = maxSessions;
+  const writableTags = optional(env.OPCUA_SERVER_WRITABLE_TAGS);
+  if (writableTags !== undefined) {
+    raw.writableTags = writableTags.split(",").map((tag) => tag.trim()).filter(Boolean);
+  }
 
   // NODE_ENV drives `env`, but only when it is one this module understands. An
   // unrecognised value falls through to the schema default ("production"), the
