@@ -77,7 +77,37 @@ export const log = (message: string, ...args: any[]) => {
 };
 
 export const logError = (error: unknown, message?: string) => {
-  logger.error(error, message === undefined ? undefined : escapeLogMessage(message));
+  const safeMessage = message === undefined ? undefined : escapeLogMessage(message);
+
+  if (typeof error === 'string') {
+    const safeError = escapeLogMessage(error);
+    const combinedMessage = safeMessage ? `${safeMessage}: ${safeError}` : safeError;
+    logger.error(combinedMessage);
+    return;
+  }
+
+  if (error instanceof Error) {
+    logger.error(
+      {
+        ...error,
+        message: escapeLogMessage(error.message),
+        stack: error.stack ? escapeLogMessage(error.stack) : undefined
+      },
+      safeMessage ?? 'Unexpected error'
+    );
+    return;
+  }
+
+  const fallbackErrorText = (() => {
+    try {
+      return typeof error === 'object' ? JSON.stringify(error) : String(error);
+    } catch {
+      return String(error);
+    }
+  })();
+  const safeFallbackError = escapeLogMessage(fallbackErrorText);
+  const combinedFallbackMessage = safeMessage ? `${safeMessage}: ${safeFallbackError}` : safeFallbackError;
+  logger.error(combinedFallbackMessage);
 };
 
 export const logWarn = (message: string, ...args: any[]) => {
