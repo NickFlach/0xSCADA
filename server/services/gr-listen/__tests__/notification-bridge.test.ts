@@ -6,7 +6,7 @@ import type {
 } from '@shared/types/alarm-correlation';
 import { AlarmCorrelationService } from '../../alarm-correlation';
 import { CachedEventBridge } from '../../../websocket/cached-event-bridge';
-import { GrListenFilter, type GrListenConfig } from '../index';
+import { GrListenFilter, getGrListenFilter, type GrListenConfig } from '../index';
 import {
   applyNotificationDecision,
   isCorrelationSuppressed,
@@ -262,6 +262,20 @@ describe('applyNotificationDecision', () => {
     expect(applyNotificationDecision(snapshot(), { filter })).toHaveProperty(
       'notification',
     );
+  });
+
+  it('falls back to the process-wide filter when no instance is supplied', () => {
+    // The production wiring in CachedEventBridge passes the singleton
+    // explicitly; this covers a direct caller that does not. A unique id and
+    // tag keep it independent of whatever else has used the singleton.
+    const id = `fallback-${Date.now()}`;
+    const result = applyNotificationDecision(
+      snapshot({ id, tagId: `${id}.TRIP`, severity: 'critical' }),
+      { enabled: true },
+    ) as NotifiedSnapshot;
+
+    expect(getGrListenFilter()).toBeInstanceOf(GrListenFilter);
+    expect(result.notification?.effectivePriority).toBe('critical');
   });
 
   it('returns the alarm untouched when GR::LISTEN throws', () => {
