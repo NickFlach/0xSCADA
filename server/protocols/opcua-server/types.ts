@@ -31,6 +31,8 @@ export interface SourceTag {
   siteId: string;
   /** 0xSCADA data type; mapped to a UA built-in DataType. */
   dataType: DataType;
+  /** Scalar element type. Required for an `array` tag to be strongly typed. */
+  elementDataType?: Exclude<DataType, "array" | "object">;
   /** Engineering units (mapped to UA EUInformation when present). */
   units?: string;
   /** Whether UA clients may write this variable. Defaults to read-only. */
@@ -99,6 +101,8 @@ export interface UaVariableNode {
   /** NodeId of the owning site folder. */
   parentNodeId: string;
   dataType: UaDataType;
+  /** UA ValueRank (`1` means a one-dimensional array). */
+  valueRank?: number;
   accessLevel: number;
   units?: string;
   /** Echo of the originating tag id for value routing. */

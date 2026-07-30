@@ -41,6 +41,21 @@ describe("mapDataType", () => {
     expect(mapDataType("object")).toBe(UaDataType.BaseDataType);
     expect(mapDataType("array")).toBe(UaDataType.BaseDataType);
   });
+
+  test("plans a typed one-dimensional UA array", () => {
+    const plan = buildAddressSpace(sites, [
+      {
+        tagId: "TEMPERATURES",
+        siteId: "SITE-01",
+        dataType: "array",
+        elementDataType: "number",
+      },
+    ]);
+    expect(plan.variables[0]).toMatchObject({
+      dataType: UaDataType.Double,
+      valueRank: 1,
+    });
+  });
 });
 
 describe("NodeId builders", () => {

@@ -343,6 +343,9 @@ export class OxScadaOpcuaServer {
           ? `${variable.tagId} [${variable.units}]`
           : variable.tagId,
         dataType: uaTypeToNodeOpcuaDataType(variable.dataType, DataType),
+        ...(variable.valueRank === undefined
+          ? {}
+          : { valueRank: variable.valueRank }),
         // Read-only unless the source tag is explicitly marked writable. Without
         // this the UA node would inherit node-opcua's default access level.
         accessLevel: variable.accessLevel,
@@ -357,7 +360,13 @@ export class OxScadaOpcuaServer {
                 callback(
                   null,
                   new DataValue({
-                    value: toVariant(variable, sample, Variant, DataType),
+                    value: toVariant(
+                      variable,
+                      sample,
+                      Variant,
+                      DataType,
+                      nodeOpcua.VariantArrayType,
+                    ),
                     statusCode:
                       sample === undefined || sample.quality === "bad"
                         ? StatusCodes.Bad
@@ -422,7 +431,13 @@ export class OxScadaOpcuaServer {
       const meta = variablesByTag.get(sample.tagId);
       if (!uaVar || !meta) return;
       uaVar.setValueFromSource(
-        toVariant(meta, sample, Variant, DataType),
+        toVariant(
+          meta,
+          sample,
+          Variant,
+          DataType,
+          nodeOpcua.VariantArrayType,
+        ),
         sample.quality === "bad" ? StatusCodes.Bad : StatusCodes.Good,
         toDate(sample.timestamp),
       );
@@ -487,8 +502,17 @@ function toVariant(
   sample: TagSample | undefined,
   Variant: NodeOpcuaApi["Variant"],
   DataType: Record<string, unknown>,
+  VariantArrayType: Record<string, unknown>,
 ): UaHandle {
   const raw = sample?.value;
+  if (meta.valueRank === 1) {
+    const values = Array.isArray(raw) ? raw : [];
+    return new Variant({
+      dataType: uaTypeToNodeOpcuaDataType(meta.dataType, DataType),
+      arrayType: VariantArrayType.Array,
+      value: values.map((value) => coerceScalar(meta.dataType, value)),
+    });
+  }
   switch (meta.dataType) {
     case UaDataType.Boolean:
       return new Variant({ dataType: DataType.Boolean, value: Boolean(raw) });
@@ -509,6 +533,19 @@ function toVariant(
         dataType: DataType.String,
         value: raw == null ? "" : JSON.stringify(raw),
       });
+  }
+}
+
+function coerceScalar(type: UaDataType, value: unknown): unknown {
+  switch (type) {
+    case UaDataType.Boolean:
+      return Boolean(value);
+    case UaDataType.Double: {
+      const numeric = typeof value === "number" ? value : Number(value);
+      return Number.isFinite(numeric) ? numeric : 0;
+    }
+    default:
+      return value == null ? "" : String(value);
   }
 }
 
