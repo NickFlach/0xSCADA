@@ -20,14 +20,12 @@ import { intelligenceRoutes } from "./routes/intelligence";
 import { twinRoutes } from "./routes/twin";
 import { digitalTwinService } from "./services/twin";
 import { alarmCorrelationRoutes } from "./routes/alarm-correlation";
-import { alarmCorrelationService } from "./services/alarm-correlation";
 import { predictiveRoutes } from "./routes/predictive";
 import { capacityReadinessRoutes } from "./routes/capacity-readiness";
 import { predictiveMaintenanceService } from "./services/predictive";
 import { tuningRoutes } from "./routes/tuning";
 import { tuningService } from "./services/tuning";
 import { marketplaceRoutes } from "./routes/marketplace";
-import { marketplaceService } from "./services/marketplace";
 import { nlQueryService } from "./services/nlquery";
 import { sreReadinessRoutes } from "./routes/sre-readiness";
 import {
@@ -70,11 +68,13 @@ export async function registerRoutes(
   app: Express,
   options: RouteRegistrationOptions = {},
 ): Promise<Server> {
+  // Register the deployment's evidence collectors before the service layer
+  // starts: server/index.ts calls initializeServices() after this function
+  // returns, and compliance's initialize() starts scans against whatever is
+  // registered by then.
   for (const collector of options.complianceCollectors ?? []) {
     complianceService.registerCollector(collector);
   }
-  // Start registered collectors and recurring scans at process boot.
-  await complianceService.initialize();
 
   // ==========================================================================
   // MODULAR ROUTES
@@ -159,10 +159,6 @@ export async function registerRoutes(
     predictiveMaintenanceService.ingestTagUpdate(update)
   );
 
-  // Start the periodic predictive analysis sweep here —
-  // services/initializeServices() has no callers at startup.
-  void predictiveMaintenanceService.initialize();
-
   // Surface predictive alerts on the alarm WebSocket channel so they reach
   // operators, not just the REST API.
   predictiveMaintenanceService.on("alert", (alert) => {
@@ -181,43 +177,22 @@ export async function registerRoutes(
     }).catch(() => { /* alarm fan-out failure must not break alerting */ });
   });
 
-  // Start alarm-correlation idle-group sweeps (#213). Registered here rather
-  // than in services/initializeServices(), which no startup path invokes.
-  void alarmCorrelationService.initialize();
-
-  // Feed live tag updates into the digital twin and start its step timer
-  // here — services/initializeServices() has no callers at startup (#214).
+  // Feed live tag updates into the digital twin (#214). The twin's own
+  // start-up — like every other service's — belongs to
+  // services/initializeServices(), which server/index.ts calls once this
+  // function returns; only the httpServer-scoped wiring lives here.
   const unsubscribeTwin = tagStreamServer.onTagUpdate(
     (update) => digitalTwinService.ingestTagUpdate(update)
   );
-  void digitalTwinService.initialize();
   httpServer.once("close", () => {
     unsubscribeTwin();
     void digitalTwinService.shutdown();
   });
 
-  // Start the tuning service (and its underlying optimization service)
-  // here — services/initializeServices() has no callers at startup (#215).
-  // initialize() opens the durable tuning-audit store and logs whether the
-  // approver allowlist and the gain-apply opt-in are configured, so a
-  // fail-closed deployment is visible at boot rather than at first approval.
-  void tuningService.initialize();
   httpServer.once("close", () => {
     void tuningService.shutdown();
   });
-  // Load marketplace state and register the first-party plugin
-  // implementations here — services/initializeServices() has no callers at
-  // startup (#217). This is awaited rather than fired-and-forgotten: the
-  // publish path checks plugin ownership against the loaded registry, and an
-  // ownership check against an unhydrated registry would authorize a hijack.
-  await marketplaceService.initialize();
 
-  // Mark the NL query service live here — services/initializeServices() has no
-  // callers at startup (#216). There is nothing to subscribe or schedule: the
-  // engine reads the historian, the live tag stream, and the alarm-correlation
-  // engine at query time rather than keeping a shadow copy of process data, so
-  // initialize() only flips the health flag.
-  void nlQueryService.initialize();
   httpServer.once("close", () => {
     void nlQueryService.shutdown();
   });
