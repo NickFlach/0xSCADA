@@ -87,14 +87,11 @@ export const logError = (error: unknown, message?: string) => {
   }
 
   if (error instanceof Error) {
-    logger.error(
-      {
-        ...error,
-        message: escapeLogMessage(error.message),
-        stack: error.stack ? escapeLogMessage(error.stack) : undefined
-      },
-      safeMessage ?? 'Unexpected error'
-    );
+    // The Error goes through untouched as pino's first argument: pino
+    // serializes it as a structured field (JSON-encoded, so control characters
+    // in message/stack cannot forge log lines) and the stack survives intact.
+    // Only the free-text `msg` needs escaping.
+    logger.error(error, safeMessage);
     return;
   }
 

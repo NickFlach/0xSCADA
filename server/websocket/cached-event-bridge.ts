@@ -15,6 +15,11 @@ import {
   alarmCorrelationService,
   type AlarmCorrelationService,
 } from '../services/alarm-correlation';
+import { getGrListenFilter } from '../services/gr-listen/index.js';
+import {
+  applyNotificationDecision,
+  type NotificationDecider,
+} from '../services/gr-listen/notification-bridge.js';
 import type { AlarmWireSnapshot } from '@shared/types/alarm-correlation';
 import type Redis from 'ioredis';
 import { randomUUID } from 'node:crypto';
@@ -37,6 +42,18 @@ type CorrelationSource = Pick<
  * the shortcut and is delivered again, which is the safe direction.
  */
 const MAX_DEDUPE_TRACKED_ALARMS = 20_000;
+
+/**
+ * Production notification decider: the process-wide GR::LISTEN filter.
+ *
+ * The instance is chosen here rather than inside the bridge module, so which
+ * filter production runs against is visible at the same place every other
+ * dependency of this class is wired — the same reason `alarmCorrelationService`
+ * is the constructor default above. Resolved per alarm, not at construction,
+ * so importing this module never builds a filter.
+ */
+const decideWithProcessFilter: NotificationDecider = (alarm) =>
+  applyNotificationDecision(alarm, { filter: getGrListenFilter() });
 
 interface AlarmSink {
   broadcastAlarm(alarm: any): void;
@@ -89,6 +106,12 @@ export class CachedEventBridge {
     private readonly correlationService: CorrelationSource = alarmCorrelationService,
     private readonly tagAlarmSink: AlarmSink = tagStreamServer,
     private readonly unifiedAlarmSink: AlarmSink = unifiedStreamServer,
+    /**
+     * GR::LISTEN notification-fatigue filter (#6). Runs after correlation has
+     * enriched the alarm and only decorates the payload — it can never drop an
+     * alarm, and it is inert unless `GR_LISTEN_ENABLED=true`.
+     */
+    private readonly decideNotification: NotificationDecider = decideWithProcessFilter,
   ) {}
 
   /**
@@ -340,20 +363,28 @@ export class CachedEventBridge {
   private broadcastRawAlarm(
     alarm: Record<string, unknown> | AlarmWireSnapshot,
   ): void {
+    // Correlation has already done the structural work; GR::LISTEN decides
+    // notification worthiness on top of it and attaches the verdict as a
+    // `notification` field. It decorates only — a `suppress` decision still
+    // fans out here, exactly like a correlation-suppressed alarm does.
+    // Decorating before the remote publish means peer instances receive the
+    // same verdict rather than re-deriving one from their own filter state.
+    const payload = this.decideNotification(alarm);
+
     try {
-      this.tagAlarmSink.broadcastAlarm(alarm as any);
+      this.tagAlarmSink.broadcastAlarm(payload as any);
     } catch {
       // One local sink must not block the other.
     }
     try {
-      this.unifiedAlarmSink.broadcastAlarm(alarm);
+      this.unifiedAlarmSink.broadcastAlarm(payload);
     } catch {
       // Correlation state changes must survive delivery failures.
     }
 
     if (!this.publisher) return;
     const remotePayload = {
-      ...alarm,
+      ...payload,
       _bridgeOrigin: this.instanceId,
     };
     void this.publisher

@@ -7,6 +7,21 @@
  * Issue: #282 — services/ barrel export missing modules
  */
 
+// Boot singletons are bound statically, never through `import()`. On Node 20,
+// tsx can hand a dynamic import a different module instance than the static
+// consumers in server/routes.ts hold (#541) — the boot list would then report
+// success while the routed singleton stayed uninitialized.
+import { complianceService } from './compliance';
+import { geometryService } from './geometry';
+import { optimizationService } from './optimization';
+import { spcService } from './spc';
+import { alarmCorrelationService } from './alarm-correlation';
+import { digitalTwinService } from './twin';
+import { predictiveMaintenanceService } from './predictive';
+import { tuningService } from './tuning';
+import { marketplaceService } from './marketplace';
+import { nlQueryService } from './nlquery';
+
 // ── Verification Service ─────────────────────────────────────────────────────
 export * from './verification';
 
@@ -125,146 +140,156 @@ export { NLQueryService, nlQueryService } from './nlquery';
 export * from './ghostos';
 
 /**
- * Initialize all services
- * 
- * Call this function to initialize all services in the correct order.
- * Some services may depend on others being initialized first.
+ * The lifecycle contract a service must satisfy to join the boot sequence.
+ */
+export interface ManagedService {
+  initialize(): Promise<void>;
+  healthCheck(): Promise<{ healthy: boolean; message: string }>;
+}
+
+/**
+ * One entry in the single startup path.
+ */
+export interface ManagedServiceEntry {
+  /** Key this service occupies in the aggregate health surface. */
+  readonly key: string;
+  /** Operator-facing name written to the boot log. */
+  readonly name: string;
+  /** Directory under `server/services/` that implements it. */
+  readonly module: string;
+  /**
+   * When true a failed `initialize()` aborts boot. Reserved for services where
+   * serving traffic against un-hydrated state is a security defect rather than
+   * a missing feature — these are the two that `registerRoutes` used to await
+   * and propagate. The rest are logged and left unhealthy in
+   * `getServicesHealthStatus()`, which is how an operator sees the failure
+   * instead of the process dying on an unhandled rejection.
+   */
+  readonly required: boolean;
+  readonly service: ManagedService;
+}
+
+/**
+ * Every service the platform starts at boot, in dependency order.
+ *
+ * This list is the ONLY startup path (#10). `registerRoutes` keeps the
+ * order-sensitive wiring that needs the HTTP server — evidence-collector
+ * registration, `tagStreamServer.onTagUpdate(...)` ingest hooks and
+ * `httpServer.once("close", ...)` shutdown handlers — but calls no
+ * `initialize()` of its own.
+ *
+ * 'Machine Learning' was removed (#605) — the service it booted fabricated its
+ * output; see the removal note above. Ubiquity and L2 Rollup are removed
+ * (#638); neither may be started by this generic boot sequence.
+ */
+export const MANAGED_SERVICES: readonly ManagedServiceEntry[] = [
+  // Required: registerRoutes hands compliance the deployment's evidence
+  // collectors first, and a scan that ran without them would report an
+  // unevidenced "compliant".
+  {
+    key: 'compliance',
+    name: 'Compliance',
+    module: 'compliance',
+    required: true,
+    service: complianceService,
+  },
+  { key: 'geometry', name: 'Geometry', module: 'geometry', required: false, service: geometryService },
+  // Optimization owns the PID controller registry that tuning proposes
+  // against, so it is started before PID Tuning.
+  {
+    key: 'optimization',
+    name: 'Optimization',
+    module: 'optimization',
+    required: false,
+    service: optimizationService,
+  },
+  { key: 'spc', name: 'SPC', module: 'spc', required: false, service: spcService },
+  {
+    key: 'alarmCorrelation',
+    name: 'Alarm Correlation',
+    module: 'alarm-correlation',
+    required: false,
+    service: alarmCorrelationService,
+  },
+  { key: 'twin', name: 'Digital Twin', module: 'twin', required: false, service: digitalTwinService },
+  {
+    key: 'predictive',
+    name: 'Predictive Maintenance',
+    module: 'predictive',
+    required: false,
+    service: predictiveMaintenanceService,
+  },
+  { key: 'tuning', name: 'PID Tuning', module: 'tuning', required: false, service: tuningService },
+  // Required: the publish path checks plugin ownership against the loaded
+  // registry, and an ownership check against an un-hydrated registry would
+  // authorize a hijack.
+  {
+    key: 'marketplace',
+    name: 'Agent Marketplace',
+    module: 'marketplace',
+    required: true,
+    service: marketplaceService,
+  },
+  // Reads the alarm-correlation engine at query time, so it is marked live
+  // after that engine is running.
+  {
+    key: 'nlquery',
+    name: 'NL Process Query',
+    module: 'nlquery',
+    required: false,
+    service: nlQueryService,
+  },
+];
+
+/**
+ * Initialize every service in `MANAGED_SERVICES`, in order.
+ *
+ * Called exactly once, by `server/index.ts`, after `registerRoutes` has
+ * installed the order-sensitive wiring and before the HTTP listener opens.
  */
 export async function initializeServices(): Promise<void> {
-  const services = [
-    { name: 'Compliance', service: () => import('./compliance').then(m => m.complianceService.initialize()) },
-    { name: 'Geometry', service: () => import('./geometry').then(m => m.geometryService.initialize()) },
-    // 'Machine Learning' removed (#605) — the service it booted fabricated its
-    // output; see the removal note above.
-    // Ubiquity and L2 Rollup are removed (#638); neither may be started by this
-    // generic boot sequence.
-    { name: 'Optimization', service: () => import('./optimization').then(m => m.optimizationService.initialize()) },
-    { name: 'SPC', service: () => import('./spc').then(m => m.spcService.initialize()) },
-    { name: 'Digital Twin', service: () => import('./twin').then(m => m.digitalTwinService.initialize()) },
-    { name: 'Predictive Maintenance', service: () => import('./predictive').then(m => m.predictiveMaintenanceService.initialize()) },
-    { name: 'PID Tuning', service: () => import('./tuning').then(m => m.tuningService.initialize()) },
-    { name: 'Agent Marketplace', service: () => import('./marketplace').then(m => m.marketplaceService.initialize()) }
-  ];
-
-  for (const { name, service } of services) {
+  for (const entry of MANAGED_SERVICES) {
     try {
-      await service();
-      console.log(`✓ ${name} service initialized`);
+      await entry.service.initialize();
+      console.log(`✓ ${entry.name} service initialized`);
     } catch (error) {
-      console.error(`✗ Failed to initialize ${name} service:`, error);
-      // Continue with other services even if one fails
+      console.error(`✗ Failed to initialize ${entry.name} service:`, error);
+      if (entry.required) throw error;
+      // Continue with other services even if an optional one fails; the
+      // aggregate health surface reports it as unhealthy.
     }
   }
 }
 
 /**
- * Get health status for all services
+ * Aggregate health for every service in the single startup path.
+ *
+ * The keys are exactly the keys of `MANAGED_SERVICES` — a service that is
+ * booted is reported on, and nothing else is. Redis/cache health is reported
+ * by `server/health/` under `redis`; it is not started by this path, so it is
+ * not claimed here. The former `flux` entry returned a hard-coded
+ * `healthy: true` from a try block that could not throw, which asserted
+ * nothing about the integration, and is gone.
  */
 export async function getServicesHealthStatus(): Promise<{
   [serviceName: string]: { healthy: boolean; message: string };
 }> {
-  const healthChecks = {
-    cache: async () => {
-      try {
-        const { isRedisHealthy } = await import('./cache');
-        return { healthy: isRedisHealthy(), message: isRedisHealthy() ? 'Cache healthy' : 'Cache unavailable' };
-      } catch {
-        return { healthy: false, message: 'Cache service error' };
-      }
-    },
-    compliance: async () => {
-      try {
-        const { complianceService } = await import('./compliance');
-        return await complianceService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Compliance service not available' };
-      }
-    },
-    flux: async () => {
-      try {
-        // Flux health would depend on connection status
-        return { healthy: true, message: 'Flux integration healthy' };
-      } catch {
-        return { healthy: false, message: 'Flux service error' };
-      }
-    },
-    geometry: async () => {
-      try {
-        const { geometryService } = await import('./geometry');
-        return await geometryService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Geometry service not available' };
-      }
-    },
-    // No `ml` key (#605). The removed check reported `healthy: true` whenever
-    // two hard-coded models were present, which said nothing about whether
-    // anything could infer — there was no inference. An absent key is the
-    // honest answer: the platform has no ML subsystem to report on.
-    // Ubiquity and L2 Rollup have no subsystem to report after #638, so absent
-    // keys are the honest operator-facing result.
-    optimization: async () => {
-      try {
-        const { optimizationService } = await import('./optimization');
-        return await optimizationService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Optimization service not available' };
-      }
-    },
-    spc: async () => {
-      try {
-        const { spcService } = await import('./spc');
-        return await spcService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'SPC service not available' };
-      }
-    },
-    twin: async () => {
-      try {
-        const { digitalTwinService } = await import('./twin');
-        return await digitalTwinService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Digital twin service not available' };
-      }
-    },
-    predictive: async () => {
-      try {
-        const { predictiveMaintenanceService } = await import('./predictive');
-        return await predictiveMaintenanceService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Predictive maintenance service not available' };
-      }
-    },
-    tuning: async () => {
-      try {
-        const { tuningService } = await import('./tuning');
-        return await tuningService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Tuning service not available' };
-      }
-    },
-    marketplace: async () => {
-      try {
-        const { marketplaceService } = await import('./marketplace');
-        return await marketplaceService.healthCheck();
-      } catch {
-        return { healthy: false, message: 'Marketplace service not available' };
-      }
-    }
-  };
-
   const results: { [key: string]: { healthy: boolean; message: string } } = {};
 
-  await Promise.allSettled(
-    Object.entries(healthChecks).map(async ([name, check]) => {
+  await Promise.all(
+    MANAGED_SERVICES.map(async (entry) => {
       try {
-        results[name] = await check();
+        const { healthy, message } = await entry.service.healthCheck();
+        results[entry.key] = { healthy, message };
       } catch (error) {
-        results[name] = { 
-          healthy: false, 
-          message: error instanceof Error ? error.message : 'Unknown error' 
+        results[entry.key] = {
+          healthy: false,
+          message: error instanceof Error
+            ? error.message
+            : `${entry.name} service not available`,
         };
       }
-    })
+    }),
   );
 
   return results;

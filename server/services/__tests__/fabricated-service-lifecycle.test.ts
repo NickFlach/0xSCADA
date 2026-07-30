@@ -21,17 +21,14 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import * as services from '../index';
-import { getServicesHealthStatus, serviceRegistry } from '../index';
+import { MANAGED_SERVICES, getServicesHealthStatus, serviceRegistry } from '../index';
 
 const SERVICES_DIR = path.dirname(fileURLToPath(new URL('../index.ts', import.meta.url)));
-const SERVICE_INDEX_SOURCE = readFileSync(path.join(SERVICES_DIR, 'index.ts'), 'utf8');
-const LIFECYCLE_START = SERVICE_INDEX_SOURCE.indexOf(
-  'export async function initializeServices',
-);
-const LIFECYCLE_END = SERVICE_INDEX_SOURCE.indexOf(
-  'export const serviceRegistry',
-);
-const LIFECYCLE_SOURCE = SERVICE_INDEX_SOURCE.slice(LIFECYCLE_START, LIFECYCLE_END);
+// The boot sequence is a value now, not a region of source text (#10): both
+// initializeServices() and getServicesHealthStatus() iterate MANAGED_SERVICES,
+// so reading it is a stricter check than the regex over the old dynamic
+// import() calls that this guard used to scan.
+const LIFECYCLE_MODULES = MANAGED_SERVICES.map((entry) => entry.module);
 
 function productionTypeScriptFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -75,10 +72,9 @@ describe('#638 — fabricated services are absent from the platform lifecycle', 
   });
 
   it('does not boot or health-check Ubiquity or L2 Rollup', async () => {
-    expect(LIFECYCLE_START).toBeGreaterThanOrEqual(0);
-    expect(LIFECYCLE_END).toBeGreaterThan(LIFECYCLE_START);
-    expect(LIFECYCLE_SOURCE).not.toMatch(/import\(['"]\.\/ubiquity['"]\)/);
-    expect(LIFECYCLE_SOURCE).not.toMatch(/import\(['"]\.\/l2-rollup['"]\)/);
+    expect(LIFECYCLE_MODULES.length).toBeGreaterThan(0);
+    expect(LIFECYCLE_MODULES).not.toContain('ubiquity');
+    expect(LIFECYCLE_MODULES).not.toContain('l2-rollup');
 
     const health = await getServicesHealthStatus();
     expect(Object.keys(health)).not.toContain('ubiquity');
@@ -89,7 +85,7 @@ describe('#638 — fabricated services are absent from the platform lifecycle', 
     expect(existsSync(path.join(SERVICES_DIR, 'compliance', 'index.ts'))).toBe(true);
     expect(Object.keys(services)).toContain('complianceService');
     expect(Object.keys(serviceRegistry)).toContain('compliance');
-    expect(LIFECYCLE_SOURCE).toMatch(/import\(['"]\.\/compliance['"]\)/);
+    expect(LIFECYCLE_MODULES).toContain('compliance');
     expect(Object.keys(await getServicesHealthStatus())).toContain('compliance');
   });
 });
@@ -108,10 +104,7 @@ describe('#638 — a lifecycle service cannot fabricate results with a PRNG', ()
   });
 
   it('finds no Math.random call in any booted or health-reported module', () => {
-    const lifecycleModules = [
-      ...LIFECYCLE_SOURCE.matchAll(/import\(['"]\.\/([^'"]+)['"]\)/g),
-    ].map((match) => match[1]);
-    const uniqueModules = [...new Set(lifecycleModules)];
+    const uniqueModules = [...new Set(LIFECYCLE_MODULES)];
 
     expect(uniqueModules.length).toBeGreaterThan(0);
     const offenders = uniqueModules.flatMap((moduleName) => {

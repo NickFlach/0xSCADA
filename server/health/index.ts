@@ -71,7 +71,7 @@ export const healthManager = new HealthManager(/* cacheTtlMs */ 10_000);
 // 1. Database (required) — must be healthy before anything else
 healthManager.register(
   createDatabaseCheck(async () => {
-    const h = await (storage as any).healthCheck();
+    const h = await storage.healthCheck();
     if (!h.connected) throw new Error('Database not connected');
     return h;
   })
@@ -285,6 +285,34 @@ healthManager.register({
       lastCheck: new Date(),
       message: status.message,
       details: status.details ? { ...status.details } : undefined,
+    };
+  },
+});
+
+// Managed service layer (#10). One entry reporting every service started by
+// services/initializeServices(), so the single startup path is also the single
+// thing the health surface makes claims about. Imported lazily — like the redis
+// check above — so composing the health module never pulls the whole services
+// barrel into the graph ahead of server/index.ts. Not readiness-critical: an
+// uninitialized or failed optional service is degraded, not unready, and the
+// per-service message says which one and why.
+healthManager.register({
+  name: 'services',
+  required: false,
+  check: async () => {
+    const { getServicesHealthStatus } = await import('../services');
+    const statuses = await getServicesHealthStatus();
+    const unhealthy = Object.entries(statuses)
+      .filter(([, status]) => !status.healthy)
+      .map(([name, status]) => `${name} (${status.message})`);
+    return {
+      name: 'services',
+      status: unhealthy.length === 0 ? 'healthy' : 'degraded',
+      lastCheck: new Date(),
+      message: unhealthy.length === 0
+        ? `${Object.keys(statuses).length} managed services healthy`
+        : `${unhealthy.length} of ${Object.keys(statuses).length} managed services unhealthy: ${unhealthy.join('; ')}`,
+      details: statuses,
     };
   },
 });
