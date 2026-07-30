@@ -18,6 +18,9 @@ import { edgeStoreAndForwardRuntime } from "./gateway/store-and-forward-runtime"
 import { initializeBridges } from "./bridge";
 import { gatewayManager } from "./gateway";
 import { startFluxIntegration } from "./services/flux";
+// The single service-layer startup path (#10). Bound statically for the same
+// reason as the services above.
+import { initializeServices } from "./services";
 import { federationRuntime } from "./scaling/federation-runtime";
 import { natsPublisher } from "./services/nats";
 import { logAnchorBackendBootState } from "./bridge/anchor-backend";
@@ -181,6 +184,14 @@ registerSwaggerRoutes(app, gatewayConfig);
       apiKeys: apiKeyManager.getKeysMap(),
     },
   });
+
+  // Start the service layer through its one startup path (#10). This runs
+  // after registerRoutes so the order-sensitive wiring it owns — compliance
+  // evidence collectors, tag-stream ingest hooks, shutdown handlers — is
+  // installed against services that are about to come up, and before
+  // httpServer.listen() so no request is served against un-hydrated state.
+  await initializeServices();
+  log("Service layer initialized");
 
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
