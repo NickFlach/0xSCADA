@@ -248,7 +248,7 @@ export async function registerRoutes(
   app.get("/api/health", async (req, res) => {
     try {
       // Check database connectivity with lightweight query
-      const dbHealth = await (storage as any).healthCheck();
+      const dbHealth = await storage.healthCheck();
 
       // Check blockchain service
       const blockchainConnected = (blockchainService as any).isEnabled();
@@ -296,7 +296,7 @@ export async function registerRoutes(
   // Sites
   app.get("/api/sites", async (req, res) => {
     try {
-      const sites = await (storage as any).getSites();
+      const sites = await storage.getSites();
       res.json(sites);
     } catch (error) {
       logError(error, "Error fetching sites:");
@@ -311,7 +311,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: fromZodError(validation.error).toString() });
       }
 
-      const site = await (storage as any).createSite(validation.data);
+      const site = await storage.createSite(validation.data);
 
       await (blockchainService as any).registerSite(
         site.id,
@@ -342,7 +342,7 @@ export async function registerRoutes(
         ? Math.min(parsedLimit, 100)
         : 50;
 
-      const { data, total } = await (storage as any).getEventAnchorsPaginated(page, limit);
+      const { data, total } = await storage.getEventAnchorsPaginated(page, limit);
 
       // Calculate pagination metadata
       const totalPages = Math.ceil(total / limit);
@@ -390,7 +390,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: fromZodError(validation.error).toString() });
       }
 
-      const event = await (storage as any).createEventAnchor(validation.data);
+      const event = await storage.createEventAnchor(validation.data);
 
       const txHash = await (blockchainService as any).anchorEvent(
         event.assetId,
@@ -399,7 +399,7 @@ export async function registerRoutes(
       );
 
       if (txHash) {
-        await (storage as any).updateEventTxHash(event.id, txHash);
+        await storage.updateEventTxHash(event.id, txHash);
         event.txHash = txHash;
       }
 
@@ -413,7 +413,7 @@ export async function registerRoutes(
   // Maintenance Records
   app.get("/api/maintenance", async (req, res) => {
     try {
-      const records = await (storage as any).getMaintenanceRecords();
+      const records = await storage.getMaintenanceRecords();
       res.json(records);
     } catch (error) {
       logError(error, "Error fetching maintenance records:");
@@ -428,7 +428,7 @@ export async function registerRoutes(
         return res.status(400).json({ error: fromZodError(validation.error).toString() });
       }
 
-      const record = await (storage as any).createMaintenanceRecord(validation.data);
+      const record = await storage.createMaintenanceRecord(validation.data);
 
       await (blockchainService as any).anchorMaintenance(
         record.assetId,

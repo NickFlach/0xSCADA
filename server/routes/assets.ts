@@ -15,7 +15,7 @@ const router = Router();
 
 router.get("/", async (req, res) => {
   try {
-    const assets = await (storage as any).getAssets();
+    const assets = await storage.getAssets();
     res.json(assets);
   } catch (error) {
     logError(error, "Error fetching assets:");
@@ -25,7 +25,7 @@ router.get("/", async (req, res) => {
 
 router.get("/site/:siteId", async (req, res) => {
   try {
-    const assets = await (storage as any).getAssetsBySiteId(req.params.siteId);
+    const assets = await storage.getAssetsBySiteId(req.params.siteId);
     res.json(assets);
   } catch (error) {
     logError(error, "Error fetching assets:");
@@ -40,7 +40,7 @@ router.post("/", async (req, res) => {
       return res.status(400).json({ error: fromZodError(validation.error).toString() });
     }
 
-    const asset = await (storage as any).createAsset(validation.data);
+    const asset = await storage.createAsset(validation.data);
 
     await (blockchainService as any).registerAsset(
       asset.id,
