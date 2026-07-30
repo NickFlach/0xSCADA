@@ -8,6 +8,7 @@ import { getAnchorPipeline } from "./bridge";
 interface SimulatorConfig {
   enabled: boolean;
   eventIntervalMs: number;
+  analogIntervalMs: number;
 }
 
 interface SimAsset {
@@ -21,9 +22,111 @@ interface SimAsset {
   metadata: Record<string, any>;
 }
 
-class FieldSimulator {
+/**
+ * A continuous analog process channel (#5). The discrete event stream above
+ * fires every ~10s and carries mostly categorical payloads; the analytics
+ * services (predictive, twin, SPC) need a real numeric time series, so every
+ * asset also emits 1–3 of these on a steady cadence.
+ *
+ * Signal shape is baseline + slow sinusoidal drift + bounded noise, clamped
+ * into the physical band [min, max].
+ */
+export interface AnalogChannelSpec {
+  /** Channel suffix — the tag is `${asset.nameOrTag}.${channel}` */
+  channel: string;
+  unit: string;
+  /** Centre of the process band */
+  baseline: number;
+  /** Peak deviation of the slow drift */
+  amplitude: number;
+  /** Peak deviation of the per-sample noise */
+  noise: number;
+  /** Period of the slow drift, in ms */
+  periodMs: number;
+  /** Physical band — the sample is clamped into it */
+  min: number;
+  max: number;
+}
+
+/** Analog channels emitted per asset type. Unknown types emit nothing. */
+export const ANALOG_CHANNELS: Readonly<Record<string, readonly AnalogChannelSpec[]>> = {
+  TRANSFORMER: [
+    { channel: "TEMPERATURE", unit: "degC", baseline: 65, amplitude: 8, noise: 1.5, periodMs: 900_000, min: 20, max: 110 },
+    { channel: "LOAD_PERCENT", unit: "%", baseline: 72, amplitude: 15, noise: 2, periodMs: 600_000, min: 0, max: 100 },
+  ],
+  BREAKER: [
+    { channel: "CURRENT", unit: "A", baseline: 620, amplitude: 90, noise: 12, periodMs: 480_000, min: 0, max: 1200 },
+  ],
+  INVERTER: [
+    { channel: "DC_VOLTAGE", unit: "V", baseline: 720, amplitude: 40, noise: 6, periodMs: 720_000, min: 0, max: 1000 },
+    { channel: "AC_POWER_KW", unit: "kW", baseline: 380, amplitude: 90, noise: 8, periodMs: 1_800_000, min: 0, max: 500 },
+  ],
+  MCC: [
+    { channel: "MOTOR_CURRENT", unit: "A", baseline: 145, amplitude: 20, noise: 3, periodMs: 540_000, min: 0, max: 300 },
+  ],
+};
+
+export function analogChannelsForAsset(assetType: string): readonly AnalogChannelSpec[] {
+  return ANALOG_CHANNELS[assetType] ?? [];
+}
+
+/**
+ * Deterministic per-tag seed (FNV-1a). Two assets sharing a channel spec still
+ * get independent noise and drift phase, without any global mutable state.
+ */
+export function seedForTag(tagName: string): number {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < tagName.length; i++) {
+    h ^= tagName.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  return h >>> 0;
+}
+
+/** Mix a seed with a sample index so each sample draws an independent value. */
+function mixSeed(seed: number, step: number): number {
+  let h = Math.imul(seed ^ 0x9e3779b9, 0x85ebca6b) >>> 0;
+  h = Math.imul(h ^ step ^ (h >>> 13), 0xc2b2ae35) >>> 0;
+  return (h ^ (h >>> 16)) >>> 0;
+}
+
+/** mulberry32 — same generator the rest of the repo uses for seeded noise. */
+function mulberry32(seed: number): () => number {
+  let a = seed >>> 0;
+  return () => {
+    a |= 0;
+    a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/**
+ * Sample one analog channel. Pure: the same (spec, elapsedMs, seed) always
+ * yields the same finite number — no Math.random anywhere in the signal path,
+ * so tests are deterministic.
+ */
+export function generateAnalogSample(spec: AnalogChannelSpec, elapsedMs: number, seed: number): number {
+  const rng = mulberry32(mixSeed(seed, Math.round(elapsedMs)));
+  // Per-tag phase offset so co-located assets don't drift in lockstep.
+  const phase = (seed / 4294967296) * 2 * Math.PI;
+  const drift = spec.amplitude * Math.sin((2 * Math.PI * elapsedMs) / spec.periodMs + phase);
+  const noise = (rng() * 2 - 1) * spec.noise;
+  return Math.min(spec.max, Math.max(spec.min, spec.baseline + drift + noise));
+}
+
+/** setInterval treats NaN/0 as "every tick" — fall back to the default. */
+function positiveIntervalMs(raw: string | undefined, fallback: number): number {
+  const parsed = parseInt(raw || "", 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
+export class FieldSimulator {
   private config: SimulatorConfig;
   private intervalId: NodeJS.Timeout | null = null;
+  private analogIntervalId: NodeJS.Timeout | null = null;
+  private analogTick = 0;
   private assets: SimAsset[] = [];
   private isInitialized = false;
 
@@ -31,6 +134,7 @@ class FieldSimulator {
     this.config = {
       enabled: process.env.SIMULATOR_ENABLED !== "false",
       eventIntervalMs: parseInt(process.env.SIMULATOR_INTERVAL_MS || "10000"),
+      analogIntervalMs: positiveIntervalMs(process.env.SIMULATOR_ANALOG_INTERVAL_MS, 2000),
     };
   }
 
@@ -55,6 +159,7 @@ class FieldSimulator {
     this.isInitialized = true;
     log(`✅ Field simulator ready (${this.assets.length} assets monitored)`, "simulator");
     log(`   Event generation interval: ${this.config.eventIntervalMs}ms`, "simulator");
+    log(`   Analog sample interval: ${this.config.analogIntervalMs}ms`, "simulator");
   }
 
   start() {
@@ -68,14 +173,48 @@ class FieldSimulator {
       this.generateEvent();
     }, this.config.eventIntervalMs);
 
+    this.analogIntervalId = setInterval(() => {
+      this.emitAnalogSamples();
+    }, this.config.analogIntervalMs);
+
     log("🏭 Field simulator started — publishing to Flux", "simulator");
   }
 
   stop() {
+    if (this.analogIntervalId) {
+      clearInterval(this.analogIntervalId);
+      this.analogIntervalId = null;
+    }
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
       log("⏸️  Field simulator stopped", "simulator");
+    }
+  }
+
+  /**
+   * Broadcast one sample of every analog channel (#5). Values are real finite
+   * numbers — never a stringified payload — so predictive/twin/SPC get a
+   * usable time series in dev. Elapsed time comes from the tick counter rather
+   * than the wall clock, keeping the emitted series reproducible.
+   */
+  private emitAnalogSamples() {
+    const elapsedMs = this.analogTick * this.config.analogIntervalMs;
+    this.analogTick++;
+
+    for (const asset of this.assets) {
+      for (const spec of analogChannelsForAsset(asset.assetType)) {
+        const tagName = `${asset.nameOrTag}.${spec.channel}`;
+        const value = generateAnalogSample(spec, elapsedMs, seedForTag(tagName));
+        try {
+          tagStreamServer.broadcastTagUpdate({
+            tagName,
+            value,
+            quality: "good",
+            timestamp: new Date().toISOString(),
+          });
+        } catch { /* WebSocket not connected — that's fine */ }
+      }
     }
   }
 
