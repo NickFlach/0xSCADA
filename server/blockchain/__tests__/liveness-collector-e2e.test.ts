@@ -236,22 +236,25 @@ describe("observed liveness end-to-end: real socket -> real DB -> real route -> 
     expect(missDetails).toHaveLength(4);
     for (const detail of missDetails) {
       expect(detail.startsWith("no answer:")).toBe(true);
-      // The audited reason is the errno the OS actually reported, not `fetch`'s
-      // opaque "fetch failed". This is the assertion the stubbed suites cannot
-      // make: they inject the very message they then assert on.
-      //
-      // `UND_ERR_*` is explicitly NOT accepted here. Undici wraps the libuv
-      // error in a SocketError whose code is errno-shaped, and surfacing that
-      // instead would satisfy a laxer pattern while telling an auditor nothing
-      // — see `describeFetchFailure`, which walks past it to the real errno.
-      expect(detail).toMatch(/\(E[A-Z0-9_]+\)$/);
-      expect(detail).not.toMatch(/\(UND_/);
+      // The guarantee `describeFetchFailure` actually makes: never `fetch`'s
+      // bare, opaque "fetch failed", always a code an auditor can look up.
+      // This is the assertion the stubbed suites cannot make — they inject the
+      // very message they then assert on.
+      expect(detail).toMatch(/\((E[A-Z0-9_]+|UND_ERR_[A-Z0-9_]+)\)$/);
     }
-    // The rounds that dialled the closed port fresh were refused. (The first
-    // miss can be ECONNRESET instead: the keep-alive socket opened by round 1
-    // is destroyed when the listener closes, and that is an equally real
-    // reason — which is the point of recording the code rather than guessing.)
+
+    // The rounds that dialled the closed port fresh are refused by the OS, and
+    // that is a real errno every time.
+    const withRealErrno = missDetails.filter((d) => /\(E[A-Z0-9_]+\)$/.test(d));
+    expect(withRealErrno.length).toBeGreaterThanOrEqual(3);
     expect(missDetails.some((d) => d.includes("ECONNREFUSED"))).toBe(true);
+
+    // The FIRST miss is the exception, and deliberately not pinned to an errno.
+    // It reuses the keep-alive socket opened by round 1, which `closeAllConnections()`
+    // destroys locally — so on some hosts there is no OS error to report at all
+    // and undici's own `UND_ERR_SOCKET` is the most specific thing that exists.
+    // Demanding an errno there asserted a property of the runner, not of the
+    // code, and failed CI on unrelated PRs.
     expect(rows[5].previousHeight).toBe(rows[0].observedHeight);
 
     // ── Serve it through the real seam and the real route, over real HTTP.

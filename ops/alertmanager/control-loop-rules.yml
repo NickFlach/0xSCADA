@@ -239,3 +239,63 @@ groups:
             has exceeded 120s at P95. Note this interval includes the pipeline's
             batching window, so compare it against windowSizeMs/flushIntervalMs
             before treating it as a chain problem.
+
+      # ── Blueprint control loop ────────────────────────────────────────────
+      #
+      # These cover the scan loop itself, which is a DIFFERENT subsystem from
+      # the anchor pipeline above. It does not feed the pipeline, so it has no
+      # stage in the tick -> batch -> sign -> anchor -> confirm chain and never
+      # will; anchoring every scan would be absurd volume. Its own metrics are
+      # the platform's actual "tick" measurement, and until now nothing
+      # displayed or alerted on them.
+      #
+      # Every rule is gated on blueprint_control_loop_running == 1. The loop is
+      # opt-in (BLUEPRINT_CONTROL_LOOP_ENABLED), and a deployment that does not
+      # run it must not page.
+
+      - alert: BlueprintControlLoopOverrunning
+        expr: |
+          rate(blueprint_control_loop_overruns_total[5m]) > 0
+          and on(blueprint) blueprint_control_loop_running == 1
+        for: 5m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Blueprint control-loop scans exceed their scan period"
+          description: >-
+            A scan took longer to execute than the configured period, so the
+            loop cannot hold its cadence regardless of scheduling. This is the
+            more serious of the two timing faults: unlike a missed deadline it
+            is not a scheduling delay, it is the work itself not fitting.
+
+      - alert: BlueprintControlLoopMissingDeadlines
+        expr: |
+          rate(blueprint_control_loop_missed_deadlines_total[5m]) > 0
+          and on(blueprint) blueprint_control_loop_running == 1
+        for: 15m
+        labels:
+          severity: warning
+          area: integrity-pipeline
+        annotations:
+          summary: "Blueprint control-loop scans are being delivered late"
+          description: >-
+            Scans arrived later than period + jitter tolerance. Sustained misses
+            with no overruns point at event-loop contention from other work on
+            this process rather than at the blueprint program.
+
+      - alert: BlueprintControlLoopStopped
+        expr: |
+          blueprint_control_loop_enabled == 1
+          and on() blueprint_control_loop_running == 0
+        for: 2m
+        labels:
+          severity: critical
+          area: integrity-pipeline
+        annotations:
+          summary: "Blueprint control loop is enabled but not running"
+          description: >-
+            Configuration asks for the loop but no scan timer is armed — it
+            failed to load, or was stopped and not restarted. Check
+            blueprint_control_loop_load_failures_total. Absence of scans is
+            silent otherwise, which is what this rule exists to prevent.

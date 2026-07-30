@@ -194,6 +194,55 @@ describe('control-loop observability config matches what is produced (#460)', ()
     }
   });
 
+  it('every published control-loop metric is visible somewhere in ops', () => {
+    // The MIRROR of the two tests above. Those catch a dashboard naming a
+    // metric nobody emits; this catches a metric nobody displays.
+    //
+    // Both are silent failures and the second is the sneakier one: the loop
+    // publishes p50/p99/max, missed deadlines and overruns on every scan, and
+    // for as long as no panel or rule named them, an operator watching the
+    // "control-loop latency" dashboard saw the ANCHORING stages and nothing
+    // about the scan loop itself. Nothing was broken, so nothing complained.
+    const published = [
+      'blueprint_control_loop_enabled',
+      'blueprint_control_loop_running',
+      'blueprint_control_loop_tick_p50_ms',
+      'blueprint_control_loop_tick_p99_ms',
+      'blueprint_control_loop_tick_max_ms',
+      'blueprint_control_loop_scan_period_ms',
+      'blueprint_control_loop_missed_deadlines_total',
+      'blueprint_control_loop_overruns_total',
+    ];
+
+    const ops = `${rulesText}
+${dashboardText}`;
+    const invisible = published.filter((metric) => !ops.includes(metric));
+    expect(invisible, 'published but named by no panel and no alert rule').toEqual([]);
+  });
+
+  it('the blueprint-loop alerts exist and cannot page a deployment that is not running it', () => {
+    // The loop is opt-in (BLUEPRINT_CONTROL_LOOP_ENABLED). Every rule about it
+    // must therefore be gated on it actually running, or every deployment that
+    // does not use blueprints pages forever and the alerts get muted — which
+    // is how a real overrun would then go unseen.
+    const parsed = yaml.load(rulesText) as PromRuleFile;
+    const byName = new Map(parsed.groups[0].rules.map((r) => [r.alert, r]));
+
+    for (const name of ['BlueprintControlLoopOverrunning', 'BlueprintControlLoopMissingDeadlines']) {
+      const rule = byName.get(name);
+      expect(rule, `${name} is missing`).toBeDefined();
+      expect(rule!.expr, `${name} is not gated on the loop running`)
+        .toContain('blueprint_control_loop_running == 1');
+    }
+
+    // The stopped alert is the inverse and must NOT require running == 1;
+    // its whole purpose is firing when enabled and running disagree.
+    const stopped = byName.get('BlueprintControlLoopStopped');
+    expect(stopped).toBeDefined();
+    expect(stopped!.expr).toContain('blueprint_control_loop_enabled == 1');
+    expect(stopped!.expr).toContain('blueprint_control_loop_running == 0');
+  });
+
   it('neither the rules nor the dashboard reference the unmeasurable tick stage', () => {
     expect(rulesText).not.toContain('stage="tick"');
     expect(dashboardText).not.toContain('stage=\\"tick\\"');
