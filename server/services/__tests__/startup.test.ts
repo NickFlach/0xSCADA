@@ -14,7 +14,7 @@
  * from the boot list fails this suite instead of quietly shrinking its own oracle.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -44,6 +44,20 @@ const SERVER_DIR = path.resolve(
   path.dirname(fileURLToPath(new URL('../index.ts', import.meta.url))),
   '..',
 );
+
+/**
+ * The comment each ad-hoc `initialize()` call carried. Assembled at runtime so
+ * this guard is not itself a hit for the repo-wide grep it enforces.
+ */
+const WORKAROUND_MARKER = ['has no callers', 'at startup'].join(' ');
+
+function typeScriptFiles(directory: string): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const absolute = path.join(directory, entry.name);
+    if (entry.isDirectory()) return typeScriptFiles(absolute);
+    return entry.isFile() && entry.name.endsWith('.ts') ? [absolute] : [];
+  });
+}
 
 /**
  * Every service the platform must start at boot, in the order it must start
@@ -186,7 +200,14 @@ describe('#10 — the startup path is the only startup path', () => {
 
   it('leaves no initialize() call in registerRoutes', () => {
     expect(routesSource).not.toMatch(/\.initialize\(\)/);
-    expect(routesSource).not.toContain('has no callers at startup');
+  });
+
+  it('leaves the workaround comment nowhere under server/', () => {
+    const offenders = typeScriptFiles(SERVER_DIR)
+      .filter((file) => readFileSync(file, 'utf8').includes(WORKAROUND_MARKER))
+      .map((file) => path.relative(SERVER_DIR, file).replaceAll('\\', '/'));
+
+    expect(offenders).toEqual([]);
   });
 
   it('keeps httpServer-scoped wiring in registerRoutes', () => {
