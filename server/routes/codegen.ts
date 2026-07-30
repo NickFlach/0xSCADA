@@ -72,7 +72,7 @@ function phaseTypeFromBody(req: Request): ParsedPhaseType | null {
 // Generated Code records (functional)
 router.get("/generated-code", async (req, res) => {
   try {
-    const code = await (storage as any).getGeneratedCode();
+    const code = await storage.getGeneratedCode();
     res.json(code);
   } catch (error) {
     logError(error, "Error fetching generated code:");
@@ -82,7 +82,7 @@ router.get("/generated-code", async (req, res) => {
 
 router.get("/generated-code/:sourceType/:sourceId", async (req, res) => {
   try {
-    const code = await (storage as any).getGeneratedCodeBySource(req.params.sourceType, req.params.sourceId);
+    const code = await storage.getGeneratedCodeBySource(req.params.sourceType, req.params.sourceId);
     res.json(code);
   } catch (error) {
     logError(error, "Error fetching generated code:");
@@ -92,7 +92,7 @@ router.get("/generated-code/:sourceType/:sourceId", async (req, res) => {
 
 router.post("/generated-code", async (req, res) => {
   try {
-    const code = await (storage as any).createGeneratedCode(req.body);
+    const code = await storage.createGeneratedCode(req.body);
     res.status(201).json(code);
   } catch (error) {
     logError(error, "Error creating generated code:");
@@ -103,8 +103,8 @@ router.post("/generated-code", async (req, res) => {
 // Anchor generated code to blockchain (functional)
 router.post("/generated-code/:id/anchor", async (req, res) => {
   try {
-    const codeRecords = await (storage as any).getGeneratedCode();
-    const record = codeRecords.find((r: any) => r.id === req.params.id);
+    const codeRecords = await storage.getGeneratedCode();
+    const record = codeRecords.find((r) => r.id === req.params.id);
 
     if (!record) {
       return res.status(404).json({ error: "Generated code not found" });
@@ -125,7 +125,7 @@ router.post("/generated-code/:id/anchor", async (req, res) => {
     );
 
     if (txHash) {
-      await (storage as any).updateGeneratedCodeTxHash(record.id, txHash);
+      await storage.updateGeneratedCodeTxHash(record.id, txHash);
       record.txHash = txHash;
       res.json({
         success: true,

@@ -133,7 +133,7 @@ async function persistBlueprintImport(
 // Control Module Types
 router.get("/cm-types", async (req, res) => {
   try {
-    const cmTypes = await (storage as any).getControlModuleTypes();
+    const cmTypes = await storage.getControlModuleTypes();
     res.json(cmTypes);
   } catch (error) {
     logError(error, "Error fetching CM types:");
@@ -143,7 +143,7 @@ router.get("/cm-types", async (req, res) => {
 
 router.get("/cm-types/:name", async (req, res) => {
   try {
-    const cmType = await (storage as any).getControlModuleTypeByName(req.params.name);
+    const cmType = await storage.getControlModuleTypeByName(req.params.name);
     if (!cmType) {
       return res.status(404).json({ error: "Control module type not found" });
     }
@@ -156,7 +156,7 @@ router.get("/cm-types/:name", async (req, res) => {
 
 router.post("/cm-types", async (req, res) => {
   try {
-    const cmType = await (storage as any).createControlModuleType(req.body);
+    const cmType = await storage.createControlModuleType(req.body);
     res.status(201).json(cmType);
   } catch (error) {
     logError(error, "Error creating CM type:");
@@ -167,7 +167,7 @@ router.post("/cm-types", async (req, res) => {
 // Control Module Instances
 router.get("/cm-instances", async (req, res) => {
   try {
-    const instances = await (storage as any).getControlModuleInstances();
+    const instances = await storage.getControlModuleInstances();
     res.json(instances);
   } catch (error) {
     logError(error, "Error fetching CM instances:");
@@ -178,7 +178,7 @@ router.get("/cm-instances", async (req, res) => {
 // Unit Types
 router.get("/unit-types", async (req, res) => {
   try {
-    const unitTypes = await (storage as any).getUnitTypes();
+    const unitTypes = await storage.getUnitTypes();
     res.json(unitTypes);
   } catch (error) {
     logError(error, "Error fetching unit types:");
@@ -188,7 +188,7 @@ router.get("/unit-types", async (req, res) => {
 
 router.post("/unit-types", async (req, res) => {
   try {
-    const unitType = await (storage as any).createUnitType(req.body);
+    const unitType = await storage.createUnitType(req.body);
     res.status(201).json(unitType);
   } catch (error) {
     logError(error, "Error creating unit type:");
@@ -199,7 +199,7 @@ router.post("/unit-types", async (req, res) => {
 // Unit Instances
 router.get("/unit-instances", async (req, res) => {
   try {
-    const instances = await (storage as any).getUnitInstances();
+    const instances = await storage.getUnitInstances();
     res.json(instances);
   } catch (error) {
     logError(error, "Error fetching unit instances:");
@@ -210,7 +210,7 @@ router.get("/unit-instances", async (req, res) => {
 // Phase Types
 router.get("/phase-types", async (req, res) => {
   try {
-    const phaseTypes = await (storage as any).getPhaseTypes();
+    const phaseTypes = await storage.getPhaseTypes();
     res.json(phaseTypes);
   } catch (error) {
     logError(error, "Error fetching phase types:");
@@ -220,7 +220,7 @@ router.get("/phase-types", async (req, res) => {
 
 router.post("/phase-types", async (req, res) => {
   try {
-    const phaseType = await (storage as any).createPhaseType(req.body);
+    const phaseType = await storage.createPhaseType(req.body);
     res.status(201).json(phaseType);
   } catch (error) {
     logError(error, "Error creating phase type:");
@@ -231,7 +231,7 @@ router.post("/phase-types", async (req, res) => {
 // Phase Instances
 router.get("/phase-instances", async (req, res) => {
   try {
-    const instances = await (storage as any).getPhaseInstances();
+    const instances = await storage.getPhaseInstances();
     res.json(instances);
   } catch (error) {
     logError(error, "Error fetching phase instances:");
@@ -242,7 +242,7 @@ router.get("/phase-instances", async (req, res) => {
 // Design Specifications
 router.get("/design-specs", async (req, res) => {
   try {
-    const specs = await (storage as any).getDesignSpecifications();
+    const specs = await storage.getDesignSpecifications();
     res.json(specs);
   } catch (error) {
     logError(error, "Error fetching design specs:");
@@ -304,13 +304,13 @@ router.post("/seed", async (req, res) => {
 router.get("/summary", async (req, res) => {
   try {
     const [cmTypes, cmInstances, unitTypes, unitInstances, phaseTypes, phaseInstances, vendors] = await Promise.all([
-      (storage as any).getControlModuleTypes(),
-      (storage as any).getControlModuleInstances(),
-      (storage as any).getUnitTypes(),
-      (storage as any).getUnitInstances(),
-      (storage as any).getPhaseTypes(),
-      (storage as any).getPhaseInstances(),
-      (storage as any).getVendors(),
+      storage.getControlModuleTypes(),
+      storage.getControlModuleInstances(),
+      storage.getUnitTypes(),
+      storage.getUnitInstances(),
+      storage.getPhaseTypes(),
+      storage.getPhaseInstances(),
+      storage.getVendors(),
     ]);
 
     res.json({

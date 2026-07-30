@@ -2,7 +2,7 @@
  * Storage/Database module with SQLite fallback for development
  */
 import { drizzle as drizzlePostgres } from 'drizzle-orm/node-postgres';
-import { and, desc, eq, gte } from 'drizzle-orm';
+import { and, desc, eq, gte, sql } from 'drizzle-orm';
 import { Client } from 'pg';
 import { Database } from 'sqlite3';
 import * as schema from '@shared/schema';
@@ -48,6 +48,10 @@ async function withStorageLock<T>(operation: () => Promise<T>): Promise<T> {
 }
 
 type StorageTableName =
+  | 'sites'
+  | 'assets'
+  | 'event_anchors'
+  | 'maintenance_records'
   | 'vendors'
   | 'template_packages'
   | 'control_module_types'
@@ -64,6 +68,10 @@ type StorageTableName =
   | 'plugin_installations';
 
 const sqliteColumns: Record<StorageTableName, readonly string[]> = {
+  sites: ['id', 'name', 'location', 'owner', 'status', 'metadata', 'createdAt', 'updatedAt'],
+  assets: ['id', 'siteId', 'assetType', 'nameOrTag', 'critical', 'metadata', 'status', 'createdAt', 'updatedAt'],
+  event_anchors: ['id', 'assetId', 'eventType', 'payloadHash', 'timestamp', 'recordedBy', 'txHash', 'blockNumber', 'details', 'metadata', 'createdAt'],
+  maintenance_records: ['id', 'assetId', 'workOrderId', 'performedBy', 'maintenanceType', 'performedAt', 'nextDueAt', 'notes', 'attachmentHash', 'createdAt'],
   vendors: ['id', 'name', 'displayName', 'description', 'platforms', 'languages', 'configSchema', 'isActive', 'createdAt', 'updatedAt'],
   template_packages: ['id', 'name', 'vendorId', 'version', 'description', 'templateType', 'language', 'templateContent', 'placeholders', 'requiredInputs', 'createdAt', 'updatedAt'],
   control_module_types: ['id', 'name', 'vendorId', 'version', 'description', 'inputs', 'outputs', 'inOuts', 'dataTypeMappings', 'templatePackageId', 'sourcePackage', 'classification', 'createdAt', 'updatedAt'],
@@ -89,12 +97,60 @@ const sqliteJsonColumns = new Set([
   // Agent marketplace (#217)
   'manifest', 'config', 'grantedCapabilities',
 ]);
-const sqliteBooleanColumns = new Set(['isActive']);
+const sqliteBooleanColumns = new Set(['isActive', 'critical']);
 const sqliteDateColumns = new Set([
   'createdAt', 'updatedAt', 'anchoredAt', 'generatedAt', 'approvedAt',
   // Agent marketplace (#217)
   'publishedAt', 'installedAt',
+  // Core asset-registry tables (#9)
+  'timestamp', 'performedAt', 'nextDueAt',
 ]);
+
+/**
+ * Core asset-registry tables for the development SQLite database (#9).
+ *
+ * Mirrors the `sites` / `assets` / `event_anchors` / `maintenance_records`
+ * sections of `migrations/0001_initial_schema.sql`. The storage facade grew
+ * typed accessors for these tables when the routes' `storage` casts
+ * were removed; without the DDL those accessors would compile but fail against
+ * the dev database, which is the same class of runtime-only failure the casts
+ * were hiding.
+ *
+ * Column shapes follow `shared/schema.ts` (the dialect the routes validate
+ * against), not the older `maintenance_records` shape in
+ * `shared/schema-sqlite.ts` — that mirror is unused by this module, which
+ * reaches SQLite through raw SQL driven by `sqliteColumns`.
+ */
+const coreSqliteSchema = `
+CREATE TABLE IF NOT EXISTS sites (
+  id TEXT PRIMARY KEY, name TEXT NOT NULL, location TEXT, owner TEXT,
+  status TEXT NOT NULL DEFAULT 'ONLINE', metadata TEXT,
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS assets (
+  id TEXT PRIMARY KEY, site_id TEXT NOT NULL, asset_type TEXT NOT NULL,
+  name_or_tag TEXT NOT NULL, critical INTEGER NOT NULL DEFAULT 0,
+  metadata TEXT, status TEXT NOT NULL DEFAULT 'OK',
+  created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS event_anchors (
+  id TEXT PRIMARY KEY, asset_id TEXT, event_type TEXT NOT NULL,
+  payload_hash TEXT NOT NULL, timestamp INTEGER NOT NULL, recorded_by TEXT,
+  tx_hash TEXT, block_number INTEGER, details TEXT, metadata TEXT,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE IF NOT EXISTS maintenance_records (
+  id TEXT PRIMARY KEY, asset_id TEXT NOT NULL, work_order_id TEXT,
+  performed_by TEXT, maintenance_type TEXT NOT NULL,
+  performed_at INTEGER NOT NULL, next_due_at INTEGER, notes TEXT,
+  attachment_hash TEXT, created_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_assets_site_id ON assets(site_id);
+CREATE INDEX IF NOT EXISTS idx_event_anchors_asset_id ON event_anchors(asset_id);
+CREATE INDEX IF NOT EXISTS idx_event_anchors_timestamp ON event_anchors(timestamp);
+CREATE INDEX IF NOT EXISTS idx_event_anchors_tx_hash ON event_anchors(tx_hash);
+CREATE INDEX IF NOT EXISTS idx_maintenance_asset_id ON maintenance_records(asset_id);
+`;
 
 const blueprintSqliteSchema = `
 CREATE TABLE IF NOT EXISTS vendors (
@@ -440,6 +496,7 @@ async function openSqliteDatabase(databasePath: string): Promise<void> {
   sqliteClient = await new Promise<Database>((resolve, reject) => {
     const client = new Database(databasePath, (error) => error ? reject(error) : resolve(client));
   });
+  await sqliteExec(coreSqliteSchema);
   await sqliteExec(blueprintSqliteSchema);
   await sqliteExec(validatorRegistrySqliteSchema);
   await sqliteExec(validatorLivenessSqliteSchema);
@@ -689,6 +746,53 @@ async function deleteRecord(
       return;
     }
     await requireDatabase().delete(pgTable).where(eq(pgTable.id, id));
+  });
+}
+
+/**
+ * One page of rows plus the unfiltered row count, in a single lock section so
+ * the total cannot drift from the page it describes.
+ *
+ * `sqliteFind` cannot express LIMIT/OFFSET, so the SQLite branch issues its own
+ * statements. `orderColumn` is a column name from `sqliteColumns`, never
+ * caller-supplied text.
+ */
+async function listRecordsPaginated<T>(
+  pgTable: any,
+  sqliteTable: StorageTableName,
+  page: number,
+  limit: number,
+  pgOrder: unknown,
+  orderColumn: string,
+): Promise<{ data: T[]; total: number }> {
+  const safeLimit = Math.max(1, Math.floor(limit));
+  const safePage = Math.max(1, Math.floor(page));
+  const offset = (safePage - 1) * safeLimit;
+
+  return withStorageLock(async () => {
+    if (dbType === 'sqlite') {
+      const rows = await sqliteAll(
+        `SELECT * FROM ${sqliteTable} ORDER BY ${toSnakeCase(orderColumn)} DESC LIMIT ? OFFSET ?`,
+        [safeLimit, offset],
+      );
+      const [countRow] = await sqliteAll(`SELECT COUNT(*) AS total FROM ${sqliteTable}`);
+      return {
+        data: rows.map(decodeSqliteRow) as unknown as T[],
+        total: Number(countRow?.total ?? 0),
+      };
+    }
+
+    const database = requireDatabase();
+    const data = await database
+      .select()
+      .from(pgTable)
+      .orderBy(pgOrder)
+      .limit(safeLimit)
+      .offset(offset) as T[];
+    const [countRow] = await database
+      .select({ total: sql<number>`count(*)` })
+      .from(pgTable) as { total: number | string }[];
+    return { data, total: Number(countRow?.total ?? 0) };
   });
 }
 
@@ -1517,7 +1621,144 @@ export async function listBlueprintSafeStateLog(
 }
 
 // Export storage object as expected by health/index.ts
-export const storage = {
+// ─── Typed storage facade (#9) ────────────────────────────────────────────────
+// Routes used to reach this object through `storage`, so a call to a
+// method that did not exist compiled fine and failed as a runtime 500. The
+// `Storage` interface below is the contract: every method the routes call is
+// declared here, `storage` is annotated with it, and a typo or a removed method
+// is a compile error at the call site instead of a production incident.
+
+/** Result of the active connectivity probe used by the health endpoints. */
+export interface StorageHealthCheck {
+  connected: boolean;
+  type: string;
+  /** Round-trip time of the probe query. Always present, including on failure. */
+  latencyMs: number;
+  error?: string;
+}
+
+/** Static view of the connection, taken without touching the database. */
+export interface StorageHealth {
+  connected: boolean;
+  type: 'postgres' | 'sqlite';
+  database: string;
+}
+
+/** One page of rows plus the total row count that page was drawn from. */
+export interface PaginatedResult<T> {
+  data: T[];
+  total: number;
+}
+
+export interface Storage {
+  transaction<T>(operation: () => Promise<T>): Promise<T>;
+  isConnected(): boolean;
+  getHealth(): StorageHealth;
+  healthCheck(): Promise<StorageHealthCheck>;
+
+  // Sites
+  getSites(): Promise<schema.Site[]>;
+  createSite(input: schema.InsertSite): Promise<schema.Site>;
+
+  // Assets
+  getAssets(): Promise<schema.Asset[]>;
+  getAssetsBySiteId(siteId: string): Promise<schema.Asset[]>;
+  createAsset(input: schema.InsertAsset): Promise<schema.Asset>;
+
+  // Event anchors
+  getEventAnchorsPaginated(
+    page: number,
+    limit: number,
+  ): Promise<PaginatedResult<schema.EventAnchor>>;
+  createEventAnchor(input: schema.InsertEventAnchor): Promise<schema.EventAnchor>;
+  updateEventTxHash(id: string, txHash: string): Promise<schema.EventAnchor>;
+
+  // Maintenance records
+  getMaintenanceRecords(): Promise<schema.MaintenanceRecord[]>;
+  createMaintenanceRecord(
+    input: schema.InsertMaintenanceRecord,
+  ): Promise<schema.MaintenanceRecord>;
+
+  // Control module types & instances
+  createControlModuleType(input: schema.InsertControlModuleType): Promise<schema.ControlModuleType>;
+  getControlModuleTypes(): Promise<schema.ControlModuleType[]>;
+  getControlModuleTypeByName(name: string): Promise<schema.ControlModuleType | undefined>;
+  upsertControlModuleType(input: schema.InsertControlModuleType): Promise<schema.ControlModuleType>;
+  createControlModuleInstance(
+    input: schema.InsertControlModuleInstance,
+  ): Promise<schema.ControlModuleInstance>;
+  upsertControlModuleInstance(
+    input: schema.InsertControlModuleInstance,
+  ): Promise<schema.ControlModuleInstance>;
+  getControlModuleInstances(): Promise<schema.ControlModuleInstance[]>;
+  getControlModuleInstancesByTypeId(typeId: string): Promise<schema.ControlModuleInstance[]>;
+
+  // Unit types & instances
+  createUnitType(input: schema.InsertUnitType): Promise<schema.UnitType>;
+  getUnitTypes(): Promise<schema.UnitType[]>;
+  getUnitTypeByName(name: string): Promise<schema.UnitType | undefined>;
+  upsertUnitType(input: schema.InsertUnitType): Promise<schema.UnitType>;
+  createUnitInstance(input: schema.InsertUnitInstance): Promise<schema.UnitInstance>;
+  upsertUnitInstance(input: schema.InsertUnitInstance): Promise<schema.UnitInstance>;
+  getUnitInstances(): Promise<schema.UnitInstance[]>;
+  getUnitInstancesByTypeId(typeId: string): Promise<schema.UnitInstance[]>;
+
+  // Phase types & instances
+  createPhaseType(input: schema.InsertPhaseType): Promise<schema.PhaseType>;
+  getPhaseTypes(): Promise<schema.PhaseType[]>;
+  getPhaseTypeByName(name: string): Promise<schema.PhaseType | undefined>;
+  upsertPhaseType(input: schema.InsertPhaseType): Promise<schema.PhaseType>;
+  createPhaseInstance(input: schema.InsertPhaseInstance): Promise<schema.PhaseInstance>;
+  getPhaseInstances(): Promise<schema.PhaseInstance[]>;
+
+  // Design specifications
+  createDesignSpecification(
+    input: schema.InsertDesignSpecification,
+  ): Promise<schema.DesignSpecification>;
+  getDesignSpecifications(): Promise<schema.DesignSpecification[]>;
+
+  // Vendors
+  createVendor(input: schema.InsertVendor): Promise<schema.Vendor>;
+  getVendors(): Promise<schema.Vendor[]>;
+  getVendorByName(name: string): Promise<schema.Vendor | undefined>;
+  getVendorById(id: string): Promise<schema.Vendor | undefined>;
+  upsertVendor(input: schema.InsertVendor): Promise<schema.Vendor>;
+
+  // Template packages
+  createTemplatePackage(input: schema.InsertTemplatePackage): Promise<schema.TemplatePackage>;
+  getTemplatePackages(): Promise<schema.TemplatePackage[]>;
+  getTemplatePackagesByVendor(vendorId: string): Promise<schema.TemplatePackage[]>;
+
+  // Generated code
+  createGeneratedCode(input: schema.InsertGeneratedCode): Promise<schema.GeneratedCode>;
+  getGeneratedCode(): Promise<schema.GeneratedCode[]>;
+  getGeneratedCodeBySource(sourceType: string, sourceId: string): Promise<schema.GeneratedCode[]>;
+  updateGeneratedCodeTxHash(id: string, txHash: string): Promise<schema.GeneratedCode>;
+
+  // Data type mappings
+  createDataTypeMapping(input: schema.InsertDataTypeMapping): Promise<schema.DataTypeMapping>;
+  getDataTypeMappingsByVendor(vendorId: string): Promise<schema.DataTypeMapping[]>;
+  upsertDataTypeMapping(input: schema.InsertDataTypeMapping): Promise<schema.DataTypeMapping>;
+
+  // Controllers
+  createController(input: schema.InsertController): Promise<schema.Controller>;
+  getControllers(): Promise<schema.Controller[]>;
+  getControllersByVendor(vendorId: string): Promise<schema.Controller[]>;
+  getControllersBySite(siteId: string): Promise<schema.Controller[]>;
+
+  // Agent marketplace (#217)
+  getPluginRegistryEntries(): Promise<schema.PluginRegistryRow[]>;
+  upsertPluginRegistryEntry(
+    input: schema.InsertPluginRegistryRow,
+  ): Promise<schema.PluginRegistryRow>;
+  getPluginInstallations(): Promise<schema.PluginInstallationRow[]>;
+  upsertPluginInstallation(
+    input: schema.InsertPluginInstallationRow,
+  ): Promise<schema.PluginInstallationRow>;
+  deletePluginInstallation(pluginId: string): Promise<void>;
+}
+
+export const storage: Storage = {
   transaction: runStorageTransaction,
   isConnected: () => db !== null,
   getHealth: () => ({
@@ -1532,19 +1773,86 @@ export const storage = {
    * query against Postgres; the file-backed SQLite dev database is considered
    * connected once initialized.
    */
-  healthCheck: async (): Promise<{ connected: boolean; type: string; error?: string }> => {
+  healthCheck: async (): Promise<StorageHealthCheck> => {
     if (!db) {
-      return { connected: false, type: dbType, error: 'Database not initialized' };
+      return {
+        connected: false,
+        type: dbType,
+        latencyMs: 0,
+        error: 'Database not initialized',
+      };
     }
+    // `/api/health` has always reported `latencyMs`; until the routes were
+    // typed it read an undefined property through `storage` and
+    // published `latencyMs: undefined`. Measure it here so the field is real.
+    const startedAt = Date.now();
     try {
       if (dbType === 'postgres' && pgClient) {
         await pgClient.query('SELECT 1');
       }
-      return { connected: true, type: dbType };
+      return { connected: true, type: dbType, latencyMs: Date.now() - startedAt };
     } catch (err) {
-      return { connected: false, type: dbType, error: (err as Error).message };
+      return {
+        connected: false,
+        type: dbType,
+        latencyMs: Date.now() - startedAt,
+        error: (err as Error).message,
+      };
     }
   },
+
+  // ── Core asset registry (#9) ───────────────────────────────────────────
+  // Previously reached only through `storage` and never implemented:
+  // every one of these routes returned a 500 from a "not a function"
+  // TypeError. Both dialects are implemented so the endpoints work in
+  // development as well as against Postgres.
+
+  getSites: () => listRecords<schema.Site>(schema.sites, 'sites'),
+  createSite: (input: schema.InsertSite) =>
+    createRecord<schema.Site>(schema.sites, 'sites', input),
+
+  getAssets: () => listRecords<schema.Asset>(schema.assets, 'assets'),
+  getAssetsBySiteId: (siteId: string) =>
+    listRecords<schema.Asset>(
+      schema.assets,
+      'assets',
+      {
+        pgWhere: eq(schema.assets.siteId, siteId),
+        sqliteWhere: { siteId },
+      },
+    ),
+  createAsset: (input: schema.InsertAsset) =>
+    createRecord<schema.Asset>(schema.assets, 'assets', input),
+
+  getEventAnchorsPaginated: (page: number, limit: number) =>
+    listRecordsPaginated<schema.EventAnchor>(
+      schema.eventAnchors,
+      'event_anchors',
+      page,
+      limit,
+      desc(schema.eventAnchors.timestamp),
+      'timestamp',
+    ),
+  createEventAnchor: (input: schema.InsertEventAnchor) =>
+    createRecord<schema.EventAnchor>(schema.eventAnchors, 'event_anchors', input),
+  updateEventTxHash: (id: string, txHash: string) =>
+    updateRecord<schema.EventAnchor>(schema.eventAnchors, 'event_anchors', id, { txHash }),
+
+  getMaintenanceRecords: () =>
+    listRecords<schema.MaintenanceRecord>(
+      schema.maintenanceRecords,
+      'maintenance_records',
+      {
+        pgOrder: desc(schema.maintenanceRecords.performedAt),
+        sqliteOrder: 'performedAt',
+      },
+    ),
+  createMaintenanceRecord: (input: schema.InsertMaintenanceRecord) =>
+    createRecord<schema.MaintenanceRecord>(
+      schema.maintenanceRecords,
+      'maintenance_records',
+      input,
+    ),
 
   createControlModuleType: (input: schema.InsertControlModuleType) =>
     createRecord<schema.ControlModuleType>(schema.controlModuleTypes, 'control_module_types', input),
