@@ -77,6 +77,10 @@ describe('#605 — the aggregate health surface makes no ML claim', () => {
       predictive: 'predictive',
       tuning: 'tuning',
       marketplace: 'marketplace',
+      // Joined the reported surface with the single startup path (#10); both
+      // were already started ad hoc by registerRoutes.
+      alarmCorrelation: 'alarm-correlation',
+      nlquery: 'nlquery',
     };
 
     const health = await getServicesHealthStatus();
