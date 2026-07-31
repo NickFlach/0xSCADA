@@ -26,7 +26,13 @@ const sites: SourceSite[] = [
 
 const tags: SourceTag[] = [
   { tagId: "PT-101.PV", siteId: "SITE-01", dataType: "number", units: "bar" },
-  { tagId: "RUN", siteId: "SITE-01", dataType: "boolean", writable: true },
+  {
+    tagId: "RUN",
+    siteId: "SITE-01",
+    dataType: "boolean",
+    writable: true,
+    direction: "input",
+  },
   { tagId: "BATCH-ID", siteId: "SITE-02", dataType: "string" },
 ];
 
@@ -104,9 +110,21 @@ describe("accessLevelFor", () => {
       siteId: "s",
       dataType: "number",
       writable: true,
+      direction: "input",
     });
     expect(level & UaAccessLevel.CurrentRead).toBeTruthy();
     expect(level & UaAccessLevel.CurrentWrite).toBeTruthy();
+  });
+
+  test("refuses write access for non-input tags", () => {
+    const level = accessLevelFor({
+      tagId: "t",
+      siteId: "s",
+      dataType: "number",
+      writable: true,
+      direction: "output",
+    });
+    expect(level).toBe(UaAccessLevel.CurrentRead);
   });
 });
 

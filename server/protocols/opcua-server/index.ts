@@ -47,9 +47,10 @@ import type {
   SourceSite,
   SourceTag,
   TagSample,
+  TagWriteRequest,
   UaVariableNode,
 } from "./types";
-import { UaDataType } from "./types";
+import { UaAccessLevel, UaDataType } from "./types";
 
 /**
  * Data source the server reads from. Implementations live behind
@@ -68,6 +69,12 @@ export interface TagDataSource {
    * DataChangeNotifications.
    */
   subscribe(onChange: (sample: TagSample) => void): () => void;
+  /**
+   * Accept an authorized supervisory value and its audit record. The shipped
+   * storage implementation persists inside 0xSCADA; it does not dispatch to a
+   * PLC or field protocol.
+   */
+  writeTag?(request: TagWriteRequest): Promise<void>;
 }
 
 export interface OpcuaServerDeps {
@@ -383,6 +390,49 @@ export class OxScadaOpcuaServer {
           },
         },
       });
+      if (
+        variable.accessLevel & UaAccessLevel.CurrentWrite &&
+        variable.direction === "input" &&
+        this.dataSource.writeTag
+      ) {
+        const writeTag = this.dataSource.writeTag.bind(this.dataSource);
+        uaVar.writeValue = (context, dataValue, indexRange, callback) => {
+          if (indexRange && !indexRange.isEmpty()) {
+            callback(null, StatusCodes.BadIndexRangeInvalid);
+            return;
+          }
+          const tokenUserName = context.session?.userIdentityToken?.userName;
+          if (typeof tokenUserName !== "string" || tokenUserName.length === 0) {
+            callback(null, StatusCodes.BadUserAccessDenied);
+            return;
+          }
+          // Replacing writeValue bypasses node-opcua's default compatibility
+          // guard, so run the library's own validation before persistence.
+          const compatibilityStatus = uaVar.checkVariantCompatibility(
+            dataValue.value,
+          );
+          if (compatibilityStatus.isNot(StatusCodes.Good)) {
+            callback(null, compatibilityStatus);
+            return;
+          }
+          writeTag({
+            tagId: variable.tagId,
+            siteId: variable.siteId,
+            value: dataValue.value.value,
+            username: tokenUserName,
+            timestamp: new Date(),
+          }).then(
+            () => {
+              uaVar.setValueFromSource(dataValue.value, StatusCodes.Good, new Date());
+              callback(null, StatusCodes.Good);
+            },
+            (error: unknown) => {
+              logError(error, `[opcua-server] write denied for ${variable.tagId}`);
+              callback(null, StatusCodes.BadUserAccessDenied);
+            },
+          );
+        };
+      }
       this.uaVariables.set(variable.nodeId, uaVar);
     }
   }

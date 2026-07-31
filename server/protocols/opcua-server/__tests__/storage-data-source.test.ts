@@ -6,11 +6,17 @@
  * or database required (definitions are injected).
  */
 import { describe, test, expect, vi } from "vitest";
+import * as logger from "../../../logger";
 import {
   StorageTagDataSource,
   inferDataType,
 } from "../storage-data-source";
-import type { SourceSite, SourceTag, TagSample } from "../types";
+import type {
+  SourceSite,
+  SourceTag,
+  TagSample,
+  TagWriteRequest,
+} from "../types";
 
 describe("inferDataType", () => {
   test("infers scalar types", () => {
@@ -42,6 +48,26 @@ describe("StorageTagDataSource", () => {
     const src = makeSource();
     expect(await src.loadSites()).toHaveLength(1);
     expect((await src.loadTags())[0].tagId).toBe("PT-101.PV");
+  });
+
+  test("warns once when a writable tag is absent from the catalogue", async () => {
+    const warnSpy = vi.spyOn(logger, "logWarn").mockImplementation(() => {});
+    const src = new StorageTagDataSource({
+      loadSites: async () => [],
+      loadTagDefs: async () => [
+        { tagId: "SETPOINT", siteId: "SITE-01", dataType: "number" },
+      ],
+      writableInputTags: new Set(["SETPOINT", "MISSPELLED-SETPOINT"]),
+    });
+
+    await src.loadTags();
+    await src.loadTags();
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("MISSPELLED-SETPOINT"),
+    );
+    warnSpy.mockRestore();
   });
 
   test("readTag returns undefined until an update arrives", async () => {
@@ -104,5 +130,32 @@ describe("StorageTagDataSource", () => {
       timestamp: "t",
     });
     expect(good).toHaveBeenCalledOnce();
+  });
+
+  test("re-checks the writable-input allowlist at the write boundary", async () => {
+    const backend = vi.fn(async (_request: TagWriteRequest) => undefined);
+    const src = new StorageTagDataSource({
+      loadSites: async () => [],
+      loadTagDefs: async () => [],
+      writableInputTags: new Set(["SETPOINT"]),
+      writeTag: backend,
+    });
+    const base = {
+      siteId: "SITE-01",
+      value: 12.5,
+      username: "operator",
+      timestamp: new Date("2026-07-31T00:00:00Z"),
+    };
+
+    await expect(src.writeTag({ ...base, tagId: "OUTPUT" })).rejects.toThrow(
+      /writable-input allowlist/,
+    );
+    expect(backend).not.toHaveBeenCalled();
+
+    await expect(
+      src.writeTag({ ...base, tagId: "SETPOINT" }),
+    ).resolves.toBeUndefined();
+    expect(backend).toHaveBeenCalledOnce();
+    expect((await src.readTag("SETPOINT"))?.value).toBe(12.5);
   });
 });
