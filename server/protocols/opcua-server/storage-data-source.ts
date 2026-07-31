@@ -24,7 +24,7 @@ import type { SourceSite, SourceTag, TagSample } from "./types";
 /** Update shape emitted by the existing tag-stream fabric. */
 export interface IncomingTagUpdate {
   tagName: string;
-  value: unknown;
+  value: number | string | boolean | unknown[];
   quality: Quality;
   timestamp: string;
 }

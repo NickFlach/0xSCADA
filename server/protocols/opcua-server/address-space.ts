@@ -58,9 +58,13 @@ export function mapDataType(dataType: DataType): UaDataType {
 }
 
 function mapTagDataType(tag: SourceTag): UaDataType {
-  return tag.dataType === "array"
-    ? mapDataType(tag.elementDataType ?? "string")
-    : mapDataType(tag.dataType);
+  if (tag.dataType !== "array") return mapDataType(tag.dataType);
+  if (tag.elementDataType === undefined) {
+    throw new Error(
+      `Array tag "${tag.tagId}" must declare a scalar elementDataType`,
+    );
+  }
+  return mapDataType(tag.elementDataType);
 }
 
 /**

@@ -367,10 +367,11 @@ export class OxScadaOpcuaServer {
                       DataType,
                       nodeOpcua.VariantArrayType,
                     ),
-                    statusCode:
-                      sample === undefined || sample.quality === "bad"
-                        ? StatusCodes.Bad
-                        : StatusCodes.Good,
+                    statusCode: statusCodeForSample(
+                      variable,
+                      sample,
+                      StatusCodes,
+                    ),
                     sourceTimestamp: toDate(sample?.timestamp),
                   }),
                 );
@@ -438,7 +439,7 @@ export class OxScadaOpcuaServer {
           DataType,
           nodeOpcua.VariantArrayType,
         ),
-        sample.quality === "bad" ? StatusCodes.Bad : StatusCodes.Good,
+        statusCodeForSample(meta, sample, StatusCodes),
         toDate(sample.timestamp),
       );
     });
@@ -506,6 +507,9 @@ function toVariant(
 ): UaHandle {
   const raw = sample?.value;
   if (meta.valueRank === 1) {
+    // A non-array source value is paired with StatusCodes.Bad by
+    // statusCodeForSample. Keep the Variant shape valid without presenting the
+    // empty fallback as a successful process reading.
     const values = Array.isArray(raw) ? raw : [];
     return new Variant({
       dataType: uaTypeToNodeOpcuaDataType(meta.dataType, DataType),
@@ -541,12 +545,46 @@ function coerceScalar(type: UaDataType, value: unknown): unknown {
     case UaDataType.Boolean:
       return Boolean(value);
     case UaDataType.Double: {
-      const numeric = typeof value === "number" ? value : Number(value);
-      return Number.isFinite(numeric) ? numeric : 0;
+      return coerceFiniteNumber(value);
     }
     default:
       return value == null ? "" : String(value);
   }
+}
+
+/** Convert a source value to a finite number without inventing process data. */
+function coerceFiniteNumber(value: unknown): number {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
+/**
+ * Derive UA quality from both source quality and the declared array contract.
+ * Shape/type failures are quality events; they must never look like a valid
+ * empty array or a plausible numeric zero to an operator.
+ */
+function statusCodeForSample(
+  meta: UaVariableNode,
+  sample: TagSample | undefined,
+  StatusCodes: Record<string, unknown>,
+): unknown {
+  if (sample === undefined || sample.quality === "bad") {
+    return StatusCodes.Bad;
+  }
+  if (meta.valueRank !== 1) return StatusCodes.Good;
+  if (!Array.isArray(sample.value)) return StatusCodes.Bad;
+  if (
+    meta.dataType === UaDataType.Double &&
+    sample.value.some((value) => Number.isNaN(coerceFiniteNumber(value)))
+  ) {
+    return StatusCodes.Bad;
+  }
+  return StatusCodes.Good;
 }
 
 export { buildAddressSpace, summarizePlan } from "./address-space";

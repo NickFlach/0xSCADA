@@ -56,6 +56,20 @@ describe("mapDataType", () => {
       valueRank: 1,
     });
   });
+
+  test("rejects an array tag without an explicit scalar element type", () => {
+    expect(() =>
+      buildAddressSpace(sites, [
+        {
+          tagId: "UNTYPED_ARRAY",
+          siteId: "SITE-01",
+          dataType: "array",
+        },
+      ]),
+    ).toThrow(
+      'Array tag "UNTYPED_ARRAY" must declare a scalar elementDataType',
+    );
+  });
 });
 
 describe("NodeId builders", () => {

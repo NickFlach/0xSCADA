@@ -31,7 +31,10 @@ export interface SourceTag {
   siteId: string;
   /** 0xSCADA data type; mapped to a UA built-in DataType. */
   dataType: DataType;
-  /** Scalar element type. Required for an `array` tag to be strongly typed. */
+  /**
+   * Scalar element type. {@link buildAddressSpace} rejects an `array` tag when
+   * this is absent so the server never silently advertises the wrong UA type.
+   */
   elementDataType?: Exclude<DataType, "array" | "object">;
   /** Engineering units (mapped to UA EUInformation when present). */
   units?: string;

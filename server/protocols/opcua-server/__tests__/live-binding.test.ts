@@ -286,6 +286,34 @@ describe.skipIf(!nodeOpcuaAvailable)(
           23,
         ]);
 
+        dataSource.push({
+          tagId: "TEMPERATURES",
+          value: [21.5, "not-a-number", 23],
+          dataType: "array",
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
+        const invalidElementRead =
+          await session.readVariableValue(arrayNodeId);
+        expect(invalidElementRead.statusCode.name).toBe("Bad");
+        expect(
+          Number.isNaN(
+            Array.from(
+              invalidElementRead.value.value as ArrayLike<number>,
+            )[1],
+          ),
+        ).toBe(true);
+
+        dataSource.push({
+          tagId: "TEMPERATURES",
+          value: 21.5,
+          dataType: "number",
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
+        const wrongShapeRead = await session.readVariableValue(arrayNodeId);
+        expect(wrongShapeRead.statusCode.name).toBe("Bad");
+
         // 3. Subscribe and receive a DataChangeNotification for a pushed update.
         const subscription = await session.createSubscription2({
           requestedPublishingInterval: 50,
