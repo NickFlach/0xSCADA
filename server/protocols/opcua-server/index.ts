@@ -50,7 +50,7 @@ import type {
   TagWriteRequest,
   UaVariableNode,
 } from "./types";
-import { UaDataType } from "./types";
+import { UaAccessLevel, UaDataType } from "./types";
 
 /**
  * Data source the server reads from. Implementations live behind
@@ -69,7 +69,11 @@ export interface TagDataSource {
    * DataChangeNotifications.
    */
   subscribe(onChange: (sample: TagSample) => void): () => void;
-  /** Persist/dispatch an authorized control write and its audit record. */
+  /**
+   * Accept an authorized supervisory value and its audit record. The shipped
+   * storage implementation persists inside 0xSCADA; it does not dispatch to a
+   * PLC or field protocol.
+   */
   writeTag?(request: TagWriteRequest): Promise<void>;
 }
 
@@ -387,14 +391,18 @@ export class OxScadaOpcuaServer {
         },
       });
       if (
-        variable.accessLevel & 0x02 &&
+        variable.accessLevel & UaAccessLevel.CurrentWrite &&
         variable.direction === "input" &&
         this.dataSource.writeTag
       ) {
         const writeTag = this.dataSource.writeTag.bind(this.dataSource);
-        uaVar.writeValue = (context, dataValue, _indexRange, callback) => {
-          const username = context.getUserName();
-          if (!username || username === "anonymous") {
+        uaVar.writeValue = (context, dataValue, indexRange, callback) => {
+          if (indexRange && !indexRange.isEmpty()) {
+            callback(null, StatusCodes.BadIndexRangeInvalid);
+            return;
+          }
+          const tokenUserName = context.session?.userIdentityToken?.userName;
+          if (typeof tokenUserName !== "string" || tokenUserName.length === 0) {
             callback(null, StatusCodes.BadUserAccessDenied);
             return;
           }
@@ -402,7 +410,7 @@ export class OxScadaOpcuaServer {
             tagId: variable.tagId,
             siteId: variable.siteId,
             value: dataValue.value.value,
-            username,
+            username: tokenUserName,
             timestamp: new Date(),
           }).then(
             () => {

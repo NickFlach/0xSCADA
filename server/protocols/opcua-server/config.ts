@@ -138,7 +138,12 @@ const BaseOpcuaServerConfigSchema = z
     maxSessions: z.coerce.number().int().min(1).default(100),
     /** Master switch for the control write path. Off by default. */
     writesEnabled: z.boolean().default(false),
-    /** Explicit per-tag allowlist. Empty means no writable tags. */
+    /**
+     * Explicit per-tag declaration that each named historian tag is a control
+     * input. The historian has no independent direction metadata; inclusion is
+     * therefore the operator's direction assertion as well as the allowlist.
+     * Empty means no writable tags.
+     */
     writableTags: z.array(z.string().trim().min(1)).default([]),
   })
   .strict();

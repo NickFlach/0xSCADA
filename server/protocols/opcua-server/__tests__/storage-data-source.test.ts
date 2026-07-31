@@ -10,7 +10,12 @@ import {
   StorageTagDataSource,
   inferDataType,
 } from "../storage-data-source";
-import type { SourceSite, SourceTag, TagSample } from "../types";
+import type {
+  SourceSite,
+  SourceTag,
+  TagSample,
+  TagWriteRequest,
+} from "../types";
 
 describe("inferDataType", () => {
   test("infers scalar types", () => {
@@ -104,5 +109,32 @@ describe("StorageTagDataSource", () => {
       timestamp: "t",
     });
     expect(good).toHaveBeenCalledOnce();
+  });
+
+  test("re-checks the writable-input allowlist at the write boundary", async () => {
+    const backend = vi.fn(async (_request: TagWriteRequest) => undefined);
+    const src = new StorageTagDataSource({
+      loadSites: async () => [],
+      loadTagDefs: async () => [],
+      writableInputTags: new Set(["SETPOINT"]),
+      writeTag: backend,
+    });
+    const base = {
+      siteId: "SITE-01",
+      value: 12.5,
+      username: "operator",
+      timestamp: new Date("2026-07-31T00:00:00Z"),
+    };
+
+    await expect(src.writeTag({ ...base, tagId: "OUTPUT" })).rejects.toThrow(
+      /writable-input allowlist/,
+    );
+    expect(backend).not.toHaveBeenCalled();
+
+    await expect(
+      src.writeTag({ ...base, tagId: "SETPOINT" }),
+    ).resolves.toBeUndefined();
+    expect(backend).toHaveBeenCalledOnce();
+    expect((await src.readTag("SETPOINT"))?.value).toBe(12.5);
   });
 });

@@ -63,6 +63,12 @@ interface UaSession {
     nodeId: string,
     value: { dataType: unknown; value: unknown },
   ): Promise<{ name: string }>;
+  write(nodeToWrite: {
+    nodeId: string;
+    attributeId: number;
+    indexRange: string;
+    value: { value: { dataType: unknown; value: unknown } };
+  }): Promise<{ name: string }>;
   createSubscription2(options: Record<string, unknown>): Promise<UaSubscription>;
   close(): Promise<void>;
 }
@@ -156,7 +162,10 @@ class InMemoryTagDataSource implements TagDataSource {
     username: string;
     value: unknown;
   }): Promise<void> {
-    if (request.username !== OPERATOR.username) {
+    if (
+      request.username !== OPERATOR.username &&
+      request.username !== NAMED_ANONYMOUS.username
+    ) {
       throw new Error("opcua.write scope denied");
     }
     this.writes.push(request);
@@ -183,8 +192,17 @@ const OPERATOR: AuthUserRecord = {
   isActive: true,
 };
 
-const userLookup: UserLookup = async (username) =>
-  username === OPERATOR.username ? OPERATOR : null;
+const NAMED_ANONYMOUS: AuthUserRecord = {
+  ...OPERATOR,
+  id: "user-2",
+  username: "anonymous",
+};
+
+const userLookup: UserLookup = async (username) => {
+  if (username === OPERATOR.username) return OPERATOR;
+  if (username === NAMED_ANONYMOUS.username) return NAMED_ANONYMOUS;
+  return null;
+};
 
 const nodeOpcuaAvailable = await isNodeOpcuaAvailable();
 if (!nodeOpcuaAvailable) {
@@ -484,6 +502,55 @@ describe.skipIf(!nodeOpcuaAvailable)(
         username: OPERATOR.username,
         value: 33.5,
       }));
+    }, 60_000);
+
+    test("rejects IndexRange writes without mutating the whole value", async () => {
+      const before = dataSource.writes.length;
+      await withClient(async (client) => {
+        const session = await client.createSession({
+          type: api.UserTokenType.UserName,
+          userName: OPERATOR.username,
+          password: PASSWORD,
+        });
+        try {
+          const ns = server.addressSpacePlan!.namespaceIndex;
+          const status = await session.write({
+            nodeId: `ns=${ns};s=Tags/SITE-01/SETPOINT`,
+            attributeId: api.AttributeIds.Value,
+            indexRange: "0",
+            value: {
+              value: { dataType: api.DataType.Double, value: 44 },
+            },
+          });
+          expect(status.name).toBe("BadIndexRangeInvalid");
+        } finally {
+          await session.close();
+        }
+      });
+      expect(dataSource.writes).toHaveLength(before);
+    }, 60_000);
+
+    test("authorizes by token type, not the literal username", async () => {
+      await withClient(async (client) => {
+        const session = await client.createSession({
+          type: api.UserTokenType.UserName,
+          userName: NAMED_ANONYMOUS.username,
+          password: PASSWORD,
+        });
+        try {
+          const ns = server.addressSpacePlan!.namespaceIndex;
+          const status = await session.writeSingleNode(
+            `ns=${ns};s=Tags/SITE-01/SETPOINT`,
+            { dataType: api.DataType.Double, value: 34.5 },
+          );
+          expect(status.name).toBe("Good");
+        } finally {
+          await session.close();
+        }
+      });
+      expect(dataSource.writes).toContainEqual(
+        expect.objectContaining({ username: NAMED_ANONYMOUS.username }),
+      );
     }, 60_000);
 
     test("refuses a bad password", async () => {

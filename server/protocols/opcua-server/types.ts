@@ -40,7 +40,11 @@ export interface SourceTag {
   units?: string;
   /** Whether UA clients may write this variable. Defaults to read-only. */
   writable?: boolean;
-  /** Control-flow direction. Only `input` tags may accept UA writes. */
+  /**
+   * Control-flow direction. Only `input` tags may accept UA writes. Sources
+   * with real direction metadata provide it directly; the historian adapter's
+   * explicit writable-input allowlist is also its direction assertion.
+   */
   direction?: "input" | "output" | "internal";
   /** Optional source address (PLC register, OPC item id, …) for diagnostics. */
   address?: string;

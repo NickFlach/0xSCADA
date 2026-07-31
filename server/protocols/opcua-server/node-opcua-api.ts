@@ -26,6 +26,19 @@
 /** Opaque handle to a node-opcua runtime object we only ever hand back. */
 export type UaHandle = object;
 
+/** Session identity surface needed to authorize a write without string sentinels. */
+export interface UaSessionContext {
+  readonly session?: {
+    readonly userIdentityToken?: { readonly userName?: unknown };
+  };
+  getUserName(): string;
+}
+
+/** `NumericRange` surface used to reject unsupported partial writes. */
+export interface UaNumericRange {
+  isEmpty(): boolean;
+}
+
 /** node-opcua `UAVariable`, restricted to the members the server drives. */
 export interface UaVariable {
   setValueFromSource(
@@ -34,9 +47,9 @@ export interface UaVariable {
     sourceTimestamp?: Date,
   ): void;
   writeValue(
-    context: { getUserName(): string },
+    context: UaSessionContext,
     dataValue: { value: { value: unknown } },
-    indexRange: unknown,
+    indexRange: UaNumericRange | null,
     callback: (err: Error | null, statusCode?: unknown) => void,
   ): void;
 }

@@ -14,6 +14,10 @@
  * Keeping the queries injected means this module stays pure and unit-testable
  * with no database.
  *
+ * A successful `writeTag` means the configured 0xSCADA backend accepted the
+ * supervisory value. The production backend persists and audits it but does
+ * not claim that a PLC or other field device applied it.
+ *
  * Part of #461.
  */
 
@@ -41,6 +45,8 @@ export interface StorageDataSourceDeps {
   loadTagDefs: () => Promise<SourceTag[]>;
   /** Optional fail-closed write backend. Absence keeps every node read-only. */
   writeTag?: (request: TagWriteRequest) => Promise<void>;
+  /** Exact tags the operator has declared to be writable control inputs. */
+  writableInputTags?: ReadonlySet<string>;
 }
 
 /** Infer a 0xSCADA DataType from a runtime value. */
@@ -94,6 +100,11 @@ export class StorageTagDataSource implements TagDataSource {
   async writeTag(request: TagWriteRequest): Promise<void> {
     if (!this.deps.writeTag) {
       throw new Error("OPC-UA writes are not configured");
+    }
+    if (!this.deps.writableInputTags?.has(request.tagId)) {
+      throw new Error(
+        `OPC-UA tag ${request.tagId} is not in the writable-input allowlist`,
+      );
     }
     if (
       typeof request.value !== "number" &&

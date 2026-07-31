@@ -17,6 +17,11 @@
  * gateway scan loop and the field simulator already publish to. Authentication
  * resolves against the existing `users` table — no parallel credential store.
  *
+ * WRITE BOUNDARY (#667): an accepted UA write is a durable supervisory value
+ * and audit event inside 0xSCADA. It does not dispatch to a PLC or field-bus
+ * adapter. `Good` therefore means that 0xSCADA accepted and persisted the
+ * value, not that physical equipment applied a setpoint.
+ *
  * Part of #461.
  */
 
@@ -37,6 +42,9 @@ import type { AuthUserRecord, UserLookup } from "./user-auth";
 
 /** The single flag that turns the subsystem on. */
 export const OPCUA_SERVER_ENABLED_ENV = "OPCUA_SERVER_ENABLED";
+
+/** OPC quality code used for an accepted, persisted supervisory value. */
+export const OPCUA_QUALITY_GOOD = 0xc0;
 
 let activeServer: OxScadaOpcuaServer | null = null;
 let detachTagStream: (() => void) | null = null;
@@ -71,15 +79,13 @@ export async function loadSitesFromStorage(): Promise<SourceSite[]> {
  * produced, and the UA data type is derived from whether the historian ever
  * stored a string for that tag (`string_value`) or only numerics (`value`).
  *
- * Tags are exposed read-only: 0xSCADA has no audited UA write path yet, so the
- * server must not advertise one. Read-only is the intended shipped behaviour,
- * not a placeholder — #461 asked for an address space, and that is what this
- * is. Writes are tracked separately in #667, because a UA client setting a tag
- * is a control action and needs scope authorisation and an audit record before
- * it can be offered at all.
+ * The historian table has no direction column. Consequently, entries in
+ * `writableInputTags` are an explicit operator assertion that the named tag is
+ * a control input; the allowlist and direction are not independent production
+ * gates. An omitted tag remains read-only.
  */
 export async function loadTagCatalogueFromStorage(
-  writableTags: ReadonlySet<string> = new Set(),
+  writableInputTags: ReadonlySet<string> = new Set(),
 ): Promise<SourceTag[]> {
   const rows = await typedDatabase()
     .select({
@@ -98,15 +104,23 @@ export async function loadTagCatalogueFromStorage(
       tagId: row.tagId,
       siteId: row.siteId,
       dataType: row.hasStringValue ? "string" : "number",
-      writable: writableTags.has(row.tagId),
-      direction: writableTags.has(row.tagId) ? "input" : undefined,
+      writable: writableInputTags.has(row.tagId),
+      direction: writableInputTags.has(row.tagId) ? "input" : undefined,
     });
   }
   return tags;
 }
 
 /** Authorize, persist, and audit one UA control write as a single transaction. */
-export async function writeTagToStorage(request: TagWriteRequest): Promise<void> {
+export async function writeTagToStorage(
+  request: TagWriteRequest,
+  writableInputTags: ReadonlySet<string>,
+): Promise<void> {
+  if (!writableInputTags.has(request.tagId)) {
+    throw new Error(
+      `OPC-UA tag ${request.tagId} is not in the writable-input allowlist`,
+    );
+  }
   const db = typedDatabase();
   await db.transaction(async (tx) => {
     const grants = await tx
@@ -131,7 +145,7 @@ export async function writeTagToStorage(request: TagWriteRequest): Promise<void>
       siteId: request.siteId,
       value: numeric,
       stringValue: numeric === null ? String(request.value) : null,
-      quality: 192,
+      quality: OPCUA_QUALITY_GOOD,
       timestamp: request.timestamp,
     });
     await tx.insert(schema.auditLogs).values({
@@ -221,13 +235,19 @@ export async function startOpcuaServer(
     );
   }
 
-  const writableTags = config.writesEnabled
+  const writableInputTags = config.writesEnabled
     ? new Set(config.writableTags)
     : new Set<string>();
   const dataSource = new StorageTagDataSource({
     loadSites: loadSitesFromStorage,
-    loadTagDefs: () => loadTagCatalogueFromStorage(writableTags),
-    ...(config.writesEnabled ? { writeTag: writeTagToStorage } : {}),
+    loadTagDefs: () => loadTagCatalogueFromStorage(writableInputTags),
+    writableInputTags,
+    ...(config.writesEnabled
+      ? {
+          writeTag: (request: TagWriteRequest) =>
+            writeTagToStorage(request, writableInputTags),
+        }
+      : {}),
   });
 
   const server = new OxScadaOpcuaServer({
