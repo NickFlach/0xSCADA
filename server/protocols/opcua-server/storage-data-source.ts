@@ -22,6 +22,7 @@
  */
 
 import type { DataType, Quality } from "@shared/types/core/common";
+import { logWarn } from "../../logger";
 import type { TagDataSource } from "./index";
 import type {
   SourceSite,
@@ -73,6 +74,7 @@ export class StorageTagDataSource implements TagDataSource {
   private readonly deps: StorageDataSourceDeps;
   private readonly latest = new Map<string, TagSample>();
   private readonly listeners = new Set<(sample: TagSample) => void>();
+  private readonly warnedMissingWritableTags = new Set<string>();
 
   constructor(deps: StorageDataSourceDeps) {
     this.deps = deps;
@@ -82,8 +84,22 @@ export class StorageTagDataSource implements TagDataSource {
     return this.deps.loadSites();
   }
 
-  loadTags(): Promise<SourceTag[]> {
-    return this.deps.loadTagDefs();
+  async loadTags(): Promise<SourceTag[]> {
+    const tags = await this.deps.loadTagDefs();
+    const knownTagIds = new Set(tags.map((tag) => tag.tagId));
+    for (const tagId of this.deps.writableInputTags ?? []) {
+      if (
+        !knownTagIds.has(tagId) &&
+        !this.warnedMissingWritableTags.has(tagId)
+      ) {
+        this.warnedMissingWritableTags.add(tagId);
+        logWarn(
+          `[opcua-server] writable tag "${tagId}" was not found in the historian catalogue; ` +
+            "no writable UA node was created",
+        );
+      }
+    }
+    return tags;
   }
 
   async readTag(tagId: string): Promise<TagSample | undefined> {

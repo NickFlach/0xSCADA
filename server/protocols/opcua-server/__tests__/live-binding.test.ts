@@ -504,6 +504,28 @@ describe.skipIf(!nodeOpcuaAvailable)(
       }));
     }, 60_000);
 
+    test("rejects a type-confused write before it reaches storage", async () => {
+      const before = dataSource.writes.length;
+      await withClient(async (client) => {
+        const session = await client.createSession({
+          type: api.UserTokenType.UserName,
+          userName: OPERATOR.username,
+          password: PASSWORD,
+        });
+        try {
+          const ns = server.addressSpacePlan!.namespaceIndex;
+          const status = await session.writeSingleNode(
+            `ns=${ns};s=Tags/SITE-01/SETPOINT`,
+            { dataType: api.DataType.String, value: "open" },
+          );
+          expect(status.name).toBe("BadTypeMismatch");
+        } finally {
+          await session.close();
+        }
+      });
+      expect(dataSource.writes).toHaveLength(before);
+    }, 60_000);
+
     test("rejects IndexRange writes without mutating the whole value", async () => {
       const before = dataSource.writes.length;
       await withClient(async (client) => {

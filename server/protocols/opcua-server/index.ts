@@ -406,6 +406,15 @@ export class OxScadaOpcuaServer {
             callback(null, StatusCodes.BadUserAccessDenied);
             return;
           }
+          // Replacing writeValue bypasses node-opcua's default compatibility
+          // guard, so run the library's own validation before persistence.
+          const compatibilityStatus = uaVar.checkVariantCompatibility(
+            dataValue.value,
+          );
+          if (compatibilityStatus.isNot(StatusCodes.Good)) {
+            callback(null, compatibilityStatus);
+            return;
+          }
           writeTag({
             tagId: variable.tagId,
             siteId: variable.siteId,

@@ -39,6 +39,16 @@ export interface UaNumericRange {
   isEmpty(): boolean;
 }
 
+/** `StatusCode` comparison surface returned by node-opcua validation. */
+export interface UaStatusCode {
+  isNot(other: unknown): boolean;
+}
+
+/** Incoming `Variant` surface needed for compatibility checks and persistence. */
+export interface UaVariant {
+  readonly value: unknown;
+}
+
 /** node-opcua `UAVariable`, restricted to the members the server drives. */
 export interface UaVariable {
   setValueFromSource(
@@ -48,10 +58,11 @@ export interface UaVariable {
   ): void;
   writeValue(
     context: UaSessionContext,
-    dataValue: { value: { value: unknown } },
+    dataValue: { value: UaVariant },
     indexRange: UaNumericRange | null,
     callback: (err: Error | null, statusCode?: unknown) => void,
   ): void;
+  checkVariantCompatibility(value: UaVariant): UaStatusCode;
 }
 
 /** Options accepted by `Namespace.addVariable` that this server sets. */

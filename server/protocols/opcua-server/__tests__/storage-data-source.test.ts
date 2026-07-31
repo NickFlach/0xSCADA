@@ -6,6 +6,7 @@
  * or database required (definitions are injected).
  */
 import { describe, test, expect, vi } from "vitest";
+import * as logger from "../../../logger";
 import {
   StorageTagDataSource,
   inferDataType,
@@ -47,6 +48,26 @@ describe("StorageTagDataSource", () => {
     const src = makeSource();
     expect(await src.loadSites()).toHaveLength(1);
     expect((await src.loadTags())[0].tagId).toBe("PT-101.PV");
+  });
+
+  test("warns once when a writable tag is absent from the catalogue", async () => {
+    const warnSpy = vi.spyOn(logger, "logWarn").mockImplementation(() => {});
+    const src = new StorageTagDataSource({
+      loadSites: async () => [],
+      loadTagDefs: async () => [
+        { tagId: "SETPOINT", siteId: "SITE-01", dataType: "number" },
+      ],
+      writableInputTags: new Set(["SETPOINT", "MISSPELLED-SETPOINT"]),
+    });
+
+    await src.loadTags();
+    await src.loadTags();
+
+    expect(warnSpy).toHaveBeenCalledOnce();
+    expect(warnSpy).toHaveBeenCalledWith(
+      expect.stringContaining("MISSPELLED-SETPOINT"),
+    );
+    warnSpy.mockRestore();
   });
 
   test("readTag returns undefined until an update arrives", async () => {
