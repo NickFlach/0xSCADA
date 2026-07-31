@@ -38,11 +38,9 @@ export const OBJECTS_FOLDER_NODE_ID = "ns=0;i=85";
 /**
  * Map a 0xSCADA {@link DataType} to a UA built-in DataType. Numbers and
  * booleans map to their concrete UA scalar types; strings to UA String;
- * everything else (object/array) falls back to BaseDataType (Variant) since
- * this scaffold does not yet synthesise UA structured types for them.
- *
- * Tracked in #670: map `array` to a one-dimensional UA array (valueRank 1) and
- * synthesise UA ExtensionObject DataTypes for structured `object` tags.
+ * objects fall back to BaseDataType. The historian has no object schema from
+ * which a stable UA StructureDefinition could be synthesized, so their final
+ * wire representation remains documented JSON text.
  */
 export function mapDataType(dataType: DataType): UaDataType {
   switch (dataType) {
@@ -57,6 +55,16 @@ export function mapDataType(dataType: DataType): UaDataType {
     default:
       return UaDataType.BaseDataType;
   }
+}
+
+function mapTagDataType(tag: SourceTag): UaDataType {
+  if (tag.dataType !== "array") return mapDataType(tag.dataType);
+  if (tag.elementDataType === undefined) {
+    throw new Error(
+      `Array tag "${tag.tagId}" must declare a scalar elementDataType`,
+    );
+  }
+  return mapDataType(tag.elementDataType);
 }
 
 /**
@@ -189,7 +197,8 @@ export function buildAddressSpace(
       browseName: tag.tagId,
       displayName: tag.name || tag.tagId,
       parentNodeId: siteFolderNodeId(tag.siteId, namespaceIndex),
-      dataType: mapDataType(tag.dataType),
+      dataType: mapTagDataType(tag),
+      ...(tag.dataType === "array" ? { valueRank: 1 } : {}),
       accessLevel: accessLevelFor(tag),
       units: tag.units,
       tagId: tag.tagId,

@@ -43,6 +43,7 @@ export interface UaAddVariableOptions {
   displayName: string;
   description?: string;
   dataType: unknown;
+  valueRank?: number;
   accessLevel: number;
   userAccessLevel: number;
   minimumSamplingInterval: number;
@@ -140,7 +141,11 @@ export interface NodeOpcuaApi {
   OPCUACertificateManager: new (
     options: UaCertificateManagerOptions,
   ) => UaCertificateManager;
-  Variant: new (options: { dataType: unknown; value: unknown }) => UaHandle;
+  Variant: new (options: {
+    dataType: unknown;
+    value: unknown;
+    arrayType?: unknown;
+  }) => UaHandle;
   DataValue: new (options: {
     value: UaHandle;
     statusCode: unknown;
@@ -148,6 +153,7 @@ export interface NodeOpcuaApi {
   }) => UaHandle;
   /** `DataType` enum, indexed by member name (`"Double"`, `"Boolean"`, …). */
   DataType: Record<string, unknown>;
+  VariantArrayType: Record<string, unknown>;
   /** `StatusCodes` table, indexed by member name (`"Good"`, `"Bad"`, …). */
   StatusCodes: Record<string, unknown>;
   /** `SecurityPolicy` enum, indexed by member name (`"Basic256Sha256"`, …). */
@@ -174,6 +180,7 @@ const REQUIRED_MEMBERS: readonly (keyof NodeOpcuaApi)[] = [
   "Variant",
   "DataValue",
   "DataType",
+  "VariantArrayType",
   "StatusCodes",
   "SecurityPolicy",
   "MessageSecurityMode",

@@ -106,6 +106,12 @@ const SITE: SourceSite = { id: "SITE-01", name: "Refinery" };
 const TAGS: SourceTag[] = [
   { tagId: "PT-101.PV", siteId: "SITE-01", dataType: "number", units: "bar" },
   { tagId: "RUN", siteId: "SITE-01", dataType: "boolean" },
+  {
+    tagId: "TEMPERATURES",
+    siteId: "SITE-01",
+    dataType: "array",
+    elementDataType: "number",
+  },
 ];
 
 /** In-memory {@link TagDataSource}: the 0xSCADA side is not what is under test. */
@@ -208,6 +214,13 @@ describe.skipIf(!nodeOpcuaAvailable)(
         quality: "good",
         timestamp: new Date().toISOString(),
       });
+      dataSource.push({
+        tagId: "TEMPERATURES",
+        value: [21.5, 22.25, 23],
+        dataType: "array",
+        quality: "good",
+        timestamp: new Date().toISOString(),
+      });
       // SecurityPolicy None + anonymous is permitted here only because the bind
       // is loopback and env is "test"; the config layer refuses both otherwise.
       server = makeServer(dataSource, pkiFolder, {
@@ -246,6 +259,7 @@ describe.skipIf(!nodeOpcuaAvailable)(
         const sitesRoot = `ns=${namespaceIndex};s=Sites`;
         const siteFolder = `ns=${namespaceIndex};s=Sites/SITE-01`;
         const tagNodeId = `ns=${namespaceIndex};${TAG_NODE_ID_SUFFIX}`;
+        const arrayNodeId = `ns=${namespaceIndex};s=Tags/SITE-01/TEMPERATURES`;
 
         // 1. Browse: Objects -> Sites -> SITE-01 -> tag variables.
         const sites = await session.browse(sitesRoot);
@@ -263,6 +277,42 @@ describe.skipIf(!nodeOpcuaAvailable)(
         const read = await session.readVariableValue(tagNodeId);
         expect(read.statusCode.name).toBe("Good");
         expect(read.value.value).toBeCloseTo(12.5, 6);
+
+        const arrayRead = await session.readVariableValue(arrayNodeId);
+        expect(arrayRead.statusCode.name).toBe("Good");
+        expect(Array.from(arrayRead.value.value as ArrayLike<number>)).toEqual([
+          21.5,
+          22.25,
+          23,
+        ]);
+
+        dataSource.push({
+          tagId: "TEMPERATURES",
+          value: [21.5, "not-a-number", 23],
+          dataType: "array",
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
+        const invalidElementRead =
+          await session.readVariableValue(arrayNodeId);
+        expect(invalidElementRead.statusCode.name).toBe("Bad");
+        expect(
+          Number.isNaN(
+            Array.from(
+              invalidElementRead.value.value as ArrayLike<number>,
+            )[1],
+          ),
+        ).toBe(true);
+
+        dataSource.push({
+          tagId: "TEMPERATURES",
+          value: 21.5,
+          dataType: "number",
+          quality: "good",
+          timestamp: new Date().toISOString(),
+        });
+        const wrongShapeRead = await session.readVariableValue(arrayNodeId);
+        expect(wrongShapeRead.statusCode.name).toBe("Bad");
 
         // 3. Subscribe and receive a DataChangeNotification for a pushed update.
         const subscription = await session.createSubscription2({
