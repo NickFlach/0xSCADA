@@ -130,6 +130,37 @@ describe('AutoRemediationEngine', () => {
     expect(replicas).toBe(2);
     expect(result.changed).toBe(false);
     expect(result.status).not.toBe('succeeded');
+    // Failing safe is only half of it. A caller that meant to execute must be
+    // able to tell that it got a plan instead, and the result message is the
+    // only channel it has — every other field is identical to an explicit
+    // `dryRun: true`, including the idempotency fingerprint (asserted below).
+    expect(
+      result.message,
+      'the assumption was applied silently',
+    ).toMatch(/dryRun was not stated; assumed true/);
+  });
+
+  it('says nothing about an assumption when dryRun was actually stated', async () => {
+    // Guards the other direction: the annotation must not leak onto requests
+    // that stated the flag, or it stops meaning anything.
+    let replicas = 2;
+    const action = createScaleOutAction({
+      currentReplicas: async () => replicas,
+      setReplicas: async (_component: string, desired: number) => {
+        replicas = desired;
+      },
+      readyReplicas: async () => replicas,
+    });
+    const engine = new AutoRemediationEngine([action], { cooldownMs: 0 }, { now });
+    const result = await engine.execute({
+      actionId: 'scale-out',
+      context: { component: 'gateway', desiredReplicas: 4, maximumReplicas: 6 },
+      idempotencyKey: 'dry-run-stated',
+      dryRun: true,
+    });
+
+    expect(result.status).toBe('planned');
+    expect(result.message ?? '').not.toMatch(/assumed true/);
   });
 
   it('fingerprints an unstated dryRun the same as an explicit dry run', async () => {

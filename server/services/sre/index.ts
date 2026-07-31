@@ -490,8 +490,10 @@ export class AutoRemediationEngine {
     // engine must not perform a live infrastructure change because a caller
     // said nothing, so an absent flag resolves to a dry run.
     //
-    // Not silent: `dryRunAssumed` puts it in the result message, because a
-    // caller that meant to execute and quietly got a plan is its own bug.
+    // Not silent: `dryRunAssumed` is threaded into `executeOnce` and appended
+    // to the result message (and therefore to the audit record), because a
+    // caller that meant to execute and quietly got a plan is its own bug. A
+    // safe default that cannot be observed is just a different silent failure.
     const dryRunAssumed = typeof request.dryRun !== 'boolean';
     const dryRun = dryRunAssumed ? true : request.dryRun;
     const normalizedRequest: RemediationRequest<Context> = { ...request, context, dryRun };
@@ -523,7 +525,7 @@ export class AutoRemediationEngine {
       return { ...(await running.promise), reused: true };
     }
 
-    const promise = this.executeOnce(action, normalizedRequest);
+    const promise = this.executeOnce(action, normalizedRequest, dryRunAssumed);
     this.inFlight.set(request.idempotencyKey, { fingerprint, promise });
     try {
       const result = await promise;
@@ -546,10 +548,15 @@ export class AutoRemediationEngine {
    * `execute()` — in particular its `dryRun` is the resolved boolean, never the
    * caller's possibly-absent field. Everything below may therefore read
    * `request.dryRun` directly; do not call this with a raw caller request.
+   *
+   * `dryRunAssumed` records whether that resolution had to invent the value.
+   * It is not derivable from `request` here — normalization has already erased
+   * the difference — which is precisely why it is passed separately.
    */
   private async executeOnce<Context>(
     action: RemediationAction<Context>,
     request: RemediationRequest<Context>,
+    dryRunAssumed: boolean,
   ): Promise<RemediationResult> {
     const started = this.now();
     const scope = `${action.id}:${action.scope(request.context)}`;
@@ -574,6 +581,16 @@ export class AutoRemediationEngine {
         scope,
         ...partial,
       };
+      if (dryRunAssumed) {
+        // Say so on every outcome, not just the planned one. The caller asked
+        // for something the engine declined to take at face value, and it
+        // learns that here or nowhere. Appended rather than replacing, so the
+        // action's own message survives, and set before appendAudit so the
+        // audit record carries it too.
+        result.message = result.message
+          ? `${result.message} (dryRun was not stated; assumed true)`
+          : 'dryRun was not stated; assumed true';
+      }
       this.appendAudit(result);
       return result;
     };
