@@ -26,6 +26,29 @@
 /** Opaque handle to a node-opcua runtime object we only ever hand back. */
 export type UaHandle = object;
 
+/** Session identity surface needed to authorize a write without string sentinels. */
+export interface UaSessionContext {
+  readonly session?: {
+    readonly userIdentityToken?: { readonly userName?: unknown };
+  };
+  getUserName(): string;
+}
+
+/** `NumericRange` surface used to reject unsupported partial writes. */
+export interface UaNumericRange {
+  isEmpty(): boolean;
+}
+
+/** `StatusCode` comparison surface returned by node-opcua validation. */
+export interface UaStatusCode {
+  isNot(other: unknown): boolean;
+}
+
+/** Incoming `Variant` surface needed for compatibility checks and persistence. */
+export interface UaVariant {
+  readonly value: unknown;
+}
+
 /** node-opcua `UAVariable`, restricted to the members the server drives. */
 export interface UaVariable {
   setValueFromSource(
@@ -33,6 +56,13 @@ export interface UaVariable {
     statusCode?: unknown,
     sourceTimestamp?: Date,
   ): void;
+  writeValue(
+    context: UaSessionContext,
+    dataValue: { value: UaVariant },
+    indexRange: UaNumericRange | null,
+    callback: (err: Error | null, statusCode?: unknown) => void,
+  ): void;
+  checkVariantCompatibility(value: UaVariant): UaStatusCode;
 }
 
 /** Options accepted by `Namespace.addVariable` that this server sets. */
@@ -43,6 +73,7 @@ export interface UaAddVariableOptions {
   displayName: string;
   description?: string;
   dataType: unknown;
+  valueRank?: number;
   accessLevel: number;
   userAccessLevel: number;
   minimumSamplingInterval: number;
@@ -140,7 +171,11 @@ export interface NodeOpcuaApi {
   OPCUACertificateManager: new (
     options: UaCertificateManagerOptions,
   ) => UaCertificateManager;
-  Variant: new (options: { dataType: unknown; value: unknown }) => UaHandle;
+  Variant: new (options: {
+    dataType: unknown;
+    value: unknown;
+    arrayType?: unknown;
+  }) => UaHandle;
   DataValue: new (options: {
     value: UaHandle;
     statusCode: unknown;
@@ -148,6 +183,7 @@ export interface NodeOpcuaApi {
   }) => UaHandle;
   /** `DataType` enum, indexed by member name (`"Double"`, `"Boolean"`, …). */
   DataType: Record<string, unknown>;
+  VariantArrayType: Record<string, unknown>;
   /** `StatusCodes` table, indexed by member name (`"Good"`, `"Bad"`, …). */
   StatusCodes: Record<string, unknown>;
   /** `SecurityPolicy` enum, indexed by member name (`"Basic256Sha256"`, …). */
@@ -174,6 +210,7 @@ const REQUIRED_MEMBERS: readonly (keyof NodeOpcuaApi)[] = [
   "Variant",
   "DataValue",
   "DataType",
+  "VariantArrayType",
   "StatusCodes",
   "SecurityPolicy",
   "MessageSecurityMode",

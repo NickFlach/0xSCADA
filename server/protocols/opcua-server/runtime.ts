@@ -17,10 +17,15 @@
  * gateway scan loop and the field simulator already publish to. Authentication
  * resolves against the existing `users` table — no parallel credential store.
  *
+ * WRITE BOUNDARY (#667): an accepted UA write is a durable supervisory value
+ * and audit event inside 0xSCADA. It does not dispatch to a PLC or field-bus
+ * adapter. `Good` therefore means that 0xSCADA accepted and persisted the
+ * value, not that physical equipment applied a setpoint.
+ *
  * Part of #461.
  */
 
-import { eq, isNotNull, sql } from "drizzle-orm";
+import { and, eq, isNotNull, sql } from "drizzle-orm";
 import type { NodePgDatabase } from "drizzle-orm/node-postgres";
 import * as schema from "@shared/schema";
 import { logError, logInfo, logWarn } from "../../logger";
@@ -32,11 +37,14 @@ import {
 } from "./config";
 import { OxScadaOpcuaServer } from "./index";
 import { StorageTagDataSource } from "./storage-data-source";
-import type { SourceSite, SourceTag } from "./types";
+import type { SourceSite, SourceTag, TagWriteRequest } from "./types";
 import type { AuthUserRecord, UserLookup } from "./user-auth";
 
 /** The single flag that turns the subsystem on. */
 export const OPCUA_SERVER_ENABLED_ENV = "OPCUA_SERVER_ENABLED";
+
+/** OPC quality code used for an accepted, persisted supervisory value. */
+export const OPCUA_QUALITY_GOOD = 0xc0;
 
 let activeServer: OxScadaOpcuaServer | null = null;
 let detachTagStream: (() => void) | null = null;
@@ -71,14 +79,14 @@ export async function loadSitesFromStorage(): Promise<SourceSite[]> {
  * produced, and the UA data type is derived from whether the historian ever
  * stored a string for that tag (`string_value`) or only numerics (`value`).
  *
- * Tags are exposed read-only: 0xSCADA has no audited UA write path yet, so the
- * server must not advertise one. Read-only is the intended shipped behaviour,
- * not a placeholder — #461 asked for an address space, and that is what this
- * is. Writes are tracked separately in #667, because a UA client setting a tag
- * is a control action and needs scope authorisation and an audit record before
- * it can be offered at all.
+ * The historian table has no direction column. Consequently, entries in
+ * `writableInputTags` are an explicit operator assertion that the named tag is
+ * a control input; the allowlist and direction are not independent production
+ * gates. An omitted tag remains read-only.
  */
-export async function loadTagCatalogueFromStorage(): Promise<SourceTag[]> {
+export async function loadTagCatalogueFromStorage(
+  writableInputTags: ReadonlySet<string> = new Set(),
+): Promise<SourceTag[]> {
   const rows = await typedDatabase()
     .select({
       tagId: schema.historianData.tagId,
@@ -96,10 +104,63 @@ export async function loadTagCatalogueFromStorage(): Promise<SourceTag[]> {
       tagId: row.tagId,
       siteId: row.siteId,
       dataType: row.hasStringValue ? "string" : "number",
-      writable: false,
+      writable: writableInputTags.has(row.tagId),
+      direction: writableInputTags.has(row.tagId) ? "input" : undefined,
     });
   }
   return tags;
+}
+
+/** Authorize, persist, and audit one UA control write as a single transaction. */
+export async function writeTagToStorage(
+  request: TagWriteRequest,
+  writableInputTags: ReadonlySet<string>,
+): Promise<void> {
+  if (!writableInputTags.has(request.tagId)) {
+    throw new Error(
+      `OPC-UA tag ${request.tagId} is not in the writable-input allowlist`,
+    );
+  }
+  const db = typedDatabase();
+  await db.transaction(async (tx) => {
+    const grants = await tx
+      .select({ userId: schema.users.id })
+      .from(schema.users)
+      .innerJoin(schema.userRoles, eq(schema.userRoles.userId, schema.users.id))
+      .innerJoin(schema.rolePermissions, eq(schema.rolePermissions.roleId, schema.userRoles.roleId))
+      .innerJoin(schema.permissions, eq(schema.permissions.id, schema.rolePermissions.permissionId))
+      .where(and(
+        eq(schema.users.username, request.username),
+        eq(schema.users.isActive, true),
+        eq(schema.permissions.resource, "opcua"),
+        eq(schema.permissions.action, "write"),
+      ))
+      .limit(1);
+    const grant = grants[0];
+    if (!grant) throw new Error("OPC-UA write scope denied");
+
+    const numeric = typeof request.value === "number" ? request.value : null;
+    await tx.insert(schema.historianData).values({
+      tagId: request.tagId,
+      siteId: request.siteId,
+      value: numeric,
+      stringValue: numeric === null ? String(request.value) : null,
+      quality: OPCUA_QUALITY_GOOD,
+      timestamp: request.timestamp,
+    });
+    await tx.insert(schema.auditLogs).values({
+      userId: grant.userId,
+      action: "UPDATE",
+      resource: "opcua-tag",
+      resourceId: request.tagId,
+      siteId: request.siteId,
+      details: {
+        protocol: "opcua",
+        value: request.value,
+        sessionIdentity: request.username,
+      },
+    });
+  });
 }
 
 /** Resolve a username against the existing `users` table. */
@@ -174,9 +235,19 @@ export async function startOpcuaServer(
     );
   }
 
+  const writableInputTags = config.writesEnabled
+    ? new Set(config.writableTags)
+    : new Set<string>();
   const dataSource = new StorageTagDataSource({
     loadSites: loadSitesFromStorage,
-    loadTagDefs: loadTagCatalogueFromStorage,
+    loadTagDefs: () => loadTagCatalogueFromStorage(writableInputTags),
+    writableInputTags,
+    ...(config.writesEnabled
+      ? {
+          writeTag: (request: TagWriteRequest) =>
+            writeTagToStorage(request, writableInputTags),
+        }
+      : {}),
   });
 
   const server = new OxScadaOpcuaServer({

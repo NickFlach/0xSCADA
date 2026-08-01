@@ -14,17 +14,27 @@
  * Keeping the queries injected means this module stays pure and unit-testable
  * with no database.
  *
+ * A successful `writeTag` means the configured 0xSCADA backend accepted the
+ * supervisory value. The production backend persists and audits it but does
+ * not claim that a PLC or other field device applied it.
+ *
  * Part of #461.
  */
 
 import type { DataType, Quality } from "@shared/types/core/common";
+import { logWarn } from "../../logger";
 import type { TagDataSource } from "./index";
-import type { SourceSite, SourceTag, TagSample } from "./types";
+import type {
+  SourceSite,
+  SourceTag,
+  TagSample,
+  TagWriteRequest,
+} from "./types";
 
 /** Update shape emitted by the existing tag-stream fabric. */
 export interface IncomingTagUpdate {
   tagName: string;
-  value: number | string | boolean;
+  value: number | string | boolean | unknown[];
   quality: Quality;
   timestamp: string;
 }
@@ -34,6 +44,10 @@ export interface StorageDataSourceDeps {
   loadSites: () => Promise<SourceSite[]>;
   /** Load the tag catalogue (distinct `historian_data` tag ids per site). */
   loadTagDefs: () => Promise<SourceTag[]>;
+  /** Optional fail-closed write backend. Absence keeps every node read-only. */
+  writeTag?: (request: TagWriteRequest) => Promise<void>;
+  /** Exact tags the operator has declared to be writable control inputs. */
+  writableInputTags?: ReadonlySet<string>;
 }
 
 /** Infer a 0xSCADA DataType from a runtime value. */
@@ -60,6 +74,7 @@ export class StorageTagDataSource implements TagDataSource {
   private readonly deps: StorageDataSourceDeps;
   private readonly latest = new Map<string, TagSample>();
   private readonly listeners = new Set<(sample: TagSample) => void>();
+  private readonly warnedMissingWritableTags = new Set<string>();
 
   constructor(deps: StorageDataSourceDeps) {
     this.deps = deps;
@@ -69,8 +84,22 @@ export class StorageTagDataSource implements TagDataSource {
     return this.deps.loadSites();
   }
 
-  loadTags(): Promise<SourceTag[]> {
-    return this.deps.loadTagDefs();
+  async loadTags(): Promise<SourceTag[]> {
+    const tags = await this.deps.loadTagDefs();
+    const knownTagIds = new Set(tags.map((tag) => tag.tagId));
+    for (const tagId of this.deps.writableInputTags ?? []) {
+      if (
+        !knownTagIds.has(tagId) &&
+        !this.warnedMissingWritableTags.has(tagId)
+      ) {
+        this.warnedMissingWritableTags.add(tagId);
+        logWarn(
+          `[opcua-server] writable tag "${tagId}" was not found in the historian catalogue; ` +
+            "no writable UA node was created",
+        );
+      }
+    }
+    return tags;
   }
 
   async readTag(tagId: string): Promise<TagSample | undefined> {
@@ -82,6 +111,31 @@ export class StorageTagDataSource implements TagDataSource {
     return () => {
       this.listeners.delete(onChange);
     };
+  }
+
+  async writeTag(request: TagWriteRequest): Promise<void> {
+    if (!this.deps.writeTag) {
+      throw new Error("OPC-UA writes are not configured");
+    }
+    if (!this.deps.writableInputTags?.has(request.tagId)) {
+      throw new Error(
+        `OPC-UA tag ${request.tagId} is not in the writable-input allowlist`,
+      );
+    }
+    if (
+      typeof request.value !== "number" &&
+      typeof request.value !== "string" &&
+      typeof request.value !== "boolean"
+    ) {
+      throw new Error("OPC-UA writes only accept scalar tag values");
+    }
+    await this.deps.writeTag(request);
+    this.pushTagUpdate({
+      tagName: request.tagId,
+      value: request.value,
+      quality: "good",
+      timestamp: request.timestamp.toISOString(),
+    });
   }
 
   /**

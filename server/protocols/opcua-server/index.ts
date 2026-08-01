@@ -47,9 +47,10 @@ import type {
   SourceSite,
   SourceTag,
   TagSample,
+  TagWriteRequest,
   UaVariableNode,
 } from "./types";
-import { UaDataType } from "./types";
+import { UaAccessLevel, UaDataType } from "./types";
 
 /**
  * Data source the server reads from. Implementations live behind
@@ -68,6 +69,12 @@ export interface TagDataSource {
    * DataChangeNotifications.
    */
   subscribe(onChange: (sample: TagSample) => void): () => void;
+  /**
+   * Accept an authorized supervisory value and its audit record. The shipped
+   * storage implementation persists inside 0xSCADA; it does not dispatch to a
+   * PLC or field protocol.
+   */
+  writeTag?(request: TagWriteRequest): Promise<void>;
 }
 
 export interface OpcuaServerDeps {
@@ -343,6 +350,9 @@ export class OxScadaOpcuaServer {
           ? `${variable.tagId} [${variable.units}]`
           : variable.tagId,
         dataType: uaTypeToNodeOpcuaDataType(variable.dataType, DataType),
+        ...(variable.valueRank === undefined
+          ? {}
+          : { valueRank: variable.valueRank }),
         // Read-only unless the source tag is explicitly marked writable. Without
         // this the UA node would inherit node-opcua's default access level.
         accessLevel: variable.accessLevel,
@@ -357,11 +367,18 @@ export class OxScadaOpcuaServer {
                 callback(
                   null,
                   new DataValue({
-                    value: toVariant(variable, sample, Variant, DataType),
-                    statusCode:
-                      sample === undefined || sample.quality === "bad"
-                        ? StatusCodes.Bad
-                        : StatusCodes.Good,
+                    value: toVariant(
+                      variable,
+                      sample,
+                      Variant,
+                      DataType,
+                      nodeOpcua.VariantArrayType,
+                    ),
+                    statusCode: statusCodeForSample(
+                      variable,
+                      sample,
+                      StatusCodes,
+                    ),
                     sourceTimestamp: toDate(sample?.timestamp),
                   }),
                 );
@@ -373,6 +390,49 @@ export class OxScadaOpcuaServer {
           },
         },
       });
+      if (
+        variable.accessLevel & UaAccessLevel.CurrentWrite &&
+        variable.direction === "input" &&
+        this.dataSource.writeTag
+      ) {
+        const writeTag = this.dataSource.writeTag.bind(this.dataSource);
+        uaVar.writeValue = (context, dataValue, indexRange, callback) => {
+          if (indexRange && !indexRange.isEmpty()) {
+            callback(null, StatusCodes.BadIndexRangeInvalid);
+            return;
+          }
+          const tokenUserName = context.session?.userIdentityToken?.userName;
+          if (typeof tokenUserName !== "string" || tokenUserName.length === 0) {
+            callback(null, StatusCodes.BadUserAccessDenied);
+            return;
+          }
+          // Replacing writeValue bypasses node-opcua's default compatibility
+          // guard, so run the library's own validation before persistence.
+          const compatibilityStatus = uaVar.checkVariantCompatibility(
+            dataValue.value,
+          );
+          if (compatibilityStatus.isNot(StatusCodes.Good)) {
+            callback(null, compatibilityStatus);
+            return;
+          }
+          writeTag({
+            tagId: variable.tagId,
+            siteId: variable.siteId,
+            value: dataValue.value.value,
+            username: tokenUserName,
+            timestamp: new Date(),
+          }).then(
+            () => {
+              uaVar.setValueFromSource(dataValue.value, StatusCodes.Good, new Date());
+              callback(null, StatusCodes.Good);
+            },
+            (error: unknown) => {
+              logError(error, `[opcua-server] write denied for ${variable.tagId}`);
+              callback(null, StatusCodes.BadUserAccessDenied);
+            },
+          );
+        };
+      }
       this.uaVariables.set(variable.nodeId, uaVar);
     }
   }
@@ -422,8 +482,14 @@ export class OxScadaOpcuaServer {
       const meta = variablesByTag.get(sample.tagId);
       if (!uaVar || !meta) return;
       uaVar.setValueFromSource(
-        toVariant(meta, sample, Variant, DataType),
-        sample.quality === "bad" ? StatusCodes.Bad : StatusCodes.Good,
+        toVariant(
+          meta,
+          sample,
+          Variant,
+          DataType,
+          nodeOpcua.VariantArrayType,
+        ),
+        statusCodeForSample(meta, sample, StatusCodes),
         toDate(sample.timestamp),
       );
     });
@@ -487,8 +553,20 @@ function toVariant(
   sample: TagSample | undefined,
   Variant: NodeOpcuaApi["Variant"],
   DataType: Record<string, unknown>,
+  VariantArrayType: Record<string, unknown>,
 ): UaHandle {
   const raw = sample?.value;
+  if (meta.valueRank === 1) {
+    // A non-array source value is paired with StatusCodes.Bad by
+    // statusCodeForSample. Keep the Variant shape valid without presenting the
+    // empty fallback as a successful process reading.
+    const values = Array.isArray(raw) ? raw : [];
+    return new Variant({
+      dataType: uaTypeToNodeOpcuaDataType(meta.dataType, DataType),
+      arrayType: VariantArrayType.Array,
+      value: values.map((value) => coerceScalar(meta.dataType, value)),
+    });
+  }
   switch (meta.dataType) {
     case UaDataType.Boolean:
       return new Variant({ dataType: DataType.Boolean, value: Boolean(raw) });
@@ -510,6 +588,53 @@ function toVariant(
         value: raw == null ? "" : JSON.stringify(raw),
       });
   }
+}
+
+function coerceScalar(type: UaDataType, value: unknown): unknown {
+  switch (type) {
+    case UaDataType.Boolean:
+      return Boolean(value);
+    case UaDataType.Double: {
+      return coerceFiniteNumber(value);
+    }
+    default:
+      return value == null ? "" : String(value);
+  }
+}
+
+/** Convert a source value to a finite number without inventing process data. */
+function coerceFiniteNumber(value: unknown): number {
+  const numeric =
+    typeof value === "number"
+      ? value
+      : typeof value === "string" && value.trim() !== ""
+        ? Number(value)
+        : Number.NaN;
+  return Number.isFinite(numeric) ? numeric : Number.NaN;
+}
+
+/**
+ * Derive UA quality from both source quality and the declared array contract.
+ * Shape/type failures are quality events; they must never look like a valid
+ * empty array or a plausible numeric zero to an operator.
+ */
+function statusCodeForSample(
+  meta: UaVariableNode,
+  sample: TagSample | undefined,
+  StatusCodes: Record<string, unknown>,
+): unknown {
+  if (sample === undefined || sample.quality === "bad") {
+    return StatusCodes.Bad;
+  }
+  if (meta.valueRank !== 1) return StatusCodes.Good;
+  if (!Array.isArray(sample.value)) return StatusCodes.Bad;
+  if (
+    meta.dataType === UaDataType.Double &&
+    sample.value.some((value) => Number.isNaN(coerceFiniteNumber(value)))
+  ) {
+    return StatusCodes.Bad;
+  }
+  return StatusCodes.Good;
 }
 
 export { buildAddressSpace, summarizePlan } from "./address-space";

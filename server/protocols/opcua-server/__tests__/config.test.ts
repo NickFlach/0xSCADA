@@ -265,6 +265,8 @@ describe("loadOpcuaServerConfigFromEnv", () => {
     expect(config.allowAnonymous).toBe(false);
     expect(config.securityPolicy).toBe("Basic256Sha256");
     expect(config.env).toBe("production");
+    expect(config.writesEnabled).toBe(false);
+    expect(config.writableTags).toEqual([]);
   });
 
   test("a development NODE_ENV still refuses anonymous access", () => {
@@ -289,6 +291,16 @@ describe("loadOpcuaServerConfigFromEnv", () => {
       loadOpcuaServerConfigFromEnv({ OPCUA_SERVER_ENABLED: "true" }).enabled,
     ).toBe(true);
     expect(loadOpcuaServerConfigFromEnv({}).enabled).toBe(false);
+  });
+
+  test("requires a separate write opt-in and parses an explicit tag allowlist", () => {
+    const config = loadOpcuaServerConfigFromEnv({
+      OPCUA_SERVER_ENABLED: "true",
+      OPCUA_SERVER_WRITES_ENABLED: "true",
+      OPCUA_SERVER_WRITABLE_TAGS: "SP-101, SP-202",
+    });
+    expect(config.writesEnabled).toBe(true);
+    expect(config.writableTags).toEqual(["SP-101", "SP-202"]);
   });
 
   test("a routable OPCUA_SERVER_HOST needs OPCUA_SERVER_ALLOW_REMOTE_BIND", () => {

@@ -26,7 +26,13 @@ const sites: SourceSite[] = [
 
 const tags: SourceTag[] = [
   { tagId: "PT-101.PV", siteId: "SITE-01", dataType: "number", units: "bar" },
-  { tagId: "RUN", siteId: "SITE-01", dataType: "boolean", writable: true },
+  {
+    tagId: "RUN",
+    siteId: "SITE-01",
+    dataType: "boolean",
+    writable: true,
+    direction: "input",
+  },
   { tagId: "BATCH-ID", siteId: "SITE-02", dataType: "string" },
 ];
 
@@ -40,6 +46,35 @@ describe("mapDataType", () => {
   test("falls back to BaseDataType for object/array", () => {
     expect(mapDataType("object")).toBe(UaDataType.BaseDataType);
     expect(mapDataType("array")).toBe(UaDataType.BaseDataType);
+  });
+
+  test("plans a typed one-dimensional UA array", () => {
+    const plan = buildAddressSpace(sites, [
+      {
+        tagId: "TEMPERATURES",
+        siteId: "SITE-01",
+        dataType: "array",
+        elementDataType: "number",
+      },
+    ]);
+    expect(plan.variables[0]).toMatchObject({
+      dataType: UaDataType.Double,
+      valueRank: 1,
+    });
+  });
+
+  test("rejects an array tag without an explicit scalar element type", () => {
+    expect(() =>
+      buildAddressSpace(sites, [
+        {
+          tagId: "UNTYPED_ARRAY",
+          siteId: "SITE-01",
+          dataType: "array",
+        },
+      ]),
+    ).toThrow(
+      'Array tag "UNTYPED_ARRAY" must declare a scalar elementDataType',
+    );
   });
 });
 
@@ -75,9 +110,21 @@ describe("accessLevelFor", () => {
       siteId: "s",
       dataType: "number",
       writable: true,
+      direction: "input",
     });
     expect(level & UaAccessLevel.CurrentRead).toBeTruthy();
     expect(level & UaAccessLevel.CurrentWrite).toBeTruthy();
+  });
+
+  test("refuses write access for non-input tags", () => {
+    const level = accessLevelFor({
+      tagId: "t",
+      siteId: "s",
+      dataType: "number",
+      writable: true,
+      direction: "output",
+    });
+    expect(level).toBe(UaAccessLevel.CurrentRead);
   });
 });
 
