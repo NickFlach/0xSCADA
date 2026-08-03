@@ -364,21 +364,135 @@ describe("EventPipeline", () => {
       expect(readyBatch?.events).toHaveLength(3);
     });
 
-    it("should forward batches to bridge when enabled", async () => {
+    it("should deliver qualified batches to an attached bridge (#39)", async () => {
+      const delivered: EventBatch[] = [];
+      const bridgedPipeline = new EventPipeline(
+        {
+          batcher: { max_events_per_batch: 3, log_level: "error" },
+          pipeline: { enable_bridge_forwarding: true, min_bridge_batch_size: 2 },
+        },
+        { forwardBatch: (batch) => { delivered.push(batch); } },
+      );
+      bridgedPipeline.registerSource(mockSource);
+
+      let forwardedBatch: EventBatch | null = null;
+      bridgedPipeline.on("batch:forwarded", (batch) => {
+        forwardedBatch = batch;
+      });
+
+      // Create batch that meets minimum size for bridge forwarding
+      for (let i = 0; i < 3; i++) {
+        await bridgedPipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` });
+      }
+
+      // The bridge actually received the batch — the metric counts real delivery
+      expect(delivered).toHaveLength(1);
+      expect(delivered[0]?.events).toHaveLength(3);
+      expect(forwardedBatch).toBeDefined();
+
+      const metrics = bridgedPipeline.getMetrics();
+      expect(metrics.batches_forwarded).toBe(1);
+      expect(metrics.batches_forward_failed).toBe(0);
+
+      await bridgedPipeline.shutdown();
+    });
+
+    it("claims nothing when no bridge is attached — no metric, no batch:forwarded (#39)", async () => {
+      // The shared `pipeline` has forwarding enabled but no bridge injected.
       let forwardedBatch: EventBatch | null = null;
       pipeline.on("batch:forwarded", (batch) => {
         forwardedBatch = batch;
       });
-      
-      // Create batch that meets minimum size for bridge forwarding
+
       for (let i = 0; i < 3; i++) {
         await pipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` });
       }
-      
-      expect(forwardedBatch).toBeDefined();
-      
-      const metrics = pipeline.getMetrics();
-      expect(metrics.batches_forwarded).toBe(1);
+
+      expect(forwardedBatch).toBeNull();
+      expect(pipeline.getMetrics().batches_forwarded).toBe(0);
+      expect(pipeline.getMetrics().batches_forward_failed).toBe(0);
+    });
+
+    it("counts a throwing bridge as a failed delivery without crashing the loop (#39)", async () => {
+      const failingPipeline = new EventPipeline(
+        {
+          batcher: { max_events_per_batch: 3, log_level: "error" },
+          pipeline: { enable_bridge_forwarding: true, min_bridge_batch_size: 2 },
+        },
+        {
+          forwardBatch: () => {
+            throw new Error("bridge down");
+          },
+        },
+      );
+      failingPipeline.registerSource(mockSource);
+
+      let forwardedBatch: EventBatch | null = null;
+      let failure: { batch: EventBatch; error: string } | null = null;
+      failingPipeline.on("batch:forwarded", (batch) => {
+        forwardedBatch = batch;
+      });
+      failingPipeline.on("batch:forward_failed", (payload) => {
+        failure = payload;
+      });
+
+      for (let i = 0; i < 3; i++) {
+        await failingPipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` });
+      }
+
+      expect(forwardedBatch).toBeNull();
+      expect(failure).not.toBeNull();
+      expect(failure?.error).toContain("bridge down");
+      const metrics = failingPipeline.getMetrics();
+      expect(metrics.batches_forwarded).toBe(0);
+      expect(metrics.batches_forward_failed).toBe(1);
+
+      // The pipeline loop survived: it keeps accepting and batching events
+      const result = await failingPipeline.processEvent({
+        ...mockEvent,
+        sequence_number: 99,
+        payload_hash: "hash_after_failure",
+      });
+      expect(result).toBe(true);
+
+      await failingPipeline.shutdown();
+    });
+
+    it("supports async bridges: success and rejection are both counted (#39)", async () => {
+      const delivered: EventBatch[] = [];
+      let failNext = false;
+      const asyncPipeline = new EventPipeline(
+        {
+          batcher: { max_events_per_batch: 3, log_level: "error" },
+          pipeline: { enable_bridge_forwarding: true, min_bridge_batch_size: 2 },
+        },
+        {
+          forwardBatch: async (batch) => {
+            if (failNext) throw new Error("async bridge rejected");
+            delivered.push(batch);
+          },
+        },
+      );
+      asyncPipeline.registerSource(mockSource);
+
+      for (let i = 0; i < 3; i++) {
+        await asyncPipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` });
+      }
+      await vi.waitFor(() => {
+        expect(asyncPipeline.getMetrics().batches_forwarded).toBe(1);
+      });
+      expect(delivered).toHaveLength(1);
+
+      failNext = true;
+      for (let i = 10; i < 13; i++) {
+        await asyncPipeline.processEvent({ ...mockEvent, sequence_number: i, payload_hash: `hash_${i}` });
+      }
+      await vi.waitFor(() => {
+        expect(asyncPipeline.getMetrics().batches_forward_failed).toBe(1);
+      });
+      expect(asyncPipeline.getMetrics().batches_forwarded).toBe(1);
+
+      await asyncPipeline.shutdown();
     });
 
     it("should not forward small batches to bridge", async () => {
