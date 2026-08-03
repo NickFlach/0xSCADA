@@ -46,6 +46,17 @@ const EventPipelineConfigSchema = z.object({
 
 export type EventPipelineConfig = z.infer<typeof EventPipelineConfigSchema>;
 
+// ─── Bridge Delivery Interface ──────────────────────────────────────────────
+
+/**
+ * Delivery target for qualified batches. Injected as a constructor dependency
+ * (#39) so production composes the real event/websocket bridge (see
+ * server/pipeline/websocket-batch-bridge.ts) while tests substitute a fake.
+ */
+export interface BatchBridge {
+  forwardBatch(batch: EventBatch): void | Promise<void>;
+}
+
 // ─── Pipeline Metrics Interface ─────────────────────────────────────────────
 
 export interface EventPipelineMetrics {
@@ -59,8 +70,10 @@ export interface EventPipelineMetrics {
   events_dropped: number;
   /** Batches processed */
   batches_processed: number;
-  /** Batches forwarded to bridge */
+  /** Batches actually delivered to the attached bridge (counted on success) */
   batches_forwarded: number;
+  /** Bridge deliveries that failed (bridge threw or rejected) */
+  batches_forward_failed: number;
   /** Current pipeline queue depth */
   pipeline_queue_depth: number;
   /** Pipeline uptime in ms */
@@ -97,15 +110,18 @@ export class EventPipeline extends EventEmitter {
     events_dropped: 0,
     batches_processed: 0,
     batches_forwarded: 0,
+    batches_forward_failed: 0,
     pipeline_queue_depth: 0,
     uptime_ms: 0,
     last_event_timestamp: null,
   };
 
   private dedupCleanupTimer: NodeJS.Timeout;
+  private readonly bridge?: BatchBridge;
 
-  constructor(config: Partial<EventPipelineConfig> = {}) {
+  constructor(config: Partial<EventPipelineConfig> = {}, bridge?: BatchBridge) {
     super();
+    this.bridge = bridge;
     this.config = EventPipelineConfigSchema.parse(config);
     this.logger = pino({ 
       level: this.config.batcher.log_level,
@@ -362,17 +378,61 @@ export class EventPipeline extends EventEmitter {
     this.emit("batch:ready", batch);
   }
 
+  /**
+   * Hand a qualified batch to the attached bridge (#39).
+   *
+   * `batches_forwarded` counts only successful deliveries; failures are
+   * counted in `batches_forward_failed` and must never crash the pipeline
+   * loop. With no bridge attached there is nothing to forward, so nothing is
+   * counted or claimed — subscribers still receive every batch via
+   * `batch:ready`.
+   */
   private forwardToBridge(batch: EventBatch): void {
-    this.metrics.batches_forwarded++;
-    
+    if (!this.bridge) {
+      this.logger.debug(
+        "Bridge forwarding enabled but no bridge attached; batch available to in-process subscribers only",
+        { batch_id: batch.id },
+      );
+      return;
+    }
+
     this.logger.info("Forwarding batch to bridge", {
       batch_id: batch.id,
       event_count: batch.events.length,
     });
 
-    // TODO: Implement actual bridge integration
-    // For now, just emit an event
+    let outcome: void | Promise<void>;
+    try {
+      outcome = this.bridge.forwardBatch(batch);
+    } catch (error) {
+      this.recordForwardFailure(batch, error);
+      return;
+    }
+
+    if (outcome instanceof Promise) {
+      outcome.then(
+        () => this.recordForwardSuccess(batch),
+        (error: unknown) => this.recordForwardFailure(batch, error),
+      );
+    } else {
+      this.recordForwardSuccess(batch);
+    }
+  }
+
+  private recordForwardSuccess(batch: EventBatch): void {
+    this.metrics.batches_forwarded++;
     this.emit("batch:forwarded", batch);
+  }
+
+  private recordForwardFailure(batch: EventBatch, error: unknown): void {
+    this.metrics.batches_forward_failed++;
+    const message = error instanceof Error ? error.message : String(error);
+    this.logger.warn("Bridge delivery failed", {
+      batch_id: batch.id,
+      event_count: batch.events.length,
+      error: message,
+    });
+    this.emit("batch:forward_failed", { batch, error: message });
   }
 
   private cleanupDeduplication(): void {
@@ -416,18 +476,24 @@ export class EventPipeline extends EventEmitter {
 
 // ─── Factory Function ───────────────────────────────────────────────────────
 
-export function createEventPipeline(config?: Partial<EventPipelineConfig>): EventPipeline {
-  return new EventPipeline(config);
+export function createEventPipeline(
+  config?: Partial<EventPipelineConfig>,
+  bridge?: BatchBridge,
+): EventPipeline {
+  return new EventPipeline(config, bridge);
 }
 
 // ─── Default Pipeline Instance ──────────────────────────────────────────────
 
 let defaultPipeline: EventPipeline | null = null;
 
-export function getDefaultEventPipeline(config?: Partial<EventPipelineConfig>): EventPipeline {
+export function getDefaultEventPipeline(
+  config?: Partial<EventPipelineConfig>,
+  bridge?: BatchBridge,
+): EventPipeline {
   if (!defaultPipeline) {
     // Default sources (system + simulator) are registered in the constructor.
-    defaultPipeline = createEventPipeline(config);
+    defaultPipeline = createEventPipeline(config, bridge);
   }
 
   return defaultPipeline;
