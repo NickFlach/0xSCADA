@@ -59,14 +59,18 @@ export const eventAnchors = sqliteTable("event_anchors", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
 });
 
+// Reconciled to the Postgres shape (#55): this mirror had drifted to an older
+// column set (record_type/started_at/...), which is exactly the divergence the
+// parity suite exists to catch — server/storage.ts already creates the dev
+// table with the Postgres columns via raw DDL.
 export const maintenanceRecords = sqliteTable("maintenance_records", {
   id: text("id").primaryKey(),
   assetId: text("asset_id").notNull(),
-  recordType: text("record_type").notNull(),
-  performedBy: text("performed_by").notNull(),
-  startedAt: integer("started_at", { mode: "timestamp" }).notNull(),
-  completedAt: integer("completed_at", { mode: "timestamp" }),
-  description: text("description").notNull(),
+  workOrderId: text("work_order_id"),
+  performedBy: text("performed_by"),
+  maintenanceType: text("maintenance_type").notNull(),
+  performedAt: integer("performed_at", { mode: "timestamp" }).notNull(),
+  nextDueAt: integer("next_due_at", { mode: "timestamp" }),
   notes: text("notes"),
   attachmentHash: text("attachment_hash"),
   createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
@@ -688,3 +692,163 @@ export type Alarm = typeof alarms.$inferSelect;
 export type InsertAlarm = typeof alarms.$inferInsert;
 export type AlarmHistory = typeof alarmHistory.$inferSelect;
 export type InsertAlarmHistory = typeof alarmHistory.$inferInsert;
+
+// ─── #55: tables previously missing from the dev-mode mirror ─────────────────
+// Mirrored from shared/schema.ts under the established conventions:
+// uuid/varchar → text, pgEnum → text, jsonb → text({mode:"json"}),
+// timestamptz → integer({mode:"timestamp"}), boolean → integer({mode:"boolean"}).
+// No FKs/indexes (simplified dev mirror). The parity suite enumerates ALL
+// Postgres tables, so the next new table cannot skip this file silently.
+
+export const roles = sqliteTable("roles", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  isSystem: integer("is_system", { mode: "boolean" }).default(false).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const permissions = sqliteTable("permissions", {
+  id: text("id").primaryKey(),
+  resource: text("resource").notNull(),
+  action: text("action").notNull(),
+  description: text("description"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const rolePermissions = sqliteTable("role_permissions", {
+  roleId: text("role_id").notNull(),
+  permissionId: text("permission_id").notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const userRoles = sqliteTable("user_roles", {
+  userId: text("user_id").notNull(),
+  roleId: text("role_id").notNull(),
+  siteId: text("site_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const auditLogs = sqliteTable("audit_logs", {
+  id: text("id").primaryKey(),
+  userId: text("user_id"),
+  action: text("action").notNull(), // audit_action enum in Postgres
+  resource: text("resource").notNull(),
+  resourceId: text("resource_id"),
+  details: text("details", { mode: "json" }),
+  ipAddress: text("ip_address"),
+  userAgent: text("user_agent"),
+  siteId: text("site_id"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const recipes = sqliteTable("recipes", {
+  id: text("id").primaryKey(),
+  name: text("name").notNull(),
+  description: text("description"),
+  siteId: text("site_id"),
+  assetId: text("asset_id"),
+  isActive: integer("is_active", { mode: "boolean" }).default(true).notNull(),
+  createdBy: text("created_by"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const recipeVersions = sqliteTable("recipe_versions", {
+  id: text("id").primaryKey(),
+  recipeId: text("recipe_id").notNull(),
+  version: integer("version").notNull(),
+  parameters: text("parameters", { mode: "json" }).notNull(),
+  setpoints: text("setpoints", { mode: "json" }),
+  approvedBy: text("approved_by"),
+  approvedAt: integer("approved_at", { mode: "timestamp" }),
+  comment: text("comment"),
+  createdBy: text("created_by"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const historianData = sqliteTable("historian_data", {
+  id: text("id").primaryKey(),
+  tagId: text("tag_id").notNull(),
+  siteId: text("site_id"),
+  value: real("value"),
+  stringValue: text("string_value"),
+  quality: integer("quality").default(192),
+  timestamp: integer("timestamp", { mode: "timestamp" }).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const certifications = sqliteTable("certifications", {
+  id: text("id").primaryKey(),
+  certType: text("cert_type").notNull(), // cert_type enum in Postgres
+  title: text("title").notNull(),
+  description: text("description"),
+  artifactHash: text("artifact_hash").notNull(),
+  artifactUri: text("artifact_uri"),
+  validFrom: integer("valid_from", { mode: "timestamp" }),
+  validUntil: integer("valid_until", { mode: "timestamp" }),
+  siteId: text("site_id"),
+  assetId: text("asset_id"),
+  metadata: text("metadata", { mode: "json" }),
+  status: text("status").default("DRAFT").notNull(), // cert_status enum in Postgres
+  requiredApprovals: integer("required_approvals").default(1).notNull(),
+  currentApprovals: integer("current_approvals").default(0).notNull(),
+  requestedBy: text("requested_by").notNull(),
+  supersedes: text("supersedes"),
+  supersededBy: text("superseded_by"),
+  tokenId: text("token_id"),
+  txHash: text("tx_hash"),
+  mintedAt: integer("minted_at", { mode: "timestamp" }),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const certificationApprovals = sqliteTable("certification_approvals", {
+  id: text("id").primaryKey(),
+  certificationId: text("certification_id").notNull(),
+  approverId: text("approver_id").notNull(),
+  approverRole: text("approver_role"),
+  status: text("status").default("PENDING").notNull(),
+  comment: text("comment"),
+  decidedAt: integer("decided_at", { mode: "timestamp" }),
+  signature: text("signature"),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const modbusRegisterMap = sqliteTable("modbus_register_map", {
+  id: text("id").primaryKey(),
+  siteId: text("site_id").notNull(),
+  unitId: integer("unit_id").default(1).notNull(),
+  area: text("area").notNull(),
+  address: integer("address").notNull(),
+  tagId: text("tag_id").notNull(),
+  dataType: text("data_type").notNull(),
+  scale: real("scale"),
+  wordOrder: text("word_order"),
+  writable: integer("writable", { mode: "boolean" }).default(false).notNull(),
+  createdAt: integer("created_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const pluginRegistry = sqliteTable("plugin_registry", {
+  id: text("id").primaryKey(),
+  version: text("version").notNull(),
+  manifest: text("manifest", { mode: "json" }).notNull(),
+  publisher: text("publisher").notNull(),
+  installs: integer("installs").default(0).notNull(),
+  publishedAt: integer("published_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
+
+export const pluginInstallations = sqliteTable("plugin_installations", {
+  id: text("id").primaryKey(),
+  version: text("version").notNull(),
+  manifest: text("manifest", { mode: "json" }).notNull(),
+  status: text("status").notNull(),
+  config: text("config", { mode: "json" }).notNull().$defaultFn(() => ({})),
+  grantedCapabilities: text("granted_capabilities", { mode: "json" }).notNull().$defaultFn(() => []),
+  installedBy: text("installed_by").notNull(),
+  installedAt: integer("installed_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+  updatedAt: integer("updated_at", { mode: "timestamp" }).notNull().$defaultFn(() => new Date()),
+});
