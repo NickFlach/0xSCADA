@@ -12,7 +12,6 @@ import { initializeDatabase } from "./storage";
 // Stateful startup services must stay in the static graph. On Node 20, tsx can
 // give import() a separate module instance from static consumers (#541).
 import { fieldSimulator } from "./simulator";
-import { initializeDefaultAgents, startDefaultAgents } from "./agents";
 import { storeAndForwardService } from "./gateway/store-and-forward";
 import { edgeStoreAndForwardRuntime } from "./gateway/store-and-forward-runtime";
 import { initializeBridges } from "./bridge";
@@ -100,9 +99,11 @@ registerSwaggerRoutes(app, gatewayConfig);
   }
 
   await fieldSimulator.initialize();
-  
-  await initializeDefaultAgents();
-  await startDefaultAgents();
+
+  // No agent bootstrap here (#37): agents are marketplace plugins whose
+  // lifecycle is owned by initializeServices() below — see /api/agents and
+  // /api/marketplace.
+  log("Agent runtime: marketplace-managed (see /api/agents, /api/marketplace)");
 
   // Bind real historian, gateway, load-balancer, and event-bus adapters before
   // accepting traffic. An enabled but incomplete deployment fails startup.
