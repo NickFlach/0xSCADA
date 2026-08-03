@@ -80,6 +80,12 @@ tags:
   - name: WebSocket
     description: WebSocket server management
 
+  - name: Tuning
+    description: Human-gated PID auto-tuning (ADR-0013 [13.4], issue #215) — loop registry, simulation-based tuning studies, approval gate, durable audit trail
+  - name: Marketplace
+    description: Agent marketplace (ADR-0013 [13.6], issue #217) — plugin registry, install lifecycle, capability grants, invocation
+  - name: Intelligence
+    description: Natural-language query (ADR-0013 [13.5], issue #216) plus the retired legacy intelligence surface (410/501 refusal envelope)
 paths:
   # ============================================================================
   # HEALTH
@@ -2455,8 +2461,1065 @@ paths:
 # ============================================================================
 # COMPONENTS
 # ============================================================================
+  # ── PID Tuning (ADR-0013 [13.4], #215) — mounted at /api/tuning ────────────
+  # Every route requires an explicit control-plane scope via the X-API-Key
+  # header: tuning.read (loops/proposals/audit), tuning.write (register,
+  # envelopes, tuning studies), tuning.approve (decide a proposal — the only
+  # path that can move live gains).
+  /api/tuning/loops:
+    post:
+      tags: [Tuning]
+      summary: Register a PID loop (create-only)
+      description: |
+        Requires control-plane scope `tuning.write`. Create-only — re-registering
+        an existing loop returns 409 (`loop-already-registered`), because
+        overwriting a live loop is a gain write and gain writes go through the
+        approval gate or nowhere.
+      security:
+        - ControlPlaneApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningLoopRegistration'
+      responses:
+        '201':
+          description: Loop registered
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningLoopSummary'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '409':
+          description: 'Loop already registered (reason: loop-already-registered)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+        '422':
+          description: 'Initial gains violate the safety envelope (reason: envelope-violation)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+  /api/tuning/loops/{loopId}:
+    get:
+      tags: [Tuning]
+      summary: Read one loop with gains, metrics and envelope
+      description: Requires control-plane scope `tuning.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningLoopId'
+      responses:
+        '200':
+          description: Loop detail
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningLoopDetail'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+  /api/tuning/loops/{loopId}/envelope:
+    put:
+      tags: [Tuning]
+      summary: Replace a loop's gain safety envelope
+      description: Requires control-plane scope `tuning.write`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningLoopId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningEnvelope'
+      responses:
+        '200':
+          description: Envelope applied
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningEnvelope'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+  /api/tuning/loops/{loopId}/tune/relay:
+    post:
+      tags: [Tuning]
+      summary: Run a relay-feedback tuning study (simulation) and file a proposal
+      description: |
+        Requires control-plane scope `tuning.write`. Simulation-based; the
+        result is an approval-gated proposal, never a live gain change.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningLoopId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningRelayRequest'
+      responses:
+        '201':
+          description: Proposal filed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningProposal'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+        '503':
+          $ref: '#/components/responses/TuningGateUnavailable'
+  /api/tuning/loops/{loopId}/tune/cohen-coon:
+    post:
+      tags: [Tuning]
+      summary: Run a Cohen-Coon tuning study (simulation) and file a proposal
+      description: Requires control-plane scope `tuning.write`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningLoopId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningCohenCoonRequest'
+      responses:
+        '201':
+          description: Proposal filed
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningProposal'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+        '503':
+          $ref: '#/components/responses/TuningGateUnavailable'
+  /api/tuning/loops/{loopId}/tune/rl:
+    post:
+      tags: [Tuning]
+      summary: Run a reinforcement-learning tuning study (simulation) and file a proposal
+      description: Requires control-plane scope `tuning.write`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningLoopId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningRLRequest'
+      responses:
+        '201':
+          description: Proposal filed with the training outcome
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  proposal:
+                    $ref: '#/components/schemas/TuningProposal'
+                  outcome:
+                    type: object
+                    description: RL training outcome summary
+                    additionalProperties: true
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+        '503':
+          $ref: '#/components/responses/TuningGateUnavailable'
+  /api/tuning/proposals:
+    get:
+      tags: [Tuning]
+      summary: List tuning proposals
+      description: Requires control-plane scope `tuning.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, applied, rejected, expired, failed]
+        - name: loopId
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+      responses:
+        '200':
+          description: Proposals matching the filter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  proposals:
+                    type: array
+                    items:
+                      $ref: '#/components/schemas/TuningProposal'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+  /api/tuning/proposals/{proposalId}:
+    get:
+      tags: [Tuning]
+      summary: Read one proposal
+      description: Requires control-plane scope `tuning.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningProposalId'
+      responses:
+        '200':
+          description: The proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningProposal'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+  /api/tuning/proposals/{proposalId}/approve:
+    post:
+      tags: [Tuning]
+      summary: Approve a proposal (the only path that can move live gains)
+      description: |
+        Requires control-plane scope `tuning.approve`. The approver identity is
+        the authenticated principal; decision bodies are strict, so a
+        caller-supplied `approver` field is rejected with 400 rather than
+        silently ignored.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningProposalId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningDecision'
+      responses:
+        '200':
+          description: Decided proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningProposal'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          description: Denied by the approval policy (`reason` field explains)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+        '409':
+          description: Proposal already decided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+        '422':
+          description: 'Proposed gains violate the safety envelope (reason: envelope-violation)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+        '503':
+          $ref: '#/components/responses/TuningGateUnavailable'
+  /api/tuning/proposals/{proposalId}/reject:
+    post:
+      tags: [Tuning]
+      summary: Reject a proposal
+      description: Requires control-plane scope `tuning.approve`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/TuningProposalId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TuningDecision'
+      responses:
+        '200':
+          description: Decided proposal
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningProposal'
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/TuningNotFound'
+        '409':
+          description: Proposal already decided
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+  /api/tuning/audit:
+    get:
+      tags: [Tuning]
+      summary: Read the durable tuning audit trail
+      description: Requires control-plane scope `tuning.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - name: proposalId
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: loopId
+          in: query
+          schema:
+            type: string
+            maxLength: 128
+        - name: decision
+          in: query
+          schema:
+            type: string
+            enum: [proposed, envelope-rejected, approved, applied, rejected, denied, expired, failed]
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        '200':
+          description: Matching audit records
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  records:
+                    type: array
+                    items:
+                      type: object
+                      description: Tuning audit record (shared/types/tuning)
+                      additionalProperties: true
+        '400':
+          $ref: '#/components/responses/TuningBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '503':
+          description: 'Audit store unavailable (reason: audit-store-unavailable)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TuningError'
+  /api/tuning/status:
+    get:
+      tags: [Tuning]
+      summary: Tuning service health
+      description: Requires control-plane scope `tuning.read`.
+      security:
+        - ControlPlaneApiKey: []
+      responses:
+        '200':
+          description: Service health report
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+
+  # ── Agent Marketplace (ADR-0013 [13.6], #217) — mounted at /api/marketplace ─
+  # Scopes: marketplace.read (registry/health), marketplace.publish,
+  # marketplace.install (install + lifecycle transitions), marketplace.invoke,
+  # marketplace.uninstall. Errors use the engine-declared envelope
+  # { error, code } with the engine's own HTTP status.
+  /api/marketplace/plugins:
+    get:
+      tags: [Marketplace]
+      summary: Search the plugin registry
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - name: q
+          in: query
+          schema:
+            type: string
+            maxLength: 256
+        - name: category
+          in: query
+          schema:
+            type: string
+            enum: [intelligence, integration, reporting, safety, optimization, custom]
+      responses:
+        '200':
+          description: Matching registry entries
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/MarketplaceError'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+    post:
+      tags: [Marketplace]
+      summary: Publish a plugin manifest
+      description: |
+        Requires control-plane scope `marketplace.publish`. The publisher
+        identity comes from the authenticated principal; the manifest schema is
+        strict, so a body carrying a `publisher` field is rejected with 400.
+      security:
+        - ControlPlaneApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceManifest'
+      responses:
+        '201':
+          description: Published registry entry
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/MarketplaceError'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '409':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}:
+    get:
+      tags: [Marketplace]
+      summary: Read one registry entry
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Registry entry
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+    delete:
+      tags: [Marketplace]
+      summary: Uninstall a plugin
+      description: Requires control-plane scope `marketplace.uninstall`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Uninstalled
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/installed:
+    get:
+      tags: [Marketplace]
+      summary: List installed plugins
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      responses:
+        '200':
+          description: Installed plugins with status
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+  /api/marketplace/plugins/{pluginId}/install:
+    post:
+      tags: [Marketplace]
+      summary: Install a published plugin
+      description: |
+        Requires control-plane scope `marketplace.install`. The installer
+        identity comes from the authenticated principal. Capability grants are
+        security state and are durable.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceInstallRequest'
+      responses:
+        '200':
+          description: Installed plugin state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/MarketplaceError'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/update:
+    post:
+      tags: [Marketplace]
+      summary: Update an installed plugin to the latest published version
+      description: Requires control-plane scope `marketplace.install`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Updated plugin state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/config:
+    put:
+      tags: [Marketplace]
+      summary: Replace an installed plugin's configuration
+      description: Requires control-plane scope `marketplace.install`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceConfigureRequest'
+      responses:
+        '200':
+          description: Updated plugin state
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/MarketplaceError'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/start:
+    post:
+      tags: [Marketplace]
+      summary: Start an installed plugin
+      description: Requires control-plane scope `marketplace.install` (lifecycle transition).
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Plugin state after the transition
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/stop:
+    post:
+      tags: [Marketplace]
+      summary: Stop a running plugin
+      description: Requires control-plane scope `marketplace.install` (lifecycle transition).
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Plugin state after the transition
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/enable:
+    post:
+      tags: [Marketplace]
+      summary: Enable a plugin
+      description: Requires control-plane scope `marketplace.install` (lifecycle transition).
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Plugin state after the transition
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/disable:
+    post:
+      tags: [Marketplace]
+      summary: Disable a plugin (auto-disable also happens after repeated failures)
+      description: Requires control-plane scope `marketplace.install` (lifecycle transition).
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Plugin state after the transition
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/invoke:
+    post:
+      tags: [Marketplace]
+      summary: Invoke a started plugin
+      description: |
+        Requires control-plane scope `marketplace.invoke` — deliberately NOT
+        sufficient for any lifecycle transition; it only runs something an
+        operator already installed and started.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/MarketplaceInvokeRequest'
+      responses:
+        '200':
+          description: Invocation result
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '400':
+          $ref: '#/components/responses/MarketplaceError'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+        '409':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/plugins/{pluginId}/health:
+    get:
+      tags: [Marketplace]
+      summary: Read one plugin's health
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - $ref: '#/components/parameters/MarketplacePluginId'
+      responses:
+        '200':
+          description: Plugin health
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+        '404':
+          $ref: '#/components/responses/MarketplaceError'
+  /api/marketplace/health:
+    get:
+      tags: [Marketplace]
+      summary: Health of all plugins
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      responses:
+        '200':
+          description: Per-plugin health list
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+  /api/marketplace/status:
+    get:
+      tags: [Marketplace]
+      summary: Marketplace engine status
+      description: Requires control-plane scope `marketplace.read`.
+      security:
+        - ControlPlaneApiKey: []
+      responses:
+        '200':
+          description: Engine status (installed/running counts, store state)
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+
+  # ── Intelligence (ADR-0013 [13.5], #216) — mounted at /api/intelligence ────
+  # POST /nlquery and GET /nlquery/history are the implemented surface
+  # (scope nlquery.read — a READ scope; the POST is transport-only). Every
+  # other route on this router refuses with the machine-readable 410/501
+  # envelope (endpoint_retired / not_implemented) rather than proxying around
+  # the fine-grained scopes of the real routers.
+  /api/intelligence/nlquery:
+    post:
+      tags: [Intelligence]
+      summary: Ask a bounded natural-language question over live SCADA data
+      description: |
+        Requires control-plane scope `nlquery.read` (a READ scope — POST is for
+        transport only, so the question stays out of URLs and access logs; the
+        route mutates nothing). Execution is bounded: input length, wall-clock
+        timeout, resolver-candidate and result caps — every response advertises
+        the bounds that shaped it. Over-long input is rejected (400), never
+        truncated. Contract: docs/adr/ADR-0027-nl-query-read-scope-and-bounds.md.
+      security:
+        - ControlPlaneApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/NlQueryRequest'
+      responses:
+        '200':
+          description: Query result with the advertised bounds
+          content:
+            application/json:
+              schema:
+                type: object
+                description: 'Engine result plus limits and historyPersistence: process-local'
+                additionalProperties: true
+        '400':
+          description: 'Invalid or over-long query (error: invalid_request, with limits and examples)'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NlQueryBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+  /api/intelligence/nlquery/history:
+    get:
+      tags: [Intelligence]
+      summary: Read recent NL query history (process-local ring buffer)
+      description: |
+        Requires control-plane scope `nlquery.read`. History is a bounded
+        in-process ring buffer — lost on restart, not shared across replicas,
+        and NOT a durable audit trail; the response says so explicitly.
+      security:
+        - ControlPlaneApiKey: []
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+      responses:
+        '200':
+          description: Recent history with persistence contract
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  history:
+                    type: array
+                    items:
+                      type: object
+                      additionalProperties: true
+                  count:
+                    type: integer
+                  persistence:
+                    type: string
+                    enum: [process-local]
+                  persistenceNote:
+                    type: string
+                  limits:
+                    $ref: '#/components/schemas/NlQueryLimits'
+        '400':
+          description: Invalid query parameters
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NlQueryBadRequest'
+        '401':
+          $ref: '#/components/responses/ControlPlaneUnauthorized'
+        '403':
+          $ref: '#/components/responses/ControlPlaneForbidden'
+  /api/intelligence/maintenance/analyze:
+    post:
+      tags: [Intelligence]
+      summary: 'RETIRED: use /api/predictive (410 Gone)'
+      description: |
+        Always returns 410 with the refusal envelope. The capability lives on
+        /api/predictive (#212) behind predictive.* scopes; the body lists the
+        replacement endpoints and scopes.
+      responses:
+        '410':
+          $ref: '#/components/responses/IntelligenceRetired'
+  /api/intelligence/maintenance/insights/{assetId}:
+    get:
+      tags: [Intelligence]
+      summary: 'RETIRED: use /api/predictive (410 Gone)'
+      description: Always returns 410 with the refusal envelope.
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '410':
+          $ref: '#/components/responses/IntelligenceRetired'
+  /api/intelligence/digitaltwin/operate:
+    post:
+      tags: [Intelligence]
+      summary: 'RETIRED: use /api/twin (410 Gone)'
+      description: |
+        Always returns 410 with the refusal envelope. The capability lives on
+        /api/twin (#214) behind twin.* scopes.
+      responses:
+        '410':
+          $ref: '#/components/responses/IntelligenceRetired'
+  /api/intelligence/digitaltwin/status/{assetId}:
+    get:
+      tags: [Intelligence]
+      summary: 'RETIRED: use /api/twin (410 Gone)'
+      description: Always returns 410 with the refusal envelope.
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '410':
+          $ref: '#/components/responses/IntelligenceRetired'
+  /api/intelligence/ml/pipeline:
+    post:
+      tags: [Intelligence]
+      summary: 'NOT IMPLEMENTED (501)'
+      description: Nothing on main implements this capability; returns 501 with the refusal envelope.
+      responses:
+        '501':
+          $ref: '#/components/responses/IntelligenceNotImplemented'
+  /api/intelligence/ml/models:
+    get:
+      tags: [Intelligence]
+      summary: 'NOT IMPLEMENTED (501)'
+      description: Nothing on main implements this capability; returns 501 with the refusal envelope.
+      responses:
+        '501':
+          $ref: '#/components/responses/IntelligenceNotImplemented'
+  /api/intelligence/ml/pipeline/status/{jobId}:
+    get:
+      tags: [Intelligence]
+      summary: 'NOT IMPLEMENTED (501)'
+      description: Nothing on main implements this capability; returns 501 with the refusal envelope.
+      parameters:
+        - name: jobId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '501':
+          $ref: '#/components/responses/IntelligenceNotImplemented'
+
 components:
   responses:
+    ControlPlaneUnauthorized:
+      description: Missing or invalid X-API-Key
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    ControlPlaneForbidden:
+      description: The key lacks the control-plane scope this route requires
+      content:
+        application/json:
+          schema:
+            type: object
+            additionalProperties: true
+    TuningBadRequest:
+      description: Request body or query failed strict zod validation
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TuningError'
+    TuningNotFound:
+      description: Loop or proposal not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TuningError'
+    TuningGateUnavailable:
+      description: The approval gate or audit store is unconfigured/unavailable (fail-closed)
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/TuningError'
+    MarketplaceError:
+      description: Engine-declared failure with machine-readable code
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/MarketplaceErrorBody'
+    IntelligenceRetired:
+      description: 'endpoint_retired: the capability lives on another, scope-guarded router'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IntelligenceRefusal'
+    IntelligenceNotImplemented:
+      description: 'not_implemented: no implementation exists on main'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/IntelligenceRefusal'
     ValidationError:
       description: Validation error
       content:
@@ -4626,3 +5689,408 @@ components:
           type: array
           items:
             type: string
+
+    # ── #54: Tuning / Marketplace / Intelligence schemas ─────────────────────
+    TuningGains:
+      type: object
+      required: [kp, ki, kd]
+      additionalProperties: false
+      properties:
+        kp:
+          type: number
+          minimum: 0
+        ki:
+          type: number
+          minimum: 0
+        kd:
+          type: number
+          minimum: 0
+    TuningRange:
+      type: object
+      required: [min, max]
+      additionalProperties: false
+      description: min must not exceed max
+      properties:
+        min:
+          type: number
+          minimum: 0
+        max:
+          type: number
+    TuningEnvelope:
+      type: object
+      required: [kpRange, kiRange, kdRange]
+      additionalProperties: false
+      properties:
+        kpRange:
+          $ref: '#/components/schemas/TuningRange'
+        kiRange:
+          $ref: '#/components/schemas/TuningRange'
+        kdRange:
+          $ref: '#/components/schemas/TuningRange'
+    TuningLoopRegistration:
+      type: object
+      required: [id, name, gains, setpoint, outputMin, outputMax]
+      additionalProperties: false
+      description: outputMin must be below outputMax
+      properties:
+        id:
+          type: string
+          minLength: 1
+          maxLength: 128
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        gains:
+          $ref: '#/components/schemas/TuningGains'
+        setpoint:
+          type: number
+        outputMin:
+          type: number
+        outputMax:
+          type: number
+        maxGainChangeFraction:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 1
+        sampleTime:
+          type: number
+          exclusiveMinimum: 0
+        envelope:
+          $ref: '#/components/schemas/TuningEnvelope'
+    TuningLoopSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        gains:
+          $ref: '#/components/schemas/TuningGains'
+        setpoint:
+          type: number
+        envelope:
+          $ref: '#/components/schemas/TuningEnvelope'
+    TuningLoopDetail:
+      allOf:
+        - $ref: '#/components/schemas/TuningLoopSummary'
+        - type: object
+          properties:
+            metrics:
+              type: object
+              description: PID performance metrics (ISE/IAE/ITAE, overshoot, settling, oscillation)
+              additionalProperties: true
+    TuningProcessModel:
+      type: object
+      required: [gain, timeConstantS, deadTimeS]
+      additionalProperties: false
+      properties:
+        gain:
+          type: number
+          description: Non-zero process gain
+        timeConstantS:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 86400
+        deadTimeS:
+          type: number
+          minimum: 0
+          maximum: 3600
+        noiseSigma:
+          type: number
+          minimum: 0
+    TuningRelayRequest:
+      type: object
+      required: [model]
+      additionalProperties: false
+      properties:
+        model:
+          $ref: '#/components/schemas/TuningProcessModel'
+        relayAmplitude:
+          type: number
+          exclusiveMinimum: 0
+        hysteresis:
+          type: number
+          exclusiveMinimum: 0
+        minCycles:
+          type: integer
+          minimum: 2
+          maximum: 20
+        dtS:
+          type: number
+          exclusiveMinimum: 0
+          maximum: 60
+    TuningCohenCoonRequest:
+      type: object
+      required: [model]
+      additionalProperties: false
+      properties:
+        model:
+          $ref: '#/components/schemas/TuningProcessModel'
+    TuningRLRequest:
+      type: object
+      required: [model]
+      additionalProperties: false
+      properties:
+        model:
+          $ref: '#/components/schemas/TuningProcessModel'
+        config:
+          type: object
+          additionalProperties: false
+          description: All fields optional (partial)
+          properties:
+            episodes:
+              type: integer
+              minimum: 1
+              maximum: 500
+            episodeTicks:
+              type: integer
+              minimum: 10
+              maximum: 10000
+            dtS:
+              type: number
+              exclusiveMinimum: 0
+              maximum: 60
+            epsilon:
+              type: number
+              minimum: 0
+              maximum: 1
+            epsilonDecay:
+              type: number
+              exclusiveMinimum: 0
+              maximum: 1
+            learningRate:
+              type: number
+              exclusiveMinimum: 0
+              maximum: 1
+            discount:
+              type: number
+              minimum: 0
+              maximum: 1
+            overshootPenalty:
+              type: number
+              minimum: 0
+            oscillationPenalty:
+              type: number
+              minimum: 0
+            seed:
+              type: integer
+    TuningDecision:
+      type: object
+      additionalProperties: false
+      description: |
+        Strict — a caller-supplied `approver` field is rejected with 400. The
+        approver identity is always the authenticated control-plane principal.
+      properties:
+        comment:
+          type: string
+          maxLength: 2000
+    TuningProposal:
+      type: object
+      description: Approval-gated tuning proposal (shared/types/tuning)
+      additionalProperties: true
+    TuningError:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: string
+        reason:
+          type: string
+          description: Machine-readable reason (e.g. envelope-violation, loop-already-registered, approval-gate-unconfigured, audit-store-unavailable)
+    MarketplaceManifest:
+      type: object
+      required: [id, name, version, category]
+      additionalProperties: false
+      description: Strict — a body carrying a `publisher` field is rejected with 400.
+      properties:
+        id:
+          type: string
+          pattern: '^[a-z0-9][a-z0-9-]{1,63}$'
+        name:
+          type: string
+          minLength: 1
+          maxLength: 256
+        version:
+          type: string
+          pattern: '^v?\\d+\\.\\d+\\.\\d+$'
+        description:
+          type: string
+          maxLength: 2000
+        author:
+          type: string
+          maxLength: 256
+        category:
+          type: string
+          enum: [intelligence, integration, reporting, safety, optimization, custom]
+        requiredCapabilities:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            enum: ['tags:read', 'alarms:read', 'events:emit', 'log']
+        configSchema:
+          type: object
+          additionalProperties:
+            type: object
+            additionalProperties: false
+            required: [type, description, required]
+            properties:
+              type:
+                type: string
+                enum: [string, number, boolean, select]
+              description:
+                type: string
+                maxLength: 500
+              default:
+                description: string | finite number | boolean
+              required:
+                type: boolean
+              options:
+                type: array
+                maxItems: 50
+                items:
+                  type: string
+                  maxLength: 256
+        dependencies:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 64
+        tags:
+          type: array
+          maxItems: 20
+          items:
+            type: string
+            maxLength: 64
+    MarketplaceInstallRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        config:
+          type: object
+          additionalProperties:
+            description: string | finite number | boolean
+        grants:
+          type: array
+          maxItems: 10
+          items:
+            type: string
+            enum: ['tags:read', 'alarms:read', 'events:emit', 'log']
+    MarketplaceConfigureRequest:
+      type: object
+      required: [config]
+      additionalProperties: false
+      properties:
+        config:
+          type: object
+          additionalProperties:
+            description: string | finite number | boolean
+    MarketplaceInvokeRequest:
+      type: object
+      additionalProperties: false
+      properties:
+        input:
+          description: Arbitrary plugin input
+    MarketplaceErrorBody:
+      type: object
+      required: [error, code]
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+          description: Machine-readable engine error code (e.g. invalid-request, plugin-not-found)
+    NlQueryRequest:
+      type: object
+      required: [query]
+      properties:
+        query:
+          type: string
+          minLength: 1
+          description: Bounded by maxQueryLength (advertised in every response's limits)
+    NlQueryLimits:
+      type: object
+      properties:
+        maxQueryLength:
+          type: integer
+        queryTimeoutMs:
+          type: integer
+        maxResolverCandidateTags:
+          type: integer
+        maxResultItems:
+          type: integer
+        maxHistoryEntries:
+          type: integer
+    NlQueryBadRequest:
+      type: object
+      required: [error, detail]
+      properties:
+        error:
+          type: string
+          enum: [invalid_request]
+        detail:
+          type: string
+        limits:
+          $ref: '#/components/schemas/NlQueryLimits'
+        examples:
+          type: array
+          items:
+            type: string
+    IntelligenceRefusal:
+      type: object
+      required: [error, detail, reference]
+      description: Single refusal envelope for every retired/unimplemented route on /api/intelligence
+      properties:
+        error:
+          type: string
+          enum: [endpoint_retired, not_implemented]
+        detail:
+          type: string
+        reference:
+          type: string
+          description: Issue URL recording the retirement decision
+        replacement:
+          type: object
+          description: Present on 410 only
+          properties:
+            endpoints:
+              type: array
+              items:
+                type: string
+            scopes:
+              type: array
+              items:
+                type: string
+
+  parameters:
+    TuningLoopId:
+      name: loopId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+    TuningProposalId:
+      name: proposalId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 128
+    MarketplacePluginId:
+      name: pluginId
+      in: path
+      required: true
+      schema:
+        type: string
+        pattern: '^[a-z0-9][a-z0-9-]{1,63}$'
+  securitySchemes:
+    ControlPlaneApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: |
+        Control-plane API key (#576 pattern). Each operation names the scope it
+        requires (e.g. tuning.read, marketplace.install, nlquery.read); the
+        central inventory is server/middleware/control-route-policy.ts.
