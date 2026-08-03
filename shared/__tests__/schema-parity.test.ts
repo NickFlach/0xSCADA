@@ -1,64 +1,50 @@
 import { describe, it, expect } from 'vitest';
 import { getTableColumns, getTableName } from 'drizzle-orm';
 import type { Table } from 'drizzle-orm';
-import {
-  alarms as pgAlarms,
-  alarmHistory as pgAlarmHistory,
-  validatorNodes as pgValidatorNodes,
-  validatorPubkeys as pgValidatorPubkeys,
-  validatorStateWatermarks as pgValidatorStateWatermarks,
-  validatorLivenessObservations as pgValidatorLivenessObservations,
-  blueprintSafeStateLog as pgBlueprintSafeStateLog,
-  pidTuningAudit as pgPidTuningAudit,
-  twinModels as pgTwinModels,
-  twinCheckpoints as pgTwinCheckpoints,
-  predictiveTagThresholds as pgPredictiveTagThresholds,
-  predictiveAlerts as pgPredictiveAlerts,
-  alarmCorrelationJournal as pgAlarmCorrelationJournal,
-  alarmCorrelationGroups as pgAlarmCorrelationGroups,
-  alarmCorrelationAlarms as pgAlarmCorrelationAlarms,
-  alarmCorrelationRules as pgAlarmCorrelationRules,
-  alarmCorrelationEquipment as pgAlarmCorrelationEquipment,
-  alarmCorrelationState as pgAlarmCorrelationState,
-} from '../schema';
-import {
-  alarms as sqliteAlarms,
-  alarmHistory as sqliteAlarmHistory,
-  validatorNodes as sqliteValidatorNodes,
-  validatorPubkeys as sqliteValidatorPubkeys,
-  validatorStateWatermarks as sqliteValidatorStateWatermarks,
-  validatorLivenessObservations as sqliteValidatorLivenessObservations,
-  blueprintSafeStateLog as sqliteBlueprintSafeStateLog,
-  pidTuningAudit as sqlitePidTuningAudit,
-  twinModels as sqliteTwinModels,
-  twinCheckpoints as sqliteTwinCheckpoints,
-  predictiveTagThresholds as sqlitePredictiveTagThresholds,
-  predictiveAlerts as sqlitePredictiveAlerts,
-  alarmCorrelationJournal as sqliteAlarmCorrelationJournal,
-  alarmCorrelationGroups as sqliteAlarmCorrelationGroups,
-  alarmCorrelationAlarms as sqliteAlarmCorrelationAlarms,
-  alarmCorrelationRules as sqliteAlarmCorrelationRules,
-  alarmCorrelationEquipment as sqliteAlarmCorrelationEquipment,
-  alarmCorrelationState as sqliteAlarmCorrelationState,
-} from '../schema-sqlite';
+import * as pgSchema from '../schema';
+import * as sqliteSchema from '../schema-sqlite';
 
 /**
- * Schema parity (issue #7): `shared/schema.ts` (Postgres, source of truth) and
- * `shared/schema-sqlite.ts` (dev-mode fallback) must define the same tables.
- * Column *types* legitimately differ per dialect (pgEnum → text, jsonb → text,
- * timestamptz → integer, bigint → integer), but the table names, property keys,
- * and SQL column names must match so the code that touches them behaves the
- * same in dev SQLite as in production Postgres. If either schema adds, drops,
- * or renames a column without the other, this suite fails instead of the
- * divergence surfacing as a silent no-op at runtime.
+ * Schema parity (issues #7 → #26 → #55): `shared/schema.ts` (Postgres, source
+ * of truth) and `shared/schema-sqlite.ts` (dev-mode fallback) must define the
+ * same tables. Column *types* legitimately differ per dialect (pgEnum → text,
+ * jsonb → text(json), timestamptz → integer(timestamp)), but table names,
+ * property keys, and SQL column names must match so code touching them behaves
+ * the same in dev SQLite as in production Postgres. A dev-mode-only gap dies
+ * at runtime while working in production — the inverse of the usual failure
+ * and the harder one to catch.
  *
- * Covers the alarm tables (#7), the validator registry backing the cross-node
- * state proxy (#454), and the PID tuning audit trail (#215).
- *
- * `blueprint_safe_state_log` (#459) is covered here because a safe-state audit
- * that silently vanishes on one dialect is a safety defect, not a dev-mode
- * inconvenience.
+ * #55 widened the net from a hand-maintained table list to programmatic
+ * enumeration of EVERY Postgres table: a new pg table must either be mirrored
+ * or added to the explicit exemption list below — it can no longer skip the
+ * decision silently. (#26 built the original per-table pattern; the narrative
+ * for why individual tables matter — alarm audit trails #7, validator
+ * registry #454, safe-state log #459, twin persistence #550, correlation
+ * state #573, marketplace durability #217 — lives in those issues.)
  */
+
+/**
+ * Postgres tables deliberately NOT mirrored in the SQLite dev schema.
+ * Every entry must state why dev mode never touches the table. An entry whose
+ * table IS mirrored fails the suite (stale exemption); a pg table neither
+ * mirrored nor listed here fails the suite (undecided).
+ */
+const EXEMPT_FROM_SQLITE_MIRROR: Record<string, string> = {
+  // (empty — as of #55 every Postgres table is mirrored)
+};
+
+function tablesOf(mod: Record<string, unknown>): Map<string, Table> {
+  const out = new Map<string, Table>();
+  for (const value of Object.values(mod)) {
+    try {
+      const name = getTableName(value as Table);
+      if (typeof name === 'string' && name.length > 0) out.set(name, value as Table);
+    } catch {
+      // Not a drizzle table export (type helper, enum, relation) — skip.
+    }
+  }
+  return out;
+}
 
 const sqlColumnNames = (table: Table): string[] =>
   Object.values(getTableColumns(table))
@@ -68,93 +54,44 @@ const sqlColumnNames = (table: Table): string[] =>
 const propertyKeys = (table: Table): string[] =>
   Object.keys(getTableColumns(table)).sort();
 
-const cases = [
-  { name: 'alarms', pg: pgAlarms, sqlite: sqliteAlarms },
-  { name: 'alarm_history', pg: pgAlarmHistory, sqlite: sqliteAlarmHistory },
-  { name: 'validator_nodes', pg: pgValidatorNodes, sqlite: sqliteValidatorNodes },
-  { name: 'validator_pubkeys', pg: pgValidatorPubkeys, sqlite: sqliteValidatorPubkeys },
-  {
-    name: 'validator_state_watermarks',
-    pg: pgValidatorStateWatermarks,
-    sqlite: sqliteValidatorStateWatermarks,
-  },
-  // #456: the observed-liveness history the what-if slashing simulator replays
-  // rules against. A column present on only one dialect would silently drop
-  // part of an observation record — and an observation that cannot be audited
-  // is indistinguishable from an invented one.
-  {
-    name: 'validator_liveness_observations',
-    pg: pgValidatorLivenessObservations,
-    sqlite: sqliteValidatorLivenessObservations,
-  },
-  {
-    name: 'blueprint_safe_state_log',
-    pg: pgBlueprintSafeStateLog,
-    sqlite: sqliteBlueprintSafeStateLog,
-  },
-  // #215: the tuning audit trail is written through whichever backend is
-  // configured, so a column that exists on only one of them would silently
-  // drop part of a plant-change record.
-  { name: 'pid_tuning_audit', pg: pgPidTuningAudit, sqlite: sqlitePidTuningAudit },
-  // #550: the digital-twin model registry and its committed checkpoints. A
-  // column present on only one dialect would drop part of a restored model or
-  // checkpoint, and a twin that comes back with partial state is worse than
-  // one that refuses to come back at all.
-  { name: 'twin_models', pg: pgTwinModels, sqlite: sqliteTwinModels },
-  { name: 'twin_checkpoints', pg: pgTwinCheckpoints, sqlite: sqliteTwinCheckpoints },
-  // #546: predictive thresholds and alert acknowledgement state. A column
-  // present on only one dialect would mean an operator's configuration — or
-  // the record of who acknowledged an alert — silently vanishing on the other,
-  // which is the exact defect this table was added to fix.
-  {
-    name: 'predictive_tag_thresholds',
-    pg: pgPredictiveTagThresholds,
-    sqlite: sqlitePredictiveTagThresholds,
-  },
-  { name: 'predictive_alerts', pg: pgPredictiveAlerts, sqlite: sqlitePredictiveAlerts },
-  // #573: the durable, replica-coordinated correlation state. A column present
-  // on only one dialect is a safety defect here, not a dev-mode inconvenience:
-  // `suppressed` on `alarm_correlation_alarms` is what makes an alarm the
-  // operator cannot currently see restorable after a restart, and `applied_seq`
-  // on `alarm_correlation_state` is what keeps two replicas from projecting the
-  // journal out of order.
-  {
-    name: 'alarm_correlation_journal',
-    pg: pgAlarmCorrelationJournal,
-    sqlite: sqliteAlarmCorrelationJournal,
-  },
-  {
-    name: 'alarm_correlation_groups',
-    pg: pgAlarmCorrelationGroups,
-    sqlite: sqliteAlarmCorrelationGroups,
-  },
-  {
-    name: 'alarm_correlation_alarms',
-    pg: pgAlarmCorrelationAlarms,
-    sqlite: sqliteAlarmCorrelationAlarms,
-  },
-  {
-    name: 'alarm_correlation_rules',
-    pg: pgAlarmCorrelationRules,
-    sqlite: sqliteAlarmCorrelationRules,
-  },
-  {
-    name: 'alarm_correlation_equipment',
-    pg: pgAlarmCorrelationEquipment,
-    sqlite: sqliteAlarmCorrelationEquipment,
-  },
-  {
-    name: 'alarm_correlation_state',
-    pg: pgAlarmCorrelationState,
-    sqlite: sqliteAlarmCorrelationState,
-  },
-] as const;
+const pgTables = tablesOf(pgSchema);
+const sqliteTables = tablesOf(sqliteSchema);
 
-describe('schema parity (Postgres vs SQLite dev fallback)', () => {
-  for (const { name, pg, sqlite } of cases) {
+describe('schema parity (Postgres vs SQLite dev fallback, #55 widened net)', () => {
+  it('enumerates a sane number of Postgres tables (guard against a broken scan)', () => {
+    // If a refactor of schema.ts made this scan return almost nothing, every
+    // per-table assertion below would vacuously pass — pin a floor instead.
+    expect(pgTables.size).toBeGreaterThanOrEqual(40);
+  });
+
+  it('every Postgres table is either mirrored or explicitly exempted', () => {
+    const undecided = [...pgTables.keys()]
+      .filter((name) => !sqliteTables.has(name) && !(name in EXEMPT_FROM_SQLITE_MIRROR))
+      .sort();
+    expect(undecided, 'pg tables neither mirrored in schema-sqlite.ts nor listed in EXEMPT_FROM_SQLITE_MIRROR').toEqual([]);
+  });
+
+  it('no exemption is stale (an exempt table must not be mirrored)', () => {
+    const stale = Object.keys(EXEMPT_FROM_SQLITE_MIRROR).filter((name) => sqliteTables.has(name));
+    expect(stale, 'exempt tables that are actually mirrored — delete the exemption').toEqual([]);
+  });
+
+  it('no exemption is dangling (an exempt table must exist in the pg schema)', () => {
+    const dangling = Object.keys(EXEMPT_FROM_SQLITE_MIRROR).filter((name) => !pgTables.has(name));
+    expect(dangling, 'exempt tables that no longer exist in schema.ts').toEqual([]);
+  });
+
+  it('the SQLite mirror has no orphan tables absent from Postgres', () => {
+    const orphans = [...sqliteTables.keys()].filter((name) => !pgTables.has(name)).sort();
+    expect(orphans, 'sqlite tables with no Postgres counterpart').toEqual([]);
+  });
+
+  for (const [name, pg] of [...pgTables.entries()].sort(([a], [b]) => a.localeCompare(b))) {
+    const sqlite = sqliteTables.get(name);
+    if (!sqlite) continue; // covered by the mirrored-or-exempted assertion above
+
     describe(name, () => {
       it('uses the same SQL table name', () => {
-        expect(getTableName(sqlite)).toBe(name);
         expect(getTableName(sqlite)).toBe(getTableName(pg));
       });
 
