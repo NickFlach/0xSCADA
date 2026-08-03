@@ -50,7 +50,9 @@ describe("startup singleton module identity", () => {
       file: "server/index.ts",
       modules: [
         "./simulator",
-        "./agents",
+        // "./agents" was dropped from this list when #37 removed the empty
+        // default-agent boot stubs: the module is no longer a startup
+        // dependency of index.ts at all (not deleted to go green).
         "./gateway/store-and-forward",
         "./gateway/store-and-forward-runtime",
         "./bridge",

@@ -102,6 +102,8 @@ export class AdapterRegistry {
       type: AdapterType;
       state: AdapterState;
       vendor: string;
+      /** True when the adapter fabricates reads instead of talking to a device (#52). */
+      simulationMode: boolean;
     }>;
   } {
     const adapters = this.getAllAdapters();
@@ -128,7 +130,8 @@ export class AdapterRegistry {
         name: adapter.manifest.name,
         type: adapter.manifest.type,
         state,
-        vendor: adapter.manifest.vendor
+        vendor: adapter.manifest.vendor,
+        simulationMode: adapter.simulationMode === true
       };
     });
     

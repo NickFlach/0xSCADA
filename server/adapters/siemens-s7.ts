@@ -26,6 +26,8 @@ type AdapterTag = any;
 type ProtocolEndpoint = any;
 type ProtocolConnection = any;
 
+import { seedForTag, mixSeed, mulberry32 } from "../simulator";
+
 const SIEMENS_S7_CAPABILITIES: AdapterCapability[] = [
   {
     id: "read-tags",
@@ -89,10 +91,19 @@ export class SiemensS7Adapter implements ProtocolAdapter, DeviceAdapter {
   
   readonly protocols = ["s7", "iso-on-tcp"];
   readonly deviceTypes = ["s7-300", "s7-400", "s7-1200", "s7-1500"];
-  
+
+  /**
+   * This adapter has no real device transport yet — every read is fabricated
+   * (#52). The flag is surfaced by AdapterRegistry.getStatus() so operators
+   * and tests can always tell these values are not live process data.
+   */
+  readonly simulationMode = true;
+
   // Add missing properties
   private context: any;
   private state: any = {};
+  /** Monotonic draw counter so consecutive fabricated reads differ deterministically. */
+  private readStep = 0;
   
   private connections: Map<string, ProtocolConnection> = new Map();
   private lastActivity: Date = new Date();
@@ -142,7 +153,8 @@ export class SiemensS7Adapter implements ProtocolAdapter, DeviceAdapter {
       name: `Tag_${index}`,
       dataType: this.inferDataType(address),
       value: this.simulateTagValue(address),
-      quality: 'good',
+      // Fabricated read — never claim 'good' for data no device produced (#52)
+      quality: 'simulated',
       timestamp: new Date()
     }));
     
@@ -347,20 +359,24 @@ export class SiemensS7Adapter implements ProtocolAdapter, DeviceAdapter {
   
   private simulateTagValue(address: string): any {
     const dataType = this.inferDataType(address);
-    
+    // Deterministic seeded draw (#52): the same fresh adapter reading the
+    // same addresses in the same order always produces the same values —
+    // reuses the simulator's shared generator, no ambient randomness.
+    const rng = mulberry32(mixSeed(seedForTag(address), this.readStep++));
+
     switch (dataType) {
       case 'boolean':
-        return Math.random() > 0.5;
+        return rng() > 0.5;
       case 'string':
-        return `S7_Value_${Math.floor(Math.random() * 1000)}`;
+        return `S7_Value_${Math.floor(rng() * 1000)}`;
       case 'object':
         if (address.toUpperCase().startsWith('T')) {
-          return { pt: Math.floor(Math.random() * 10000), et: Math.floor(Math.random() * 5000) };
+          return { pt: Math.floor(rng() * 10000), et: Math.floor(rng() * 5000) };
         }
-        return { cv: Math.floor(Math.random() * 100), pv: 100 };
+        return { cv: Math.floor(rng() * 100), pv: 100 };
       case 'number':
       default:
-        return Math.random() * 100;
+        return rng() * 100;
     }
   }
   
