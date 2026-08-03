@@ -11,12 +11,8 @@ export {
   type DecisionProposal,
 } from "../services/ghostos";
 
-export const initializeDefaultAgents = async () => {
-  // TODO: Initialize default agents
-  console.log('Initializing default agents...');
-};
-
-export const startDefaultAgents = async () => {
-  // TODO: Start default agents
-  console.log('Starting default agents...');
-};
+// There are deliberately no initialize/start calls here (#37): agents are
+// installed marketplace plugins (#217), and their lifecycle is owned by
+// services/initializeServices() — surfaced at /api/agents and
+// /api/marketplace, with health via ./runtime. Boot must not claim an agent
+// layer this module does not start.
