@@ -61,7 +61,7 @@ jobs:
           node-version: "22"
 
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v4
+        uses: github/codeql-action/init@v4.37.4
         with:
           languages: ${{ matrix.language }}
           # `security-and-quality` is deliberately NOT used: it adds
@@ -74,6 +74,6 @@ jobs:
       # extractor works from source; running `npm ci` here would only add a
       # multi-minute install for no additional coverage.
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v4
+        uses: github/codeql-action/analyze@v4.37.4
         with:
           category: "/language:${{ matrix.language }}"
